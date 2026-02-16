@@ -195,8 +195,27 @@ def _extract_items(
             # Priced aisle/section headers (e.g., "33-BAKERY INSTORE 12.00") should
             # use a nearby SKU-led item line, not the header text itself.
             is_priced_section_header = bool(desc_part) and _is_section_header_text(desc_part)
+            skip_section_header_price = False
             if is_priced_section_header:
                 desc_part = ""
+                # If the next content line already has the same trailing price,
+                # treat this header row as metadata and let the priced line parse itself.
+                for j in range(i + 1, min(i + 4, len(lines))):
+                    next_line = lines[j].strip()
+                    if not next_line:
+                        continue
+                    if _looks_like_summary_line(next_line):
+                        break
+                    next_price_match = re.search(r"(\d+\.\d{2})(-?)\s*[HhTt]?\s*$", next_line)
+                    if next_price_match:
+                        next_price = Decimal(next_price_match.group(1))
+                        if next_price_match.group(2) == "-":
+                            next_price = -next_price
+                        if next_price == price:
+                            skip_section_header_price = True
+                    break
+            if skip_section_header_price:
+                continue
 
             # Check if desc_part is valid: not empty, not too short, not a quantity expression
             # Quantity expressions like "2 @ 2/$5.00" should trigger backward search instead
@@ -238,6 +257,9 @@ def _extract_items(
                             continue
                         if _looks_like_quantity_expression(next_line):
                             continue
+                        if re.search(r"(\d+\.\d{2})(-?)\s*[HhTt]?\s*$", next_line):
+                            # This line is a standalone priced item; do not borrow it.
+                            continue
                         if re.match(r"^\$?\d+\.\d{2}\s*[HhTt]?\s*$", next_line):
                             continue
                         if re.match(r"^\d{8,}\s*$", next_line):
@@ -253,6 +275,9 @@ def _extract_items(
                             continue
                         found_desc = cleaned_next
                         break
+                if is_priced_section_header and found_desc is None:
+                    # No safe lookahead description for this header price row.
+                    continue
                 if found_desc is None:
                     for j in range(i - 1, max(i - 6, -1), -1):
                         prev_line = lines[j].strip()
