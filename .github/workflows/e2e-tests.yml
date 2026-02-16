@@ -1,4 +1,4 @@
-name: Tests
+name: E2E Tests (Cached)
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  tests:
+  e2e-cached:
     runs-on: ubuntu-latest
 
     steps:
@@ -23,5 +23,5 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest "beancount>=2.3,<3" pillow httpx
 
-      - name: Run tests (excluding e2e)
-        run: pytest tests --ignore=tests/test_e2e_receipts.py
+      - name: Run e2e tests in cached mode
+        run: pytest tests/test_e2e_receipts.py --beanbeaver-e2e-mode cached
