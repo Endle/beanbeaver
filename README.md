@@ -3,7 +3,7 @@
 Beanbeaver turns bank statements and grocery receipts into your Beancount ledger.
 
 
-** Two bodes**
+** Two modes**
 1. Import credit card and chequing statements into Beancount
 2. Parse scanned grocery receipts into itemized expenses.
 
