@@ -7,9 +7,10 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from beancount.loader import load_file
+
 from beanbeaver.domain.match import comment_block, find_transaction_end
 from beanbeaver.runtime import get_logger, get_paths
-from beancount.loader import load_file
 
 logger = get_logger(__name__)
 _TXN_START_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\s+\*")

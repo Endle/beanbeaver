@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+
 from beanbeaver.receipt.ocr_helpers import OCR_IMAGE_PADDING, resize_image_bytes, transform_paddleocr_result
 from beanbeaver.runtime import get_logger, get_paths
 

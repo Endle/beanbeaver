@@ -13,23 +13,18 @@ import warnings
 from dataclasses import dataclass
 from decimal import Decimal
 from difflib import SequenceMatcher
+from importlib.util import find_spec
 from pathlib import Path
 
 import httpx
 import pytest
-
 from beanbeaver.receipt.formatter import format_parsed_receipt
 from beanbeaver.receipt.ocr_helpers import resize_image_bytes, transform_paddleocr_result
 from beanbeaver.receipt.ocr_result_parser import parse_receipt
 
 RECEIPTS_DIR = Path(__file__).parent / "receipts_e2e"
 
-try:
-    from PIL import Image
-
-    HAS_PIL = True
-except ImportError:
-    HAS_PIL = False
+HAS_PIL = find_spec("PIL") is not None
 
 
 @dataclass(frozen=True)
@@ -135,21 +130,15 @@ class TestE2EReceiptProcessing:
             merchant_any_of = expected.get("merchant_any_of", [])
 
             if not self._merchant_matches(expected_merchant, actual_merchant, merchant_any_of):
-                assert merchant_optional, (
-                    f"Merchant mismatch: expected '{expected_merchant}', got '{actual_merchant}'"
-                )
+                assert merchant_optional, f"Merchant mismatch: expected '{expected_merchant}', got '{actual_merchant}'"
 
         if "date" in expected:
             expected_date = expected["date"]
             actual_date = receipt.date.isoformat() if receipt.date else None
-            assert actual_date == expected_date, (
-                f"Date mismatch: expected '{expected_date}', got '{actual_date}'"
-            )
+            assert actual_date == expected_date, f"Date mismatch: expected '{expected_date}', got '{actual_date}'"
 
         expected_total = Decimal(expected["total"])
-        assert receipt.total == expected_total, (
-            f"Total mismatch: expected {expected_total}, got {receipt.total}"
-        )
+        assert receipt.total == expected_total, f"Total mismatch: expected {expected_total}, got {receipt.total}"
 
         if "critical_items" in expected:
             self._verify_critical_items(receipt, expected["critical_items"])
@@ -159,17 +148,12 @@ class TestE2EReceiptProcessing:
         assert receipt.date.isoformat() in beancount_output, "Date should appear in output"
 
     def _verify_critical_items(self, receipt, critical_items: list[dict]):
-        extracted_items = {}
+        extracted_items: dict[str, list[tuple[Decimal, str | None]]] = {}
         for item in receipt.items:
             desc_upper = item.description.upper()
             if desc_upper not in extracted_items:
                 extracted_items[desc_upper] = []
-            extracted_items[desc_upper].append(
-                {
-                    "price": item.price,
-                    "category": item.category,
-                }
-            )
+            extracted_items[desc_upper].append((item.price, item.category))
 
         for critical in critical_items:
             desc_pattern = critical["description"].upper()
@@ -186,16 +170,14 @@ class TestE2EReceiptProcessing:
                 f"Extracted items: {list(extracted_items.keys())}"
             )
 
-            matching_prices = [item["price"] for item in matching_items]
+            matching_prices = [price for price, _ in matching_items]
             assert expected_price in matching_prices, (
                 f"Critical item '{critical['description']}' has wrong price. "
                 f"Expected {expected_price}, found {matching_prices}"
             )
 
             if expected_category:
-                matching_categories = [
-                    item["category"] for item in matching_items if item["price"] == expected_price
-                ]
+                matching_categories = [category for price, category in matching_items if price == expected_price]
                 assert any(expected_category in (cat or "") for cat in matching_categories), (
                     f"Critical item '{critical['description']}' has wrong category. "
                     f"Expected '{expected_category}', found {matching_categories}"
@@ -227,5 +209,6 @@ _test_cases = find_e2e_test_cases()
 if not _test_cases:
     warnings.warn(
         f"No e2e test cases found. Add .expected.json files to {RECEIPTS_DIR} "
-        "and optional matching .jpg/.ocr.json files."
+        "and optional matching .jpg/.ocr.json files.",
+        stacklevel=2,
     )

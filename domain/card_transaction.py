@@ -5,9 +5,10 @@ import decimal
 from dataclasses import dataclass
 from typing import Any
 
-from beanbeaver.runtime import get_logger
 from beancount.core import amount, data, flags
 from beancount.core.number import D
+
+from beanbeaver.runtime import get_logger
 
 logger = get_logger(__name__)
 

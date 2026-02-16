@@ -17,8 +17,10 @@ echo "========================================"
 # Track if any check fails
 FAILED=0
 
+TOTAL=3
+
 # 1. Ruff linting
-echo -e "\n${YELLOW}[1/4] Ruff linting...${NC}"
+echo -e "\n${YELLOW}[1/$TOTAL] Ruff linting...${NC}"
 if ruff check --config pyproject.toml .; then
     echo -e "${GREEN}✓ Ruff linting passed${NC}"
 else
@@ -27,7 +29,7 @@ else
 fi
 
 # 2. Ruff formatting check
-echo -e "\n${YELLOW}[2/4] Ruff format check...${NC}"
+echo -e "\n${YELLOW}[2/$TOTAL] Ruff format check...${NC}"
 if ruff format --check --config pyproject.toml .; then
     echo -e "${GREEN}✓ Ruff format check passed${NC}"
 else
@@ -37,7 +39,7 @@ else
 fi
 
 # 3. Mypy type checking
-echo -e "\n${YELLOW}[3/4] Mypy type checking...${NC}"
+echo -e "\n${YELLOW}[3/$TOTAL] Mypy type checking...${NC}"
 if mypy --config-file pyproject.toml . --ignore-missing-imports --no-error-summary 2>/dev/null; then
     echo -e "${GREEN}✓ Mypy type checking passed${NC}"
 else
@@ -48,7 +50,7 @@ fi
 # Summary
 echo -e "\n========================================"
 if [ $FAILED -eq 0 ]; then
-    echo -e "${GREEN}All checks passed!${NC}"
+    echo -e "${GREEN}All $TOTAL checks passed!${NC}"
     exit 0
 else
     echo -e "${RED}Some checks failed. Please fix the issues above.${NC}"

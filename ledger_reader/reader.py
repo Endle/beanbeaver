@@ -13,9 +13,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from beanbeaver.runtime import get_logger, get_paths
 from beancount.core import data
 from beancount.loader import load_file
+
+from beanbeaver.runtime import get_logger, get_paths
 
 logger = get_logger(__name__)
 
