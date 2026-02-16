@@ -26,7 +26,7 @@ from beanbeaver.domain.chequing_import import (
     parse_eqbank_rows,
     parse_scotia_rows,
 )
-from beanbeaver.ledger_reader import get_ledger_reader, get_ledger_writer
+from beanbeaver.ledger_access import get_ledger_reader, get_ledger_writer
 from beanbeaver.runtime import TMPDIR, get_logger, get_paths, load_chequing_categorization_patterns
 
 logger = get_logger(__name__)

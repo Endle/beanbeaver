@@ -16,7 +16,7 @@ from beanbeaver.domain.match import (
     match_key,
     transaction_charge_amount,
 )
-from beanbeaver.ledger_reader import get_ledger_writer
+from beanbeaver.ledger_access import get_ledger_writer
 from beanbeaver.runtime import get_logger, get_paths
 
 logger = get_logger(__name__)
@@ -106,7 +106,7 @@ def _select_receipts_for_match(
 
 def cmd_match(args: argparse.Namespace) -> None:
     """Match all approved receipts against ledger."""
-    from beanbeaver.ledger_reader import get_ledger_reader
+    from beanbeaver.ledger_access import get_ledger_reader
     from beanbeaver.receipt.formatter import format_enriched_transaction
     from beanbeaver.receipt.matcher import format_match_for_display, match_receipt_to_transactions
     from beanbeaver.runtime.receipt_storage import (
