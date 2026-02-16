@@ -1,0 +1,12 @@
+{
+    "merchant": "LOBLAW",
+    "merchant_optional": true,
+    "total": "16.41",
+    "critical_items": [
+        {
+            "description": "COORS LIGHT",
+            "price": "13.99",
+            "category": "Expenses:Food:AlcoholicBeverage"
+        }
+    ]
+}
