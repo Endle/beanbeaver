@@ -21,7 +21,7 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest beancount pillow httpx
+          pip install pytest "beancount>=2.3,<3" pillow httpx
 
       - name: Run tests
         run: pytest tests
