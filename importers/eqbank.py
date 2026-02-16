@@ -79,7 +79,6 @@ class ChequingTransaction:
         )
 
 
-
 class EQBankChequingImporter(importer.ImporterProtocol):
     """EQ Bank chequing account CSV importer."""
 

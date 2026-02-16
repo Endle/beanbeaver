@@ -7,10 +7,9 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from beancount import loader
-
 from beanbeaver.domain.match import comment_block, find_transaction_end
 from beanbeaver.runtime import get_logger, get_paths
+from beancount.loader import load_file
 
 logger = get_logger(__name__)
 _TXN_START_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\s+\*")
@@ -30,7 +29,7 @@ class LedgerWriter:
     def validate_ledger(self, ledger_path: Path | str | None = None) -> list[Any]:
         """Run Beancount loader validation and return errors (if any)."""
         path = self._resolve_path(ledger_path)
-        _, errors, _ = loader.load_file(str(path))
+        _, errors, _ = load_file(str(path))
         if errors:
             logger.warning("Beancount validation found %d error(s) in %s", len(errors), path)
         return list(errors)
@@ -75,7 +74,7 @@ class LedgerWriter:
         ]
         if replacement and replacement[-1].strip() != "":
             replacement.append("\n")
-        replacement.append(f'{include_prefix}  ; bb-match: {receipt_name}\n')
+        replacement.append(f"{include_prefix}  ; bb-match: {receipt_name}\n")
         replacement.append("\n")
 
         new_lines = [*lines[:start_idx], *replacement, *lines[end_idx:]]
@@ -135,4 +134,3 @@ def get_ledger_writer() -> LedgerWriter:
     if _writer is None:
         _writer = LedgerWriter()
     return _writer
-

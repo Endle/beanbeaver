@@ -16,7 +16,6 @@ logger = get_logger(__name__)
 def cmd_serve(args: argparse.Namespace) -> None:
     """Start the FastAPI server for receiving receipt uploads."""
     import uvicorn
-
     from beanbeaver.runtime import receipt_server as server
 
     print(f"Starting receipt server on {args.host}:{args.port}")
@@ -302,6 +301,7 @@ def cmd_debug_overlay(args: argparse.Namespace) -> None:
         result_path = create_debug_overlay_from_json(image_path, json_path)
         if output_path and result_path != output_path:
             import shutil
+
             shutil.move(result_path, output_path)
             result_path = output_path
         print(f"Debug overlay created: {result_path}")

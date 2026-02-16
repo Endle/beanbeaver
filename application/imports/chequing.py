@@ -48,6 +48,7 @@ SCOTIA_ACCOUNT_PATTERNS = [
     "Assets:Bank:Chequing:*Scotia*",
 ]
 
+
 def detect_chequing_csv() -> str | None:
     """Auto-detect a chequing CSV file (EQ Bank or Scotia) in ~/Downloads."""
     return detect_chequing_csv_by_rules(DOWNLOADED_CSV_BASE_PATH)
@@ -87,8 +88,7 @@ def _select_scotia_account(as_of: datetime.date | None) -> str:
         return matches[0]
     if not sys.stdin.isatty():
         raise RuntimeError(
-            "Multiple Scotia chequing accounts found. Run interactively to choose: "
-            + ", ".join(matches)
+            "Multiple Scotia chequing accounts found. Run interactively to choose: " + ", ".join(matches)
         )
     print("Multiple Scotia chequing accounts found:")
     for idx, account in enumerate(matches, 1):
@@ -108,8 +108,7 @@ def _select_eqbank_account(as_of: datetime.date | None) -> str:
         return matches[0]
     if not sys.stdin.isatty():
         raise RuntimeError(
-            "Multiple EQ Bank chequing accounts found. Run interactively to choose: "
-            + ", ".join(matches)
+            "Multiple EQ Bank chequing accounts found. Run interactively to choose: " + ", ".join(matches)
         )
     print("Multiple EQ Bank chequing accounts found:")
     for idx, account in enumerate(matches, 1):
@@ -235,7 +234,6 @@ def main() -> None:
 
     cc_cache: dict[str, str | None] = {}
     for date, description, amount_val, _balance_val in parsed_rows:
-
         # Determine expense account
         # First check for CC payments, then categorization patterns
         cc_account = resolve_cc_payment_account(

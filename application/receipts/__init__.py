@@ -21,4 +21,3 @@ __all__ = [
     "run_list_approved_receipts",
     "run_list_scanned_receipts",
 ]
-

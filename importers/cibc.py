@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import datetime
-import os
 from typing import TYPE_CHECKING
 
-from beancount.core import data
-
 from beanbeaver.runtime import get_logger
+from beancount.core import data
 
 from .base import BaseCardImporter
 

@@ -8,6 +8,8 @@ from beanbeaver.domain.beancount_dates import extract_dates_from_beancount
 from beanbeaver.domain.cc_import import build_result_file as build_cc_result_file
 from beanbeaver.domain.chequing_import import (
     build_result_file as build_chequing_result_file,
+)
+from beanbeaver.domain.chequing_import import (
     format_balance,
     format_transaction,
     latest_date,
@@ -105,9 +107,9 @@ def test_chequing_parse_and_format_helpers() -> None:
         "Expenses:Test",
     )
     assert '\\"quoted\\"' in txn
-    assert format_balance(
-        parsed_scotia[0][0], "Assets:Bank:Chequing:Scotia", Decimal("54.33")
-    ).startswith("2025-02-11 balance")
+    assert format_balance(parsed_scotia[0][0], "Assets:Bank:Chequing:Scotia", Decimal("54.33")).startswith(
+        "2025-02-11 balance"
+    )
     assert build_chequing_result_file("0101", "0131", "eqbank") == "eqbank_chequing_0101_0131.beancount"
 
 

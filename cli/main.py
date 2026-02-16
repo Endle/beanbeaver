@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+
 from beanbeaver.application.imports.csv_routing import detect_download_route
 
 
@@ -50,9 +51,7 @@ Notes:
     scan_parser.add_argument(
         "--ocr-url", default="http://localhost:8001", help="OCR service URL (default: http://localhost:8001)"
     )
-    scan_parser.add_argument(
-        "--no-edit", action="store_true", help="Skip editor and leave draft in receipts/scanned/"
-    )
+    scan_parser.add_argument("--no-edit", action="store_true", help="Skip editor and leave draft in receipts/scanned/")
     # serve command
     serve_parser = subparsers.add_parser("serve", help="Start receipt upload server")
     serve_parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
@@ -98,6 +97,7 @@ Notes:
 
         if args.import_type == "cc":
             from beanbeaver.application.imports.credit_card import main as cc_main
+
             # Pass args to the cc import main
             sys.argv = ["credit_card_import"]
             csv_file = getattr(args, "csv_file", None)
@@ -110,6 +110,7 @@ Notes:
             cc_main()
         elif args.import_type == "chequing":
             from beanbeaver.application.imports.chequing import main as chequing_main
+
             # Pass args to the chequing import main
             sys.argv = ["chequing_import"]
             csv_file = getattr(args, "csv_file", None)

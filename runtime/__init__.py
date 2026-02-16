@@ -13,6 +13,7 @@ Usage:
     print(paths.root, paths.records)
 """
 
+from beanbeaver.runtime.chequing_rules import load_chequing_categorization_patterns
 from beanbeaver.runtime.logging import (
     DEFAULT_LOG_LEVEL,
     LOG_FORMAT,
@@ -21,7 +22,6 @@ from beanbeaver.runtime.logging import (
     get_logger,
     set_log_level,
 )
-from beanbeaver.runtime.chequing_rules import load_chequing_categorization_patterns
 from beanbeaver.runtime.merchant_rules import load_known_merchant_keywords
 from beanbeaver.runtime.paths import (
     TMPDIR,

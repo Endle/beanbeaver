@@ -12,10 +12,10 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
+from beanbeaver.domain.receipt import Receipt
+
 # TODO we may remove this beancount import in future
 from beancount.core import data
-
-from beanbeaver.domain.receipt import Receipt
 
 
 @dataclass

@@ -34,8 +34,8 @@ Configuration:
 from .amex import AmexImporter
 from .base import BaseCardImporter
 from .bmo import BmoImporter
-from .cibc import CibcImporter
 from .canadian_tire_financial import CanadianTireFinancialImporter
+from .cibc import CibcImporter
 from .mbna import MbnaImporter
 from .pcf import PcfImporter
 from .rogers import RogersImporter

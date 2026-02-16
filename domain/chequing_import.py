@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Iterable
 from decimal import Decimal
-from typing import Iterable
 
 
 def format_transaction(
@@ -34,7 +34,7 @@ def format_balance(
     currency: str = "CAD",
 ) -> str:
     """Format one balance directive as Beancount text."""
-    return f'{date.strftime("%Y-%m-%d")} balance {account}  {balance} {currency}\n'
+    return f"{date.strftime('%Y-%m-%d')} balance {account}  {balance} {currency}\n"
 
 
 def build_result_file(

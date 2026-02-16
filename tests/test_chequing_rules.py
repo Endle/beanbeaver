@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import pytest
-
-from beanbeaver.runtime.chequing_rules import load_chequing_categorization_patterns
 from beanbeaver.domain.chequing_categorization import categorize_chequing_transaction
+from beanbeaver.runtime.chequing_rules import load_chequing_categorization_patterns
 
 
 def test_load_chequing_rules_from_toml(tmp_path) -> None:

@@ -10,9 +10,9 @@ To add new rules:
 3. Keywords are case-insensitive and matched with fuzzy tolerance
 """
 
+import re
 from collections import Counter
 from functools import lru_cache
-import re
 from pathlib import Path
 from typing import Any
 
@@ -423,4 +423,6 @@ def categorize_item_debug(
 
     matches = _find_all_matches(description, rules, exact_only_keywords)
     matches.sort(key=lambda x: x[0], reverse=True)
-    return [(_resolve_account_target(cat, account_mapping, default=cat) or cat, kw, score) for score, cat, kw, _ in matches]
+    return [
+        (_resolve_account_target(cat, account_mapping, default=cat) or cat, kw, score) for score, cat, kw, _ in matches
+    ]
