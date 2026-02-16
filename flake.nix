@@ -9,8 +9,23 @@
       system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          pythonPathSetup = ''
+            bb_pythonpath=""
+            if [ -d "$PWD/vendor/beanbeaver" ]; then
+              bb_pythonpath="$PWD/vendor"
+            elif [ -d "$PWD/beanbeaver" ]; then
+              bb_pythonpath="$PWD"
+            elif [ -d "$PWD/../beanbeaver" ]; then
+              bb_pythonpath="$PWD/.."
+            else
+              echo "Could not resolve beanbeaver PYTHONPATH from: $PWD" >&2
+              echo "Run from project root, vendor/, or vendor/beanbeaver." >&2
+              exit 1
+            fi
+            export PYTHONPATH="$bb_pythonpath''${PYTHONPATH:+:$PYTHONPATH}"
+          '';
           bb = pkgs.writeShellScriptBin "bb" ''
-            export PYTHONPATH="$PWD/vendor''${PYTHONPATH:+:$PYTHONPATH}"
+            ${pythonPathSetup}
             exec python -m beanbeaver.cli "$@"
           '';
         in {
@@ -36,7 +51,7 @@
                   pkgs.mypy
                 ];
                 shellHook = ''
-                  export PYTHONPATH="$PWD/vendor''${PYTHONPATH:+:$PYTHONPATH}"
+                  ${pythonPathSetup}
                 '';
             };
         }
