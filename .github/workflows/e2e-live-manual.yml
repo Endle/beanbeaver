@@ -3,9 +3,6 @@ name: E2E Tests (Live, Manual)
 on:
   workflow_dispatch:
 
-env:
-  OCR_IMAGE: ghcr.io/${{ github.repository_owner }}/beanbeaver-ocr:latest
-
 jobs:
   e2e-live:
     runs-on: ubuntu-latest
@@ -27,6 +24,8 @@ jobs:
 
       - name: Start OCR service
         run: |
+          OCR_IMAGE="ghcr.io/endle/beanbeaver-ocr:latest"
+          echo "Using OCR image: ${OCR_IMAGE}"
           docker run -d --name beanbeaver-ocr -p 8001:8000 "${OCR_IMAGE}"
 
       - name: Wait for OCR health
