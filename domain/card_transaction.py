@@ -93,6 +93,8 @@ class CardTransaction:
             trans_amt_str = self.transaction_amount
             self.transaction_amount = D(self.transaction_amount)
             assert str(self.transaction_amount) == trans_amt_str.strip()
+        elif isinstance(self.transaction_amount, float):
+            self.transaction_amount = D(str(self.transaction_amount))
 
         if self.is_payment():
             # TODO(security): Logging `self` may expose merchant/date/amount/account data.
@@ -111,13 +113,13 @@ class CardTransaction:
             logger.debug("Skipping amex offer: %s", self)
             return None
         txn = data.Transaction(
-            meta=meta,
+            meta=meta or {},
             date=self.date,
             flag=flags.FLAG_OKAY,
             payee=self.raw_merchant_name,
             narration="",
-            tags=set(),
-            links=set(),
+            tags=frozenset(),
+            links=frozenset(),
             postings=list(),
         )
 
