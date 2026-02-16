@@ -1,0 +1,68 @@
+[project]
+name = "beancount-personal"
+version = "0.1.0"
+description = "Personal beancount importers and receipt scanner"
+requires-python = ">=3.12"
+dependencies = [
+    "pillow>=10.0.0",
+    "httpx>=0.24.0",
+    "beancount>=2.3",
+]
+
+[project.scripts]
+bb = "beanbeaver.cli.main:main"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "beancount>=2.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".."]
+markers = [
+    "integration: tests requiring external services (OCR container, CLI server)",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "UP",     # pyupgrade
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # do not perform function calls in argument defaults
+    "B905",   # zip without strict= (python 3.10+)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"domain/card_transaction.py" = ["E501"]  # Allow long lines in merchant matching
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = false
+warn_unused_ignores = true
+ignore_missing_imports = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "beancount.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pandas.*"
+ignore_missing_imports = true

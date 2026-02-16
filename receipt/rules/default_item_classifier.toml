@@ -1,0 +1,240 @@
+# Auto-generated from item_categories.py rule tables
+exact_only_keywords = []
+
+[[rules]]
+id = "legacy_0000"
+keywords = ["EGG", "EGGS", "STRAWBERRY MILK", "CHOCOLATE MILK", "CHOC MILK", "CHOC MLK", "MILK", "CHEESE", "YOGURT", "YOGOURT", "BUTTER", "CREAM", "SOUR CREAM", "COTTAGE", "MARGARINE", "CHEDDAR", "MOZZARELLA", "PARMESAN", "SWEETENED SOYA"]
+category = "Expenses:Food:Grocery:Dairy"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0001"
+keywords = ["CHICKEN", "BEEF", "PORK", "BACON", "SAUSAGE", "HAM", "TURKEY", "LAMB", "STEAK", "GROUND MEAT", "MEATBALL", "SALAMI", "PEPPERONI", "PROSCIUTTO", "ROTISSERIE", "DRUMSTICK", "MEAT", "BEEF BELLY", "BEEF BELLY ROLL"]
+category = "Expenses:Food:Grocery:Meat"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0002"
+keywords = ["SALMON", "TUNA", "COD", "TILAPIA", "HALIBUT", "TROUT", "MACKEREL", "SARDINE", "ANCHOVY", "FILLET", "FISH"]
+category = "Expenses:Food:Grocery:Seafood:Fish"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0003"
+keywords = ["SHRIMP", "PRAWN", "LOBSTER", "CRAB", "SCALLOP", "MUSSEL", "CLAM", "OYSTER", "SQUID", "OCTOPUS", "CALAMARI"]
+category = "Expenses:Food:Grocery:Seafood:Shrimp"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0005"
+keywords = ["SEAFOOD"]
+category = "Expenses:Food:Grocery:Seafood"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0006"
+keywords = ["APPLE", "BANANA", "ORANGE", "BERRY", "BERRIES", "STRAWBERRY", "BLUEBERRY", "RASPBERRY", "BLACKBERRY", "GRAPE", "GRAPES", "MANGO", "PINEAPPLE", "WATERMELON", "MELON", "CANTALOUPE", "PEACH", "PEAR", "PLUM", "CHERRY", "CHERRIES", "KIWI", "LEMON", "LIME", "GRAPEFRUIT", "AVOCADO", "COCONUT", "PAPAYA", "POMEGRANATE", "FIG", "DATE", "APRICOT", "NECTARINE", "TANGERINE", "MANDARIN", "CLEMENTINE", "POMELO", "DRAGONFRUIT", "LYCHEE", "DURIAN", "JACKFRUIT", "PERSIMMON"]
+category = "Expenses:Food:Grocery:Fruit"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0007"
+keywords = ["FRESH BABY SHANGHAI"]
+category = "Expenses:Food:Grocery:Vegetable"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0008"
+keywords = ["LETTUCE", "SPINACH", "KALE", "CABBAGE", "BROCCOLI", "CAULIFLOWER", "CARROT", "CELERY", "CUCUMBER", "TOMATO", "TOMATOES", "PEPPER", "PEPPERS", "ONION", "POTATO", "POTATOES", "SWEET POTATO", "MUSHROOM", "ZUCCHINI", "SQUASH", "EGGPLANT", "ASPARAGUS", "CORN", "GREEN BEAN", "PEA", "PEAS", "EDAMAME", "BOK CHOY", "SHEPHERDS PURSE", "NAPA", "RADISH", "TURNIP", "BEET", "ARTICHOKE", "LEEK", "SCALLION", "SHALLOT", "CHIVE", "CILANTRO", "PARSLEY", "BASIL", "DILL", "TOFU", "BEAN SPROUT", "SPROUTS", "SALAD", "COLESLAW", "GREENS"]
+category = "Expenses:Food:Grocery:Vegetable"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0009"
+keywords = ["CANNED CORN", "CANNED BEAN", "CANNED TOMATO", "CANNED PEA", "DICED TOMATO", "TOMATO SAUCE", "TOMATO PASTE", "GREEN GIANT", "NIBLETS"]
+category = "Expenses:Food:Grocery:Vegetable:Canned"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0010"
+keywords = ["DUMPLING", "GYOZA", "POTSTICKER", "WONTON", "BAO", "XIAOLONGBAO"]
+category = "Expenses:Food:Grocery:Frozen:Dumpling"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0011"
+keywords = ["ICE CREAM", "ICECREAM", "GELATO", "FROZEN YOGURT", "SORBET", "POPSICLE"]
+category = "Expenses:Food:Grocery:Frozen:IceCream"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0012"
+keywords = ["FROZEN PIZZA", "FROZEN MEAL", "TV DINNER", "FROZEN ENTREE", "FROZEN BREAKFAST", "FROZEN BURRITO"]
+category = "Expenses:Food:Grocery:Frozen"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0013"
+keywords = ["ROTISSERIE CHICKEN", "PREPARED MEAL", "DELI MEAL", "READY TO EAT", "HEAT AND SERVE", "MEAL KIT"]
+category = "Expenses:Food:Grocery:PreparedMeal"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0015"
+keywords = ["BREAD", "BAGEL", "CROISSANT", "MUFFIN", "DONUT", "DOUGHNUT", "PASTRY", "CAKE", "PIE", "COOKIE", "COOKIES", "BAGUETTE", "BUN", "BUNS", "TOAST", "ENGLISH MUFFIN", "TORTILLA", "PITA", "NAAN", "FLATBREAD", "CRACKER", "CRACKERS", "WAFFLE", "PANCAKE"]
+category = "Expenses:Food:Grocery:Bakery"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0016"
+keywords = ["CHEN KE MING"]
+category = "Expenses:Food:Grocery:Staple"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0017"
+keywords = ["RICE", "PASTA", "NOODLE", "NOODLES", "SPAGHETTI", "MACARONI", "PENNE", "FLOUR", "SUGAR", "SALT", "OIL", "OLIVE OIL", "VEGETABLE OIL", "CANOLA OIL", "VINEGAR", "OATMEAL", "OATS", "CEREAL", "QUINOA", "COUSCOUS", "BARLEY", "LENTIL", "LENTILS", "CHICKPEA", "BEAN", "BEANS", "BLACK BEAN", "KIDNEY BEAN", "PINTO BEAN", "NOODLE", "NOODLES", "INSTANT NOODLE", "INSTANT NOODLES"]
+category = "Expenses:Food:Grocery:Staple"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0018"
+keywords = ["WANG SHOU YI"]
+category = "Expenses:Food:Grocery:Seasoning"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0019"
+keywords = ["CORN OIL", "GARLIC", "GINGER", "GREEN ONION", "GREEN ONIONS", "CHILI PEPPER", "RED CHILI PEPPER", "SPICE", "SEASONING", "PAPRIKA", "CUMIN", "CORIANDER", "TURMERIC", "CINNAMON", "NUTMEG", "OREGANO", "THYME", "ROSEMARY", "BAY LEAF", "CURRY", "CHILI POWDER", "CAYENNE", "SOY SAUCE", "FISH SAUCE", "OYSTER SAUCE", "HOISIN", "WASABI", "SRIRACHA", "HOT SAUCE", "KETCHUP", "MUSTARD", "MAYONNAISE", "MAYO", "RELISH", "BBQ SAUCE", "TERIYAKI", "WORCESTERSHIRE", "PERICARPIUM ZANTHOXYLI", "PERICARPIURN ZANTHOXYLI", "SALSA", "HUMMUS", "GUACAMOLE", "PESTO", "CHINA TIME HONORED BRAND", "YUQUAN FRESH PRESERVED"]
+category = "Expenses:Food:Grocery:Seasoning"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0021"
+keywords = ["POTATO CHIPS", "CHIP", "CHIPS", "POPCORN", "PRETZEL", "NUTS", "ALMONDS", "CASHEWS", "PEANUTS", "WALNUTS", "PISTACHIOS", "TRAIL MIX", "GRANOLA BAR", "PROTEIN BAR", "ENERGY BAR", "CANDY", "CHOCOLATE", "GUMMY", "GUMMIES", "SKITTLES", "M&M", "SNICKERS", "TWIX", "KITKAT", "REESE", "OREO", "GOLDFISH", "CHEETOS", "DORITOS", "PRINGLES", "LAYS", "RUFFLES", "TOSTITOS", "CHEEZ-IT", "RITZ", "FISH SHAPE CRACKER"]
+category = "Expenses:Food:Grocery:Snacks"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0022"
+keywords = ["MINT", "MINTS", "GUM", "CHEWING GUM", "BREATH", "TIC TAC", "ALTOIDS", "MENTOS"]
+category = "Expenses:Food:Grocery:Snacks:Mint"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0024"
+keywords = ["COCA COLA", "COCA-COLA", "COKE", "PEPSI", "SPRITE", "7UP", "DR PEPPER", "MOUNTAIN DEW", "GINGER ALE", "ROOT BEER", "SODA", "POP"]
+category = "Expenses:Food:Grocery:Drink:CocaCola"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0025"
+keywords = ["ORANGE JUICE", "APPLE JUICE", "GRAPE JUICE", "FRUIT PUNCH", "CRANBERRY", "LEMONADE", "SMOOTHIE", "JUICE", "V8"]
+category = "Expenses:Food:Grocery:Drink:Juice"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0026"
+keywords = ["COFFEE BEAN", "GROUND COFFEE", "INSTANT COFFEE", "COFFEE PODS", "K-CUP", "NESPRESSO", "TEA", "TEA BAG", "GREEN TEA", "BLACK TEA", "HERBAL TEA", "CHAMOMILE", "EARL GREY"]
+category = "Expenses:Food:Grocery:Drink:Coffee"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0027"
+keywords = ["WATER", "SPARKLING WATER", "MINERAL WATER", "SPRING WATER", "COCONUT WATER", "SPORTS DRINK", "GATORADE", "POWERADE", "ENERGY DRINK", "RED BULL", "MONSTER", "CRUSH", "FANTA STRAUBERRY", "FANTA STRAWBERRY", "FANTA", "PEACE TEA", "DRINK", "BEVERAGE"]
+category = "Expenses:Food:Grocery:Drink"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0028"
+keywords = ["COORS", "BEER", "WINE", "VODKA", "WHISKEY", "WHISKY", "RUM", "GIN", "TEQUILA", "COGNAC", "CHAMPAGNE", "PROSECCO", "CIDER", "SAKE", "SOJU", "LIQUOR", "LIQUEUR", "LAGER", "STOUT", "PORTER"]
+category = "Expenses:Food:AlcoholicBeverage"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0029"
+keywords = ["PAPER TOWEL", "TOILET PAPER", "TISSUE", "KLEENEX", "NAPKIN", "NAPKINS", "ALUMINUM FOIL", "PLASTIC WRAP", "CLING WRAP", "PARCHMENT", "WAX PAPER", "TRASH BAG", "GARBAGE BAG", "ZIPLOC", "STORAGE BAG", "SANDWICH BAG", "SPONGE", "DISH SOAP", "DISHWASHER", "LAUNDRY DETERGENT", "FABRIC SOFTENER", "BLEACH", "CLEANER", "CLEANING", "DISINFECTANT", "LYSOL", "CLOROX", "WINDEX", "MR CLEAN", "FEBREZE", "AIR FRESHENER", "CANDLE", "LIGHT BULB", "BATTERY", "BATTERIES"]
+category = "Expenses:Home:HouseholdSupply"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0030"
+keywords = ["SHAMPOO", "CONDITIONER", "BODY WASH", "SOAP", "HAND SOAP", "LOTION", "MOISTURIZER", "SUNSCREEN", "DEODORANT", "ANTIPERSPIRANT", "RAZOR", "SHAVING", "COTTON", "COTTON BALL", "Q-TIP", "SWAB", "BAND-AID", "BANDAGE", "FIRST AID", "FEMININE", "TAMPON", "PAD", "PANTY LINER"]
+category = "Expenses:PersonalCare"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0031"
+keywords = ["TOOTHPASTE", "TOOTHBRUSH", "MOUTHWASH", "DENTAL FLOSS", "FLOSS"]
+category = "Expenses:PersonalCare:Tooth"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0032"
+keywords = ["DOG FOOD", "CAT FOOD", "PET FOOD", "KIBBLE", "DOG TREAT", "CAT TREAT", "PET TREAT", "KITTY LITTER", "CAT LITTER", "PET TOY", "DOG TOY", "CAT TOY", "LEASH", "COLLAR", "PET BED", "DOG BED", "CAT BED"]
+category = "Expenses:Pet"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0033"
+keywords = ["XL EGGS", "KS ORG 2%", "CHOC.MILK", "CHOC MILK", "FINE-FILT"]
+category = "Expenses:Food:Grocery:Dairy"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0036"
+keywords = ["COKE ZERO", "ZERO"]
+category = "Expenses:Food:Grocery:Drink:CocaCola"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0038"
+keywords = ["MANDARINS"]
+category = "Expenses:Food:Grocery:Fruit"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0039"
+keywords = ["SKITTLE GUMM", "SNACK BITES"]
+category = "Expenses:Food:Grocery:Snacks"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0040"
+keywords = ["KS HOME BAG", "HOME BAG"]
+category = "Expenses:Home:HouseholdSupply"
+priority = 0
+exact_only = false
