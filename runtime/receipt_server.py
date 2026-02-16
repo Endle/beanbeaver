@@ -10,15 +10,16 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, Response
+from starlette.middleware.base import BaseHTTPMiddleware
+
 from beanbeaver.receipt.formatter import format_parsed_receipt
 from beanbeaver.receipt.ocr_helpers import resize_image_bytes, transform_paddleocr_result
 from beanbeaver.receipt.ocr_result_parser import parse_receipt
 from beanbeaver.runtime import get_logger, get_paths, load_known_merchant_keywords
 from beanbeaver.runtime.receipt_pipeline import create_debug_overlay, save_ocr_json
 from beanbeaver.runtime.receipt_storage import save_scanned_receipt
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, Response
-from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = get_logger(__name__)
 

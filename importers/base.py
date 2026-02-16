@@ -13,9 +13,10 @@ import os
 from collections.abc import Generator
 from typing import TYPE_CHECKING, Any
 
-from beanbeaver.runtime import get_logger
 from beancount.core import data
 from beancount.ingest import importer
+
+from beanbeaver.runtime import get_logger
 
 if TYPE_CHECKING:
     from beancount.ingest.cache import _FileMemo
