@@ -13,7 +13,8 @@ from beanbeaver.domain.match import comment_block, find_transaction_end
 from beanbeaver.runtime import get_logger, get_paths
 
 logger = get_logger(__name__)
-_TXN_START_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\s+\*")
+_TXN_START_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\s+[*!?A-Za-z](?:\s|$)")
+_INCLUDE_RE = re.compile(r'^\s*include\s+"([^"]+)"(?:\s*;.*)?$')
 
 
 class LedgerWriter:
@@ -49,12 +50,15 @@ class LedgerWriter:
             "applied" if statement was updated,
             "already_applied" if include already exists.
         """
-        content = statement_path.read_text()
+        lines = statement_path.read_text().splitlines(keepends=True)
         include_prefix = f'include "{include_rel_path}"'
-        if include_prefix in content:
-            return "already_applied"
-
-        lines = content.splitlines(keepends=True)
+        for line in lines:
+            stripped = line.lstrip()
+            if stripped.startswith(";"):
+                continue
+            include_match = _INCLUDE_RE.match(stripped.rstrip("\n"))
+            if include_match and include_match.group(1) == include_rel_path:
+                return "already_applied"
         start_idx = line_number - 1
         if start_idx < 0 or start_idx >= len(lines):
             raise ValueError(f"Invalid line number {line_number} for {statement_path}")
@@ -103,13 +107,17 @@ class LedgerWriter:
         original_enriched = enriched_path.read_text() if enriched_existed else None
 
         try:
-            enriched_path.write_text(enriched_content)
             status = self._replace_transaction_with_include(
                 statement_path=statement_path,
                 line_number=line_number,
                 include_rel_path=include_rel_path,
                 receipt_name=receipt_name,
             )
+            if status == "already_applied":
+                return status
+
+            enriched_path.parent.mkdir(parents=True, exist_ok=True)
+            enriched_path.write_text(enriched_content)
 
             apply_errors = self.validate_ledger(ledger_path=ledger_path)
             if apply_errors:

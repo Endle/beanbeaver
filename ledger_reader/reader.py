@@ -62,6 +62,45 @@ class LedgerReader:
         loaded = self.load(ledger_path=ledger_path)
         return [entry for entry in loaded.entries if isinstance(entry, data.Transaction)]
 
+    @staticmethod
+    def _collect_account_timeline(
+        entries: list[data.Directive],
+    ) -> tuple[dict[str, dt.date], dict[str, dt.date]]:
+        """Return latest open/close dates per account from ledger entries."""
+        last_open: dict[str, dt.date] = {}
+        last_close: dict[str, dt.date] = {}
+
+        for entry in entries:
+            if isinstance(entry, data.Open):
+                prior_open = last_open.get(entry.account)
+                if prior_open is None or entry.date > prior_open:
+                    last_open[entry.account] = entry.date
+            elif isinstance(entry, data.Close):
+                prior_close = last_close.get(entry.account)
+                if prior_close is None or entry.date > prior_close:
+                    last_close[entry.account] = entry.date
+
+        return last_open, last_close
+
+    @staticmethod
+    def _is_account_open_as_of(
+        account: str,
+        *,
+        as_of: dt.date,
+        last_open: dict[str, dt.date],
+        last_close: dict[str, dt.date],
+    ) -> bool:
+        """Return whether account should be considered open as of the provided date."""
+        opened = last_open.get(account)
+        if not opened or opened > as_of:
+            return False
+
+        closed = last_close.get(account)
+        if closed is None or closed > as_of:
+            return True
+
+        return opened > closed
+
     def open_accounts(
         self,
         patterns: list[str],
@@ -77,26 +116,16 @@ class LedgerReader:
             as_of = dt.date.today()
 
         loaded = self.load(ledger_path=ledger_path)
-
-        last_open: dict[str, dt.date] = {}
-        last_close: dict[str, dt.date] = {}
-
-        for entry in loaded.entries:
-            if isinstance(entry, data.Open):
-                last_open[entry.account] = entry.date
-            elif isinstance(entry, data.Close):
-                last_close[entry.account] = entry.date
-
-        def is_open(account: str) -> bool:
-            opened = last_open.get(account)
-            if not opened or opened > as_of:
-                return False
-            closed = last_close.get(account)
-            return closed is None or closed > as_of
+        last_open, last_close = self._collect_account_timeline(loaded.entries)
 
         matches: list[str] = []
         for account in last_open:
-            if not is_open(account):
+            if not self._is_account_open_as_of(
+                account,
+                as_of=as_of,
+                last_open=last_open,
+                last_close=last_close,
+            ):
                 continue
             for pattern in patterns:
                 if fnmatch.fnmatch(account, pattern):
@@ -113,8 +142,9 @@ class LedgerReader:
         prefix: str = "Liabilities:CreditCard",
     ) -> list[str]:
         """Return currently open credit-card accounts under the given prefix."""
+        normalized_prefix = prefix[:-1] if prefix.endswith(":") else prefix
         return self.open_accounts(
-            patterns=[f"{prefix}*"],
+            patterns=[f"{normalized_prefix}:*"],
             as_of=as_of,
             ledger_path=ledger_path,
         )
