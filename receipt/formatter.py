@@ -359,22 +359,23 @@ def format_enriched_transaction(
     lines.append(f'{date_str} * "{payee_clean}" "{narration}"')
 
     # Find the credit card account and amount from original transaction
-    cc_account = None
-    cc_amount = None
+    cc_account: str | None = None
+    cc_amount: Decimal | None = None
     original_expense = None
 
     for posting in txn.postings:
-        if posting.units and posting.units.number < 0:
+        number = posting.units.number if posting.units else None
+        if number is not None and number < 0:
             cc_account = posting.account
-            cc_amount = posting.units.number
-        elif posting.units and posting.units.number > 0:
+            cc_amount = number
+        elif number is not None and number > 0:
             original_expense = posting.account
 
     # Collect all postings for aligned formatting
     postings: list[tuple[str, str, str | None]] = []
 
     # Credit card posting (keep original)
-    if cc_account and cc_amount:
+    if cc_account is not None and cc_amount is not None:
         postings.append((cc_account, f"{cc_amount:.2f} CAD", None))
     else:
         postings.append(("Liabilities:CreditCard:FIXME", f"-{receipt.total:.2f} CAD", None))
@@ -403,7 +404,7 @@ def format_enriched_transaction(
         items_total += receipt.tax
 
     # Balancing line for remaining amount
-    if cc_amount:
+    if cc_amount is not None:
         expected_total = abs(cc_amount)
     else:
         expected_total = receipt.total
