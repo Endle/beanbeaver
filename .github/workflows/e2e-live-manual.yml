@@ -1,0 +1,52 @@
+name: E2E Tests (Live, Manual)
+
+on:
+  workflow_dispatch:
+
+env:
+  OCR_IMAGE: ghcr.io/${{ github.repository_owner }}/beanbeaver-ocr:latest
+
+jobs:
+  e2e-live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest "beancount>=2.3,<3" pillow httpx
+
+      - name: Start OCR service
+        run: |
+          docker run -d --name beanbeaver-ocr -p 8001:8000 "${OCR_IMAGE}"
+
+      - name: Wait for OCR health
+        run: |
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:8001/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs beanbeaver-ocr || true
+          exit 1
+
+      - name: Run e2e tests in live mode
+        run: pytest tests/test_e2e_receipts.py --beanbeaver-e2e-mode live -v
+
+      - name: Dump OCR logs on failure
+        if: failure()
+        run: docker logs beanbeaver-ocr || true
+
+      - name: Stop OCR service
+        if: always()
+        run: docker rm -f beanbeaver-ocr || true
