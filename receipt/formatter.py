@@ -1,7 +1,7 @@
 """Format Receipt data as beancount transactions."""
 
-from decimal import Decimal
 import re
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from beanbeaver.domain.receipt import Receipt, ReceiptWarning

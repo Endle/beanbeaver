@@ -9,6 +9,8 @@ from pathlib import Path
 from beanbeaver.application.imports.account_discovery import find_open_accounts
 from beanbeaver.application.imports.csv_routing import (
     detect_credit_card_csv as detect_credit_card_csv_by_rules,
+)
+from beanbeaver.application.imports.csv_routing import (
     detect_credit_card_importer_id,
 )
 from beanbeaver.application.imports.shared import (
@@ -47,6 +49,7 @@ MBNA_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:MBNA*"]
 PCF_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:PCFinancial*", "Liabilities:CreditCard:PC*"]
 CTFS_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:CTFS*"]
 AMEX_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:Amex*", "Liabilities:CreditCard:AmericanExpress*"]
+
 
 def detect_credit_card_csv() -> str | None:
     """Auto-detect a credit card CSV file in ~/Downloads."""
@@ -181,6 +184,7 @@ def _discover_bmo_accounts(as_of: datetime.date | None, csv_file: str) -> tuple[
     preferred = porter_matches if is_porter_file else bmo_matches
     primary = _select_account(preferred if preferred else matches, account_label="BMO credit card", as_of=as_of)
 
+    porter_account: str | None
     if is_porter_file:
         account = bmo_matches[0] if bmo_matches else primary
         porter_account = primary
@@ -225,7 +229,9 @@ def _discover_amex_importer(as_of: datetime.date | None, csv_file: str) -> tuple
     return AmexImporter(account=selected), selected
 
 
-def _resolve_importer(target_file_name: os.PathLike[str], csv_file: str) -> tuple[BaseCardImporter, str, datetime.date | None]:
+def _resolve_importer(
+    target_file_name: os.PathLike[str], csv_file: str
+) -> tuple[BaseCardImporter, str, datetime.date | None]:
     detected_importer = _detect_importer(target_file_name)
     as_of = _detect_statement_as_of(detected_importer, target_file_name)
 
@@ -286,6 +292,7 @@ def main() -> None:
     confirm_uncommitted_changes()
 
     # Auto-detect CSV file if not provided
+    csv_file: str | None
     if len(sys.argv) >= 2:
         csv_file = sys.argv[1]
     else:
@@ -302,6 +309,7 @@ def main() -> None:
                 "Transaction History_*.csv, *MBNA*.csv"
             )
             sys.exit(1)
+    assert csv_file is not None
 
     # Optional manual date override (dates are auto-detected if not provided)
     start_date: str | None = sys.argv[2] if len(sys.argv) >= 4 else None

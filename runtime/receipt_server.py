@@ -10,16 +10,15 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, Response
-from starlette.middleware.base import BaseHTTPMiddleware
-
 from beanbeaver.receipt.formatter import format_parsed_receipt
 from beanbeaver.receipt.ocr_helpers import resize_image_bytes, transform_paddleocr_result
 from beanbeaver.receipt.ocr_result_parser import parse_receipt
 from beanbeaver.runtime import get_logger, get_paths, load_known_merchant_keywords
 from beanbeaver.runtime.receipt_pipeline import create_debug_overlay, save_ocr_json
 from beanbeaver.runtime.receipt_storage import save_scanned_receipt
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, Response
+from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = get_logger(__name__)
 
@@ -33,9 +32,7 @@ OCR_SERVICE_URL = os.environ.get("OCR_SERVICE_URL", "http://localhost:8001")
 class FixiOSMultipartMiddleware(BaseHTTPMiddleware):
     """Fix iOS Shortcuts multipart boundary issue (LF vs CRLF)."""
 
-    async def dispatch(
-        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         content_type = request.headers.get("content-type", "")
         logger.debug(f"Content-Type: {content_type}")
 
@@ -176,7 +173,7 @@ async def upload_receipt(request: Request) -> JSONResponse:
 
                     # TODO(security): These stdout lines include merchant/date/amount/path details.
                     # Keep only for localhost-only operation; redact before non-localhost deployment.
-                    print(f"\n{'='*60}")
+                    print(f"\n{'=' * 60}")
                     print(f"Received: {filename}")
                     print(
                         f"Parsed: {receipt.merchant}, {receipt.date}, ${receipt.total:.2f}, {len(receipt.items)} items"
@@ -185,7 +182,7 @@ async def upload_receipt(request: Request) -> JSONResponse:
                     output_path = save_scanned_receipt(receipt, beancount_content)
                     draft_filename = output_path.name
                     print(f"Saved for review: {output_path}")
-                    print(f"{'='*60}\n")
+                    print(f"{'=' * 60}\n")
 
                     return JSONResponse(
                         {

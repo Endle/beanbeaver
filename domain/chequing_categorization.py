@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 def categorize_chequing_transaction(
     description: str,
     *,

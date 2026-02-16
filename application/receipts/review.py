@@ -140,4 +140,3 @@ def run_re_edit_approved_receipt(request: ReEditApprovedReceiptRequest) -> ReEdi
         status="updated",
         updated_path=final_path,
     )
-

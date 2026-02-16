@@ -6,6 +6,7 @@ from beanbeaver.receipt.item_categories import categorize_item
 
 # TODO does this file has real usage?
 
+
 def test_corn_oil_maps_to_seasoning() -> None:
     assert categorize_item("SAPORITO FOODS CORN OIL 2.84L") == "Expenses:Food:Grocery:Seasoning"
 
@@ -43,8 +44,11 @@ grocery_staple = "Expenses:Food:Grocery:Staple"
 """.strip()
     )
 
-    assert categorize_item(
-        "CUSTOM NOODLE BRAND",
-        classifier_paths=(classifier,),
-        account_paths=(account_map,),
-    ) == "Expenses:Food:Grocery:Staple"
+    assert (
+        categorize_item(
+            "CUSTOM NOODLE BRAND",
+            classifier_paths=(classifier,),
+            account_paths=(account_map,),
+        )
+        == "Expenses:Food:Grocery:Staple"
+    )

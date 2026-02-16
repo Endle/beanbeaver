@@ -32,4 +32,3 @@ def run_list_approved_receipts() -> ApprovedReceiptListing:
 def run_list_scanned_receipts() -> ScannedReceiptListing:
     """Load scanned receipt paths."""
     return ScannedReceiptListing(receipts=list_scanned_receipts())
-

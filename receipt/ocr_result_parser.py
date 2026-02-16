@@ -5,9 +5,10 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from .item_categories import categorize_item
-from .date_utils import placeholder_receipt_date
 from beanbeaver.domain.receipt import Receipt, ReceiptItem, ReceiptWarning
+
+from .date_utils import placeholder_receipt_date
+from .item_categories import categorize_item
 
 # Minimum average confidence for a line to be considered reliable
 MIN_LINE_CONFIDENCE = 0.6
@@ -45,11 +46,11 @@ FOOTER_ADDRESS_PATTERNS = re.compile(
 # These patterns detect lines like "3 @ $1.99", "1.22 lb @ $2.99/lb", "2 /for $3.00"
 QUANTITY_MODIFIER_PATTERNS = [
     # "3 @ $1.99" - count at unit price
-    (re.compile(r'^(\d+)\s*@\s*\$?(\d+\.\d{2})'), 'count_at_price'),
+    (re.compile(r"^(\d+)\s*@\s*\$?(\d+\.\d{2})"), "count_at_price"),
     # "1.22 lb @ $2.99/lb" or "1.22 lk @ $2.99/1b" (OCR errors: lk=lb, k9/kg=kg, 1b=lb)
-    (re.compile(r'^(\d+\.?\d*)\s*(?:lb|lk|kg|k[g9]|1b|1k)\s*@', re.IGNORECASE), 'weight_at_price'),
+    (re.compile(r"^(\d+\.?\d*)\s*(?:lb|lk|kg|k[g9]|1b|1k)\s*@", re.IGNORECASE), "weight_at_price"),
     # "2 /for $3.00" or "(2 /for $3.00)"
-    (re.compile(r'^\(?(\d+)\s*/\s*for\s+\$?(\d+\.\d{2})\)?'), 'multi_for_price'),
+    (re.compile(r"^\(?(\d+)\s*/\s*for\s+\$?(\d+\.\d{2})\)?"), "multi_for_price"),
 ]
 
 
@@ -141,38 +142,34 @@ def _parse_quantity_modifier(line: str) -> dict | None:
         match = pattern.match(line)
         if match:
             groups = match.groups()
-            if pattern_type == 'count_at_price':
+            if pattern_type == "count_at_price":
                 return {
-                    'quantity': int(groups[0]),
-                    'unit_price': Decimal(groups[1]),
-                    'pattern_type': pattern_type,
-                    'raw_line': line,
+                    "quantity": int(groups[0]),
+                    "unit_price": Decimal(groups[1]),
+                    "pattern_type": pattern_type,
+                    "raw_line": line,
                 }
-            elif pattern_type == 'weight_at_price':
+            elif pattern_type == "weight_at_price":
                 return {
-                    'quantity': 1,  # Weight items are qty=1
-                    'weight': Decimal(groups[0]),
-                    'pattern_type': pattern_type,
-                    'raw_line': line,
+                    "quantity": 1,  # Weight items are qty=1
+                    "weight": Decimal(groups[0]),
+                    "pattern_type": pattern_type,
+                    "raw_line": line,
                 }
-            elif pattern_type == 'multi_for_price':
+            elif pattern_type == "multi_for_price":
                 qty = int(groups[0])
                 total = Decimal(groups[1])
                 return {
-                    'quantity': qty,
-                    'unit_price': total / qty,
-                    'deal_price': total,  # The "X for $Y" total
-                    'pattern_type': pattern_type,
-                    'raw_line': line,
+                    "quantity": qty,
+                    "unit_price": total / qty,
+                    "deal_price": total,  # The "X for $Y" total
+                    "pattern_type": pattern_type,
+                    "raw_line": line,
                 }
     return None
 
 
-def _validate_quantity_price(
-    total_price: Decimal,
-    modifier: dict,
-    tolerance: Decimal = Decimal("0.02")
-) -> bool:
+def _validate_quantity_price(total_price: Decimal, modifier: dict, tolerance: Decimal = Decimal("0.02")) -> bool:
     """
     Validate that quantity × unit_price ≈ total_price.
 
@@ -190,17 +187,17 @@ def _validate_quantity_price(
     if modifier is None:
         return False
 
-    pattern_type = modifier.get('pattern_type')
+    pattern_type = modifier.get("pattern_type")
 
-    if pattern_type == 'count_at_price':
-        expected = modifier['quantity'] * modifier['unit_price']
+    if pattern_type == "count_at_price":
+        expected = modifier["quantity"] * modifier["unit_price"]
         return abs(expected - total_price) <= tolerance
 
-    elif pattern_type == 'multi_for_price':
+    elif pattern_type == "multi_for_price":
         # For "2 /for $3.00", the deal_price should equal total_price
-        return abs(modifier['deal_price'] - total_price) <= tolerance
+        return abs(modifier["deal_price"] - total_price) <= tolerance
 
-    elif pattern_type == 'weight_at_price':
+    elif pattern_type == "weight_at_price":
         # Weight items can't be validated without knowing the unit price
         # Just accept them as valid modifiers
         return True
@@ -356,7 +353,7 @@ def _extract_items_with_bbox(
         if total_line_y is not None and price_y > total_line_y + Y_TOLERANCE:
             continue
         # Find the line closest to this price (to detect header+price rows)
-        closest_line_to_price = min(all_lines, key=lambda l: abs(l[0] - price_y), default=None)
+        closest_line_to_price = min(all_lines, key=lambda line_entry: abs(line_entry[0] - price_y), default=None)
         prefer_below = False
         price_line_has_onsale = False
         onsale_target_line = None
@@ -370,7 +367,9 @@ def _extract_items_with_bbox(
             line_y, full_text, left_text, _ = closest_line_to_price
             full_upper = source_full_text.upper() if source_full_text else full_text.upper()
             price_line_has_onsale = ("ONSALE" in full_upper) or ("ON SALE" in full_upper)
-            left_is_header = _is_section_header_text(left_text) and not _is_priced_generic_item_label(left_text, full_text)
+            left_is_header = _is_section_header_text(left_text) and not _is_priced_generic_item_label(
+                left_text, full_text
+            )
             if left_is_header or _is_section_header_text(full_text) or not left_text:
                 prefer_below = True
             # ONSALE marker rows usually carry sale price for adjacent item text.
@@ -405,10 +404,7 @@ def _extract_items_with_bbox(
             for candidate_y, candidate_full_text, candidate_left_text, _ in all_lines:
                 if abs(candidate_y - price_y) > Y_TOLERANCE:
                     continue
-                if (
-                    _looks_like_summary_line(candidate_left_text)
-                    or _looks_like_summary_line(candidate_full_text)
-                ):
+                if _looks_like_summary_line(candidate_left_text) or _looks_like_summary_line(candidate_full_text):
                     is_summary = True
                     break
         if closest_line_to_price:
@@ -431,8 +427,7 @@ def _extract_items_with_bbox(
                 if nearest_above:
                     above_y, above_full_text, above_left_text, _ = nearest_above
                     if line_y - above_y <= MAX_ITEM_DISTANCE and (
-                        _looks_like_summary_line(above_left_text)
-                        or _looks_like_summary_line(above_full_text)
+                        _looks_like_summary_line(above_left_text) or _looks_like_summary_line(above_full_text)
                     ):
                         is_summary = True
                 # In dense summary blocks, labels can appear slightly above/below
@@ -443,9 +438,8 @@ def _extract_items_with_bbox(
                     for candidate_y, candidate_full_text, candidate_left_text, _ in all_lines:
                         if abs(candidate_y - line_y) > MAX_ITEM_DISTANCE:
                             continue
-                        if (
-                            _looks_like_summary_line(candidate_left_text)
-                            or _looks_like_summary_line(candidate_full_text)
+                        if _looks_like_summary_line(candidate_left_text) or _looks_like_summary_line(
+                            candidate_full_text
                         ):
                             is_summary = True
                             break
@@ -488,7 +482,9 @@ def _extract_items_with_bbox(
                 return False
             if _looks_like_summary_line(left_text) or _looks_like_summary_line(full_text):
                 return False
-            left_is_header = _is_section_header_text(left_text) and not _is_priced_generic_item_label(left_text, full_text)
+            left_is_header = _is_section_header_text(left_text) and not _is_priced_generic_item_label(
+                left_text, full_text
+            )
             if left_is_header or _is_section_header_text(full_text):
                 return False
             # Skip bare item/SKU code lines, but allow SKU-prefixed item descriptions.
@@ -636,7 +632,9 @@ def _extract_items_with_bbox(
                     continue
                 if re.match(r"^\$?\d+\.\d{2}$", full_text):
                     continue
-                left_is_header = _is_section_header_text(left_text) and not _is_priced_generic_item_label(left_text, full_text)
+                left_is_header = _is_section_header_text(left_text) and not _is_priced_generic_item_label(
+                    left_text, full_text
+                )
                 if left_is_header or _is_section_header_text(full_text):
                     continue
                 # Skip garbled OCR lines (mostly non-alpha)
@@ -815,8 +813,6 @@ def parse_receipt(
         image_filename=image_filename,
         warnings=warnings,
     )
-
-
 
 
 def _extract_merchant(
@@ -1139,7 +1135,7 @@ def _extract_items(
         lines: List of text lines from the receipt
         summary_amounts: Set of Decimal amounts (total, tax, subtotal) to exclude from items
     """
-    items = []
+    items: list[ReceiptItem] = []
     if summary_amounts is None:
         summary_amounts = set()
 
@@ -1310,17 +1306,16 @@ def _extract_items(
             # Quantity expressions like "2 @ 2/$5.00" should trigger backward search instead
             # Also handle promotional patterns like "(1 /for $2.99) 1 /for" from C&C receipts
             is_qty_expr = (
-                _looks_like_quantity_expression(desc_part)
-                # Promotional pattern like "(#)<ON SALE)"
-                or re.match(r"^\([#\w]*\)\s*<?\s*ON\s*SALE", desc_part, re.IGNORECASE)
-            ) if desc_part else False
+                (
+                    _looks_like_quantity_expression(desc_part)
+                    # Promotional pattern like "(#)<ON SALE)"
+                    or re.match(r"^\([#\w]*\)\s*<?\s*ON\s*SALE", desc_part, re.IGNORECASE)
+                )
+                if desc_part
+                else False
+            )
 
-            if (
-                desc_part
-                and len(desc_part) > 2
-                and not is_qty_expr
-                and not force_backward
-            ):
+            if desc_part and len(desc_part) > 2 and not is_qty_expr and not force_backward:
                 items.append(
                     ReceiptItem(
                         description=desc_part,
@@ -1426,9 +1421,9 @@ def _extract_items(
                         # Use first modifier (closest to price line)
                         mod = qty_modifiers[0]
                         if _validate_quantity_price(price, mod):
-                            quantity = mod.get('quantity', 1)
+                            quantity = mod.get("quantity", 1)
                             # Add weight info to description if present
-                            if 'weight' in mod:
+                            if "weight" in mod:
                                 description_suffix = f" ({mod['weight']} lb)"
                         else:
                             # Validation failed - append raw text as fallback
@@ -1469,10 +1464,7 @@ def _extract_items(
                     context = context[:80]
                 warning_sink.append(
                     ReceiptWarning(
-                        message=(
-                            f'maybe missed item with malformed OCR price "{token}"'
-                            f' (context: "{context}")'
-                        ),
+                        message=(f'maybe missed item with malformed OCR price "{token}" (context: "{context}")'),
                         after_item_index=(len(items) - 1) if items else None,
                     )
                 )

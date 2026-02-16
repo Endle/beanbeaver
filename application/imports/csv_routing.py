@@ -263,8 +263,7 @@ def detect_credit_card_importer_id(path: Path) -> CardImporterId:
 
     if not sys.stdin.isatty():
         raise RuntimeError(
-            "Ambiguous credit card importer for CSV. "
-            f"Run interactively to choose: {', '.join(importer_ids)}"
+            f"Ambiguous credit card importer for CSV. Run interactively to choose: {', '.join(importer_ids)}"
         )
 
     print(f"Ambiguous credit card importer for file: {path.name}")

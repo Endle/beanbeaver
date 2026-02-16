@@ -12,12 +12,11 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
+from beanbeaver.domain.chequing_categorization import categorize_chequing_transaction
+from beanbeaver.runtime import load_chequing_categorization_patterns
 from beancount.core import amount, data, flags
 from beancount.ingest import importer
 from beancount.ingest.cache import _FileMemo
-
-from beanbeaver.domain.chequing_categorization import categorize_chequing_transaction
-from beanbeaver.runtime import load_chequing_categorization_patterns
 
 
 @dataclass

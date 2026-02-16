@@ -6,6 +6,8 @@ import argparse
 import shutil
 import subprocess
 import sys
+from collections.abc import Sequence
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
@@ -18,6 +20,8 @@ from beanbeaver.ledger_reader import get_ledger_writer
 from beanbeaver.runtime import get_logger, get_paths
 
 logger = get_logger(__name__)
+
+type ReceiptSummary = tuple[Path, str, date, Decimal]
 
 
 def _ensure_git_clean_before_match() -> bool:
@@ -72,8 +76,8 @@ def _ensure_git_clean_before_match() -> bool:
 
 
 def _select_receipts_for_match(
-    pending: list[tuple[Path, str, object, object]],
-) -> list[tuple[Path, str, object, object]] | None:
+    pending: Sequence[ReceiptSummary],
+) -> list[ReceiptSummary] | None:
     """Let user select one approved receipt or all receipts for matching."""
     print(f"\nApproved receipts ({len(pending)}):")
     print("-" * 80)
@@ -90,7 +94,7 @@ def _select_receipts_for_match(
             print("Cancelled.")
             return None
         if choice == "a":
-            return pending
+            return list(pending)
         try:
             idx = int(choice)
             if 1 <= idx <= len(pending):

@@ -17,6 +17,7 @@ from beanbeaver.application.imports.shared import (
     detect_statement_date_range,
     write_import_output,
 )
+from beanbeaver.domain.chequing_categorization import categorize_chequing_transaction
 from beanbeaver.domain.chequing_import import (
     build_result_file,
     format_balance,
@@ -25,7 +26,6 @@ from beanbeaver.domain.chequing_import import (
     parse_eqbank_rows,
     parse_scotia_rows,
 )
-from beanbeaver.domain.chequing_categorization import categorize_chequing_transaction
 from beanbeaver.ledger_reader import get_ledger_reader, get_ledger_writer
 from beanbeaver.runtime import TMPDIR, get_logger, get_paths, load_chequing_categorization_patterns
 
@@ -47,6 +47,7 @@ SCOTIA_ACCOUNT_PATTERNS = [
     "Assets:Bank:Chequing:Scotia*",
     "Assets:Bank:Chequing:*Scotia*",
 ]
+
 
 def detect_chequing_csv() -> str | None:
     """Auto-detect a chequing CSV file (EQ Bank or Scotia) in ~/Downloads."""
@@ -87,8 +88,7 @@ def _select_scotia_account(as_of: datetime.date | None) -> str:
         return matches[0]
     if not sys.stdin.isatty():
         raise RuntimeError(
-            "Multiple Scotia chequing accounts found. Run interactively to choose: "
-            + ", ".join(matches)
+            "Multiple Scotia chequing accounts found. Run interactively to choose: " + ", ".join(matches)
         )
     print("Multiple Scotia chequing accounts found:")
     for idx, account in enumerate(matches, 1):
@@ -108,8 +108,7 @@ def _select_eqbank_account(as_of: datetime.date | None) -> str:
         return matches[0]
     if not sys.stdin.isatty():
         raise RuntimeError(
-            "Multiple EQ Bank chequing accounts found. Run interactively to choose: "
-            + ", ".join(matches)
+            "Multiple EQ Bank chequing accounts found. Run interactively to choose: " + ", ".join(matches)
         )
     print("Multiple EQ Bank chequing accounts found:")
     for idx, account in enumerate(matches, 1):
@@ -126,6 +125,7 @@ def main() -> None:
     confirm_uncommitted_changes()
 
     # Auto-detect CSV file if not provided
+    csv_file: str | None
     if len(sys.argv) >= 2:
         csv_file = sys.argv[1]
     else:
@@ -138,6 +138,7 @@ def main() -> None:
             logger.error("No chequing CSV file found in ~/Downloads")
             logger.info("Supported files: *Details.csv, Preferred_Package_*.csv")
             sys.exit(1)
+    assert csv_file is not None
 
     logger.info("Importing chequing transactions from: %s", csv_file)
 
@@ -233,7 +234,6 @@ def main() -> None:
 
     cc_cache: dict[str, str | None] = {}
     for date, description, amount_val, _balance_val in parsed_rows:
-
         # Determine expense account
         # First check for CC payments, then categorization patterns
         cc_account = resolve_cc_payment_account(

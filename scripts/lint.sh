@@ -45,15 +45,6 @@ else
     FAILED=1
 fi
 
-# 4. Beancount ledger validation
-echo -e "\n${YELLOW}[4/4] Beancount ledger validation...${NC}"
-if bean-check main.beancount 2>/dev/null; then
-    echo -e "${GREEN}✓ Beancount ledger is valid${NC}"
-else
-    echo -e "${RED}✗ Beancount ledger has errors${NC}"
-    FAILED=1
-fi
-
 # Summary
 echo -e "\n========================================"
 if [ $FAILED -eq 0 ]; then

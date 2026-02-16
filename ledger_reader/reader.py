@@ -13,10 +13,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from beancount import loader
-from beancount.core import data
-
 from beanbeaver.runtime import get_logger, get_paths
+from beancount.core import data
+from beancount.loader import load_file
 
 logger = get_logger(__name__)
 
@@ -45,7 +44,7 @@ class LedgerReader:
     def load(self, ledger_path: Path | str | None = None) -> LoadedLedger:
         """Load ledger entries from disk."""
         path = self._resolve_path(ledger_path)
-        entries, errors, options = loader.load_file(str(path))
+        entries, errors, options = load_file(str(path))
 
         if errors:
             logger.warning("Beancount reported %d error(s) while loading %s", len(errors), path)

@@ -9,7 +9,10 @@ from pathlib import Path
 from beanbeaver.ledger_reader import get_ledger_reader
 
 CC_PAYMENT_RULES: list[tuple[str, list[str]]] = [
-    ("BMO MASTERCARD", ["Liabilities:CreditCard:BMO*", "Liabilities:CreditCard:*:BMO:*", "Liabilities:CreditCard:*BMO*"]),
+    (
+        "BMO MASTERCARD",
+        ["Liabilities:CreditCard:BMO*", "Liabilities:CreditCard:*:BMO:*", "Liabilities:CreditCard:*BMO*"],
+    ),
     ("MBNA CANADA MASTERCARD", ["Liabilities:CreditCard:MBNA*"]),
     ("CIBC MASTERCARD", ["Liabilities:CreditCard:CIBC*"]),
     ("SCOTIA VISA", ["Liabilities:CreditCard:Scotia*"]),

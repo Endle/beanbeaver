@@ -17,10 +17,9 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from beanbeaver.runtime import get_logger, get_paths
-
 from beanbeaver.domain.receipt import Receipt, ReceiptItem
 from beanbeaver.receipt.date_utils import placeholder_receipt_date
+from beanbeaver.runtime import get_logger, get_paths
 
 logger = get_logger(__name__)
 

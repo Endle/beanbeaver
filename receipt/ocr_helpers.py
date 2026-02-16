@@ -7,7 +7,9 @@ MAX_IMAGE_DIMENSION = 3000  # Resize if either dimension exceeds this
 OCR_IMAGE_PADDING = 50  # White padding around image to prevent edge truncation
 
 
-def resize_image_bytes(image_bytes: bytes, max_dimension: int = MAX_IMAGE_DIMENSION, padding: int = OCR_IMAGE_PADDING) -> bytes:
+def resize_image_bytes(
+    image_bytes: bytes, max_dimension: int = MAX_IMAGE_DIMENSION, padding: int = OCR_IMAGE_PADDING
+) -> bytes:
     """
     Resize image bytes if it exceeds max_dimension on either side.
 
