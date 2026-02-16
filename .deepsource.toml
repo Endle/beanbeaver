@@ -1,1 +1,13 @@
 version = 1
+
+test_patterns = [
+  "tests/**"
+]
+
+exclude_patterns = [
+  "demo/**",
+]
+
+[[analyzers]]
+name = "python"
+enabled = true
