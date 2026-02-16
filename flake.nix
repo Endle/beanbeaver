@@ -9,6 +9,17 @@
       system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          pythonEnv = pkgs.python312.withPackages (ps: [
+            ps.pandas
+            ps.titlecase
+            ps.numpy
+            ps.fastapi
+            ps.python-multipart
+            ps.uvicorn
+            ps.httpx
+            ps.pillow
+            ps.beancount_2
+          ]);
           pythonPathSetup = ''
             bb_pythonpath=""
             if [ -d "$PWD/vendor/beanbeaver" ]; then
@@ -22,11 +33,11 @@
               echo "Run from project root, vendor/, or vendor/beanbeaver." >&2
               exit 1
             fi
-            export PYTHONPATH="$bb_pythonpath''${PYTHONPATH:+:$PYTHONPATH}"
+            export PYTHONPATH="$bb_pythonpath"
           '';
           bb = pkgs.writeShellScriptBin "bb" ''
             ${pythonPathSetup}
-            exec ${pkgs.python312}/bin/python -m beanbeaver.cli.main "$@"
+            exec ${pythonEnv}/bin/python -m beanbeaver.cli.main "$@"
           '';
         in {
             devShells.default = pkgs.mkShell {
@@ -34,16 +45,7 @@
                   bb
                   pkgs.fava
 
-                  pkgs.python312
-                  pkgs.python312Packages.pandas
-                  pkgs.python312Packages.titlecase
-                  pkgs.python312Packages.numpy
-                  pkgs.python312Packages.fastapi
-                  pkgs.python312Packages.python-multipart
-                  pkgs.python312Packages.uvicorn
-                  pkgs.python312Packages.httpx
-                  pkgs.python312Packages.pillow
-                  pkgs.python312Packages.beancount
+                  pythonEnv
 
                   # Linting and type checking
                   pkgs.ruff
@@ -51,7 +53,7 @@
                 ];
                 shellHook = ''
                   ${pythonPathSetup}
-                  export PATH="${pkgs.python312}/bin:$PATH"
+                  export PATH="${pythonEnv}/bin:$PATH"
                 '';
             };
         }
