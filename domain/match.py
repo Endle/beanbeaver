@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from decimal import Decimal
 
 
@@ -46,9 +47,17 @@ def transaction_charge_amount(match: object) -> Decimal | None:
 
 def itemized_receipt_total(receipt: object) -> Decimal:
     """Return receipt total represented by itemized lines plus tax."""
-    total = sum((item.total for item in receipt.items), Decimal("0"))
-    if getattr(receipt, "tax", None):
-        total += receipt.tax
+    total = Decimal("0")
+    items = getattr(receipt, "items", ())
+    if isinstance(items, Iterable):
+        for item in items:
+            item_total = getattr(item, "total", None)
+            if isinstance(item_total, Decimal):
+                total += item_total
+
+    tax = getattr(receipt, "tax", None)
+    if isinstance(tax, Decimal):
+        total += tax
     return total
 
 

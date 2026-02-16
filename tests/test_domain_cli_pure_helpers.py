@@ -93,7 +93,9 @@ def test_chequing_parse_and_format_helpers() -> None:
     ]
     parsed_eq = parse_eqbank_rows(eq_rows)
     parsed_scotia = parse_scotia_rows(scotia_rows)
-    assert latest_date(parsed_eq + parsed_scotia).isoformat() == "2025-02-11"
+    latest = latest_date(parsed_eq + parsed_scotia)
+    assert latest is not None
+    assert latest.isoformat() == "2025-02-11"
 
     txn = format_transaction(
         parsed_eq[0][0],

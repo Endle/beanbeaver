@@ -19,7 +19,7 @@ FAILED=0
 
 # 1. Ruff linting
 echo -e "\n${YELLOW}[1/4] Ruff linting...${NC}"
-if ruff check --config vendor/beanbeaver/pyproject.toml vendor/beanbeaver/; then
+if ruff check --config pyproject.toml .; then
     echo -e "${GREEN}✓ Ruff linting passed${NC}"
 else
     echo -e "${RED}✗ Ruff linting failed${NC}"
@@ -28,17 +28,17 @@ fi
 
 # 2. Ruff formatting check
 echo -e "\n${YELLOW}[2/4] Ruff format check...${NC}"
-if ruff format --check --config vendor/beanbeaver/pyproject.toml vendor/beanbeaver/; then
+if ruff format --check --config pyproject.toml .; then
     echo -e "${GREEN}✓ Ruff format check passed${NC}"
 else
     echo -e "${RED}✗ Ruff format check failed${NC}"
-    echo "  Run 'ruff format vendor/beanbeaver/' to fix"
+    echo "  Run 'ruff format .' to fix"
     FAILED=1
 fi
 
 # 3. Mypy type checking
 echo -e "\n${YELLOW}[3/4] Mypy type checking...${NC}"
-if mypy --config-file vendor/beanbeaver/pyproject.toml vendor/beanbeaver/ --ignore-missing-imports --no-error-summary 2>/dev/null; then
+if mypy --config-file pyproject.toml . --ignore-missing-imports --no-error-summary 2>/dev/null; then
     echo -e "${GREEN}✓ Mypy type checking passed${NC}"
 else
     echo -e "${RED}✗ Mypy type checking found issues${NC}"

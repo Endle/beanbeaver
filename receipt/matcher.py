@@ -236,10 +236,11 @@ def _try_match(
             details.append(f"date: {date_diff} day(s) off")
 
     # Check amount - find the credit card posting (negative amount)
-    txn_amount = None
+    txn_amount: Decimal | None = None
     for posting in txn.postings:
-        if posting.units and posting.units.number < 0:
-            txn_amount = abs(posting.units.number)
+        number = posting.units.number if posting.units else None
+        if number is not None and number < 0:
+            txn_amount = abs(number)
             break
 
     if txn_amount is None:
@@ -341,12 +342,13 @@ def _merchant_similarity(receipt_merchant: str, txn_payee: str) -> float:
 def format_match_for_display(match: MatchResult) -> str:
     """Format a match result for display to user."""
     txn = match.transaction
-    amount = None
+    amount: Decimal = Decimal("0")
     account = None
 
     for posting in txn.postings:
-        if posting.units and posting.units.number < 0:
-            amount = abs(posting.units.number)
+        number = posting.units.number if posting.units else None
+        if number is not None and number < 0:
+            amount = abs(number)
             account = posting.account
             break
 

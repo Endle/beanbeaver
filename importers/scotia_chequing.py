@@ -36,13 +36,13 @@ class ScotiaChequingTransaction:
     ) -> data.Transaction:
         """Create a beancount Transaction entry."""
         txn = data.Transaction(
-            meta=meta,
+            meta=meta or {},
             date=self.date,
             flag=flags.FLAG_OKAY,
             payee=self.description,
             narration="",
-            tags=set(),
-            links=set(),
+            tags=frozenset(),
+            links=frozenset(),
             postings=[],
         )
 
