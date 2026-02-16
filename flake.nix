@@ -26,13 +26,12 @@
           '';
           bb = pkgs.writeShellScriptBin "bb" ''
             ${pythonPathSetup}
-            exec python -m beanbeaver.cli "$@"
+            exec ${pkgs.python312}/bin/python -m beanbeaver.cli.main "$@"
           '';
         in {
             devShells.default = pkgs.mkShell {
                 buildInputs = [
                   bb
-                  pkgs.beancount
                   pkgs.fava
 
                   pkgs.python312
@@ -52,6 +51,7 @@
                 ];
                 shellHook = ''
                   ${pythonPathSetup}
+                  export PATH="${pkgs.python312}/bin:$PATH"
                 '';
             };
         }
