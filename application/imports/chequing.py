@@ -17,6 +17,7 @@ from beanbeaver.application.imports.shared import (
     detect_statement_date_range,
     write_import_output,
 )
+from beanbeaver.domain.chequing_categorization import categorize_chequing_transaction
 from beanbeaver.domain.chequing_import import (
     build_result_file,
     format_balance,
@@ -25,7 +26,6 @@ from beanbeaver.domain.chequing_import import (
     parse_eqbank_rows,
     parse_scotia_rows,
 )
-from beanbeaver.domain.chequing_categorization import categorize_chequing_transaction
 from beanbeaver.ledger_reader import get_ledger_reader, get_ledger_writer
 from beanbeaver.runtime import TMPDIR, get_logger, get_paths, load_chequing_categorization_patterns
 
@@ -126,6 +126,7 @@ def main() -> None:
     confirm_uncommitted_changes()
 
     # Auto-detect CSV file if not provided
+    csv_file: str | None
     if len(sys.argv) >= 2:
         csv_file = sys.argv[1]
     else:
@@ -138,6 +139,7 @@ def main() -> None:
             logger.error("No chequing CSV file found in ~/Downloads")
             logger.info("Supported files: *Details.csv, Preferred_Package_*.csv")
             sys.exit(1)
+    assert csv_file is not None
 
     logger.info("Importing chequing transactions from: %s", csv_file)
 

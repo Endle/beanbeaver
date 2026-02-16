@@ -181,6 +181,7 @@ def _discover_bmo_accounts(as_of: datetime.date | None, csv_file: str) -> tuple[
     preferred = porter_matches if is_porter_file else bmo_matches
     primary = _select_account(preferred if preferred else matches, account_label="BMO credit card", as_of=as_of)
 
+    porter_account: str | None
     if is_porter_file:
         account = bmo_matches[0] if bmo_matches else primary
         porter_account = primary
@@ -286,6 +287,7 @@ def main() -> None:
     confirm_uncommitted_changes()
 
     # Auto-detect CSV file if not provided
+    csv_file: str | None
     if len(sys.argv) >= 2:
         csv_file = sys.argv[1]
     else:
@@ -302,6 +304,7 @@ def main() -> None:
                 "Transaction History_*.csv, *MBNA*.csv"
             )
             sys.exit(1)
+    assert csv_file is not None
 
     # Optional manual date override (dates are auto-detected if not provided)
     start_date: str | None = sys.argv[2] if len(sys.argv) >= 4 else None

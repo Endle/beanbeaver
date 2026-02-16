@@ -1139,7 +1139,7 @@ def _extract_items(
         lines: List of text lines from the receipt
         summary_amounts: Set of Decimal amounts (total, tax, subtotal) to exclude from items
     """
-    items = []
+    items: list[ReceiptItem] = []
     if summary_amounts is None:
         summary_amounts = set()
 
