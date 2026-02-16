@@ -1,0 +1,15 @@
+2025-01-04 * "Pharmacy" ""
+  Expenses:Health:Pharmacy 26.70 CAD
+  Liabilities:CreditCard:CardC:Primary -26.70 CAD
+
+2025-01-11 * "Household supplies" ""
+  Expenses:Home:HouseholdSupply 34.10 CAD
+  Liabilities:CreditCard:CardC:Primary -34.10 CAD
+
+2025-01-18 * "Takeout" ""
+  Expenses:Food:Restaurant:TakeOut 24.50 CAD
+  Liabilities:CreditCard:CardC:Primary -24.50 CAD
+
+2025-01-28 * "Card payment" ""
+  Liabilities:CreditCard:CardC:Primary 60.00 CAD
+  Assets:Bank:Chequing:Personal:BankB -60.00 CAD

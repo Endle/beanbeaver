@@ -1,0 +1,11 @@
+2026-01-05 * "Grocery store" ""
+  Expenses:Food:Grocery 98.25 CAD
+  Liabilities:CreditCard:CardA:Primary -98.25 CAD
+
+2026-01-12 * "Internet bill" ""
+  Expenses:Home:Utility:Internet 55.00 CAD
+  Liabilities:CreditCard:CardA:Primary -55.00 CAD
+
+2026-01-21 * "Personal care" ""
+  Expenses:PersonalCare 33.50 CAD
+  Liabilities:CreditCard:CardA:Primary -33.50 CAD

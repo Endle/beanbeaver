@@ -1,0 +1,16 @@
+include "cardc_0101_0131.beancount"
+include "us_cardd_0110_0125.beancount"
+
+2025-01-03 * "Transfer to savings" ""
+  Assets:Bank:Saving:Personal:BankC 600.00 CAD
+  Assets:Bank:Chequing:Personal:BankB -600.00 CAD
+
+2025-01-07 * "Interest" ""
+  Income:Interest -14.20 CAD
+  Assets:Bank:Chequing:Personal:BankB 14.20 CAD
+
+2025-01-09 * "Cash withdrawal" ""
+  Assets:Cash 100.00 CAD
+  Assets:Bank:Chequing:Personal:BankB -100.00 CAD
+
+2025-01-31 balance Liabilities:CreditCard:CardC:Primary -25.30 CAD

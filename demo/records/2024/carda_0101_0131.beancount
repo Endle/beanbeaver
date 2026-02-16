@@ -1,0 +1,11 @@
+2024-01-06 * "Grocery store" ""
+  Expenses:Food:Grocery 86.40 CAD
+  Liabilities:CreditCard:CardA:Primary -86.40 CAD
+
+2024-01-08 * "Cafe" ""
+  Expenses:Food:Restaurant:Cafe 9.25 CAD
+  Liabilities:CreditCard:CardA:Primary -9.25 CAD
+
+2024-01-20 * "Card payment" ""
+  Liabilities:CreditCard:CardA:Primary 95.65 CAD
+  Assets:Bank:Chequing:Personal:BankB -95.65 CAD

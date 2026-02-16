@@ -1,0 +1,11 @@
+2024-01-15 * "Online subscription" ""
+  Expenses:Bill:OnlineService 12.99 CAD
+  Liabilities:CreditCard:CardB:Primary -12.99 CAD
+
+2024-01-22 * "Transit pass" ""
+  Expenses:Transportation:Public 78.00 CAD
+  Liabilities:CreditCard:CardB:Primary -78.00 CAD
+
+2024-01-30 * "Card payment" ""
+  Liabilities:CreditCard:CardB:Primary 90.99 CAD
+  Assets:Bank:Chequing:Personal:BankB -90.99 CAD

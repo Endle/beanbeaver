@@ -1,0 +1,11 @@
+2025-01-10 * "Small meal (USD)" ""
+  Expenses:Food:Restaurant:TakeOut 8.50 USD
+  Liabilities:CreditCard:US:CardD -8.50 USD
+
+2025-01-17 * "Taxi (USD)" ""
+  Expenses:Transportation:Taxi 11.20 USD
+  Liabilities:CreditCard:US:CardD -11.20 USD
+
+2025-01-25 * "Card payment (USD)" ""
+  Liabilities:CreditCard:US:CardD 19.70 USD
+  Assets:Bank:US:BankD -19.70 USD
