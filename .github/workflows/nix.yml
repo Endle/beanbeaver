@@ -1,0 +1,31 @@
+name: Build Nix Env
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  flake_dev_shell:
+    strategy:
+      matrix:
+        os: [ ubuntu-latest ]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Nix develop
+        run: nix develop
+      - name: Check path
+        run: |
+          nix develop . -c which bb
+          nix develop . -c bb --help
+      - name: Check size
+        run: |
+          cd /nix/store
+          du -h --max-depth=0
+
