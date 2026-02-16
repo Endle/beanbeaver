@@ -1,0 +1,13 @@
+{
+    "merchant": "LOBLAW",
+    "merchant_optional": true,
+    "date": "2026-02-11",
+    "total": "16.41",
+    "critical_items": [
+        {
+            "description": "COORS LIGHT",
+            "price": "13.99",
+            "category": "Expenses:Food:AlcoholicBeverage"
+        }
+    ]
+}
