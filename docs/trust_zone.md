@@ -11,6 +11,7 @@ Zones
 - `Pure`
   - Deterministic logic and data transformation.
   - syslog is tolerated
+  - date.today is tolerated. We may fix it in future
 
 Current Directory Mapping
 - `Privileged`
