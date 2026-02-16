@@ -100,8 +100,8 @@ def _extract_merchant_with_confidence(pages: list[dict[str, Any]]) -> str | None
 
     return None
 
-
-def _extract_date(lines: list[str], full_text: str) -> date | None:
+# TODO remove it
+def _extract_date(_lines: list[str], full_text: str) -> date | None:
     """Extract date from receipt (returns None if unknown)."""
     # Common date patterns
     patterns = [

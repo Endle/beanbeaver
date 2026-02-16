@@ -297,7 +297,8 @@ def _has_useful_bbox_data(pages: list[dict[str, Any]]) -> bool:
     return False
 
 
-def _is_spatial_layout_receipt(pages: list[dict[str, Any]], full_text: str) -> bool:
+# TODO remove pages
+def _is_spatial_layout_receipt(_pages: list[dict[str, Any]], full_text: str) -> bool:
     """
     Detect if this receipt has a spatial layout where items and prices
     are on opposite sides of the same row (requiring bbox-based parsing).
