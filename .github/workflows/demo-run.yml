@@ -1,9 +1,10 @@
-name: Demo Script
+name: Beancount Demo
 
 on:
   push:
     branches:
       - master
+      - fix_demo
 
 jobs:
   run-demo:
@@ -18,5 +19,11 @@ jobs:
       - name: Enable Nix cache
         uses: DeterminateSystems/magic-nix-cache-action@main
 
+      - name: Configure Git identity
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
       - name: Execute demo script
         run: ./demo/run_demo.sh
+
