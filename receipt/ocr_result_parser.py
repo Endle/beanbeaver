@@ -794,7 +794,7 @@ def parse_receipt(
         summary_amounts.add(subtotal)
 
     # Try bbox-based spatial parsing for receipts with items and prices on same row
-    items = []
+    items: list[ReceiptItem] = []
     warnings: list[ReceiptWarning] = []
     if _has_useful_bbox_data(pages) and _is_spatial_layout_receipt(pages, full_text):
         items = _extract_items_with_bbox(pages, warning_sink=warnings)

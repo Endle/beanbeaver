@@ -317,9 +317,9 @@ def transform_paddleocr_result(raw_result: dict[str, Any], padding: int = OCR_IM
     lines = _group_detections_by_y_overlap(detection_data, image_width)
 
     # Convert to API format
-    result_lines = []
+    result_lines: list[dict[str, Any]] = []
     for line in lines:
-        words = []
+        words: list[dict[str, Any]] = []
         for det in line:
             # Normalize bbox to [0,1] range
             bbox_points = det["bbox"]
@@ -342,7 +342,7 @@ def transform_paddleocr_result(raw_result: dict[str, Any], padding: int = OCR_IM
                 }
             )
 
-        line_text = " ".join(w["text"] for w in words)
+        line_text = " ".join(str(w["text"]) for w in words)
         result_lines.append({"text": line_text, "words": words})
 
     # Extract full text
