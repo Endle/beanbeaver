@@ -6,7 +6,7 @@ import datetime as dt
 import sys
 from pathlib import Path
 
-from beanbeaver.ledger_reader import get_ledger_reader
+from beanbeaver.ledger_access import get_ledger_reader
 
 CC_PAYMENT_RULES: list[tuple[str, list[str]]] = [
     (

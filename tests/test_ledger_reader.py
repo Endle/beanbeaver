@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from beanbeaver.ledger_reader.reader import LedgerReader
+from beanbeaver.ledger_access.reader import LedgerReader
 
 
 def _write(path: Path, content: str) -> None:

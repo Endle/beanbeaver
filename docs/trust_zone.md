@@ -14,7 +14,7 @@ Zones
 
 Current Directory Mapping
 - `Privileged`
-  - `vendor/beanbeaver/ledger_reader/`
+  - `vendor/beanbeaver/ledger_access/`
 - `Orchestrator`
   - `vendor/beanbeaver/cli/`
   - `vendor/beanbeaver/application/`
@@ -32,7 +32,7 @@ Inheritance Rules
 - Explicit subdirectory or file-level classification overrides inheritance.
 
 Contributor Checklist
-- New ledger access belongs in `ledger_reader/` unless there is a documented exception.
+- New ledger access belongs in `ledger_access/` unless there is a documented exception.
 - Keep orchestration and side effects in Orchestrator modules.
 - Keep domain logic in Pure modules and pass data in via function arguments.
 - If a new directory is added, classify it here.

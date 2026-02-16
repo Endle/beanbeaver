@@ -1,8 +1,8 @@
-"""Tests for beanbeaver.ledger_reader package exports."""
+"""Tests for beanbeaver.ledger_access package exports."""
 
 from __future__ import annotations
 
-import beanbeaver.ledger_reader as ledger_reader
+import beanbeaver.ledger_access as ledger_reader
 
 
 def test_only_getter_functions_are_exported() -> None:
