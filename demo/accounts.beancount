@@ -1,0 +1,18 @@
+option "operating_currency" "CAD"
+
+2022-01-01 open Equity:OpeningAdjustment
+2022-01-01 open Equity:Tax
+
+2022-01-01 open Assets:Cash CAD
+2022-01-01 open Assets:Investment CAD
+2022-01-01 open Assets:Bank:Chequing:Personal:BankB CAD
+2022-01-01 open Assets:Bank:Saving:Personal:BankC CAD
+2022-01-01 open Assets:Bank:US:BankD USD
+
+2022-01-01 open Liabilities:CreditCard:CardA:Primary CAD
+2022-01-01 open Liabilities:CreditCard:CardB:Primary CAD
+2022-01-01 open Liabilities:CreditCard:CardC:Primary CAD
+2022-01-01 open Liabilities:CreditCard:US:CardD USD
+
+2022-01-01 open Income:Salary CAD
+2022-01-01 open Income:Interest CAD

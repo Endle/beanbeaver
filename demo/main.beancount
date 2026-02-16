@@ -1,0 +1,12 @@
+include "accounts.beancount"
+include "expense.beancount"
+
+include "records/2024.beancount"
+include "records/2025/2025.beancount"
+include "records/2026/2026.beancount"
+
+2026-01-31 balance Liabilities:CreditCard:CardA:Primary -186.75 CAD
+
+2026-01-02 * "Opening adjustment" ""
+  Equity:OpeningAdjustment -950.00 CAD
+  Assets:Bank:Chequing:Personal:BankB 950.00 CAD

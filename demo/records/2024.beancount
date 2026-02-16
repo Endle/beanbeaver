@@ -1,0 +1,16 @@
+include "2024/carda_0101_0131.beancount"
+include "2024/cardb_0115_0131.beancount"
+
+2024-01-01 * "Rent" ""
+  Expenses:Home:Rent 1800.00 CAD
+  Assets:Bank:Chequing:Personal:BankB -1800.00 CAD
+
+2024-01-05 * "Payroll" ""
+  Income:Salary -3200.00 CAD
+  Assets:Bank:Chequing:Personal:BankB 3200.00 CAD
+
+2024-01-10 * "Tax benefit" ""
+  Equity:Tax -120.00 CAD
+  Assets:Bank:Chequing:Personal:BankB 120.00 CAD
+
+2024-01-31 balance Assets:Bank:Chequing:Personal:BankB 1333.36 CAD

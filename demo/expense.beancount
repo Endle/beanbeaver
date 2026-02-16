@@ -1,0 +1,19 @@
+2022-01-01 open Expenses:Food:Grocery
+2022-01-01 open Expenses:Food:Restaurant:TakeOut
+2022-01-01 open Expenses:Food:Restaurant:Cafe
+
+2022-01-01 open Expenses:Home:Rent
+2022-01-01 open Expenses:Home:Utility:Internet
+2022-01-01 open Expenses:Home:HouseholdSupply
+
+2022-01-01 open Expenses:Transportation:Public
+2022-01-01 open Expenses:Transportation:Taxi
+
+2022-01-01 open Expenses:Health:Pharmacy
+2022-01-01 open Expenses:Health:Vision
+
+2022-01-01 open Expenses:PersonalCare
+2022-01-01 open Expenses:Shopping:Uncategorized
+
+2022-01-01 open Expenses:Bill:OnlineService
+2022-01-01 open Expenses:BankFee:Card
