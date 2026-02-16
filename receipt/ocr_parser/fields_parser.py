@@ -311,4 +311,3 @@ def _extract_price_from_line(line: str) -> Decimal | None:
             except InvalidOperation:
                 continue
     return None
-

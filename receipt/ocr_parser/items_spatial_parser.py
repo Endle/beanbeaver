@@ -442,4 +442,3 @@ def _extract_items_with_bbox(
 
     # Keep duplicates: repeated items with identical descriptions/prices are valid.
     return items
-

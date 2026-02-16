@@ -7,6 +7,7 @@ from beanbeaver.domain.receipt import ReceiptItem, ReceiptWarning
 
 from ..item_categories import categorize_item
 from .common import (
+    _is_section_header_text,
     _looks_like_quantity_expression,
     _looks_like_summary_line,
     _parse_quantity_modifier,

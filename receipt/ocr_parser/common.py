@@ -255,7 +255,6 @@ def _is_price_word(word: dict[str, Any]) -> Decimal | None:
     return None
 
 
-
 def _clean_description(desc: str) -> str:
     """Clean up item description from OCR artifacts."""
     # Remove leading quantity prefix like "(2)" and then long SKU.
@@ -326,4 +325,3 @@ def _is_spatial_layout_receipt(pages: list[dict[str, Any]], full_text: str) -> b
         return True
 
     return False
-
