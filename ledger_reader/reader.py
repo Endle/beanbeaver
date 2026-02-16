@@ -62,8 +62,8 @@ class LedgerReader:
         loaded = self.load(ledger_path=ledger_path)
         return [entry for entry in loaded.entries if isinstance(entry, data.Transaction)]
 
+    @staticmethod
     def _collect_account_timeline(
-        self,
         entries: list[data.Directive],
     ) -> tuple[dict[str, dt.date], dict[str, dt.date]]:
         """Return latest open/close dates per account from ledger entries."""
@@ -82,8 +82,8 @@ class LedgerReader:
 
         return last_open, last_close
 
+    @staticmethod
     def _is_account_open_as_of(
-        self,
         account: str,
         *,
         as_of: dt.date,
