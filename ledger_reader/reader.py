@@ -83,16 +83,22 @@ class LedgerReader:
 
         for entry in loaded.entries:
             if isinstance(entry, data.Open):
-                last_open[entry.account] = entry.date
+                prior_open = last_open.get(entry.account)
+                if prior_open is None or entry.date > prior_open:
+                    last_open[entry.account] = entry.date
             elif isinstance(entry, data.Close):
-                last_close[entry.account] = entry.date
+                prior_close = last_close.get(entry.account)
+                if prior_close is None or entry.date > prior_close:
+                    last_close[entry.account] = entry.date
 
         def is_open(account: str) -> bool:
             opened = last_open.get(account)
             if not opened or opened > as_of:
                 return False
             closed = last_close.get(account)
-            return closed is None or closed > as_of
+            if closed is None or closed > as_of:
+                return True
+            return opened > closed
 
         matches: list[str] = []
         for account in last_open:
@@ -113,8 +119,9 @@ class LedgerReader:
         prefix: str = "Liabilities:CreditCard",
     ) -> list[str]:
         """Return currently open credit-card accounts under the given prefix."""
+        normalized_prefix = prefix[:-1] if prefix.endswith(":") else prefix
         return self.open_accounts(
-            patterns=[f"{prefix}*"],
+            patterns=[f"{normalized_prefix}:*"],
             as_of=as_of,
             ledger_path=ledger_path,
         )
