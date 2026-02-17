@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from beanbeaver.domain.receipt import ReceiptItem, ReceiptWarning
 
-from ..item_categories import categorize_item
+from ..item_categories import ItemCategoryRuleLayers, categorize_item
 from .common import (
     _is_section_header_text,
     _looks_like_quantity_expression,
@@ -20,6 +20,7 @@ def _extract_items(
     lines: list[str],
     summary_amounts: set[Decimal] | None = None,
     warning_sink: list[ReceiptWarning] | None = None,
+    item_category_rule_layers: ItemCategoryRuleLayers | None = None,
 ) -> list[ReceiptItem]:
     """
     Extract line items from receipt.
@@ -235,7 +236,7 @@ def _extract_items(
                     ReceiptItem(
                         description=desc_part,
                         price=price,
-                        category=categorize_item(desc_part),
+                        category=categorize_item(desc_part, rule_layers=item_category_rule_layers),
                     )
                 )
             else:
@@ -358,7 +359,10 @@ def _extract_items(
                             description=found_desc + description_suffix,
                             price=price,
                             quantity=quantity,
-                            category=categorize_item(found_desc),  # Categorize on item name only
+                            category=categorize_item(
+                                found_desc,
+                                rule_layers=item_category_rule_layers,
+                            ),  # Categorize on item name only
                         )
                     )
                 elif warning_sink is not None and price > Decimal("0"):

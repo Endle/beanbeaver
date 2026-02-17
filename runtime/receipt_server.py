@@ -17,7 +17,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from beanbeaver.receipt.formatter import format_parsed_receipt
 from beanbeaver.receipt.ocr_helpers import resize_image_bytes, transform_paddleocr_result
 from beanbeaver.receipt.ocr_result_parser import parse_receipt
-from beanbeaver.runtime import get_logger, get_paths, load_known_merchant_keywords
+from beanbeaver.runtime import get_logger, get_paths, load_item_category_rule_layers, load_known_merchant_keywords
 from beanbeaver.runtime.receipt_pipeline import create_debug_overlay, save_ocr_json
 from beanbeaver.runtime.receipt_storage import save_scanned_receipt
 
@@ -170,6 +170,7 @@ async def upload_receipt(request: Request) -> JSONResponse:
                         ocr_result,
                         image_filename=filename,
                         known_merchants=load_known_merchant_keywords(),
+                        item_category_rule_layers=load_item_category_rule_layers(),
                     )
 
                     # TODO(security): These stdout lines include merchant/date/amount/path details.

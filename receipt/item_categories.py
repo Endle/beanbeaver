@@ -12,16 +12,10 @@ To add new rules:
 
 import re
 from collections import Counter
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import Path
 from typing import Any
-
-from beanbeaver.runtime.paths import get_paths
-
-try:
-    import tomllib
-except ImportError:  # pragma: no cover
-    import tomli as tomllib  # type: ignore[no-redef]
 
 # Fuzzy matching thresholds (0.0 to 1.0)
 # Higher = stricter matching, lower = more tolerant of OCR errors
@@ -79,6 +73,18 @@ DEFAULT_CATEGORY_ACCOUNTS: dict[str, str] = {
 }
 
 
+RuleEntry = tuple[tuple[str, ...], str, int]
+
+
+@dataclass(frozen=True)
+class ItemCategoryRuleLayers:
+    """In-memory categorization rules and account mapping."""
+
+    rules: tuple[RuleEntry, ...]
+    exact_only_keywords: frozenset[str]
+    account_mapping: Mapping[str, str]
+
+
 def _normalize_keywords(raw: Any) -> tuple[str, ...]:
     """Normalize keywords value from TOML into a non-empty tuple."""
     if isinstance(raw, str):
@@ -90,102 +96,66 @@ def _normalize_keywords(raw: Any) -> tuple[str, ...]:
     return tuple()
 
 
-def _load_rule_file(path: Path, layer_priority: int) -> tuple[list[tuple[tuple[str, ...], str, int]], set[str]]:
-    """Load classifier rules from a TOML file."""
-    if not path.exists():
-        return [], set()
-
-    with open(path, "rb") as f:
-        data = tomllib.load(f)
-
-    loaded_rules: list[tuple[tuple[str, ...], str, int]] = []
-    exact_only_keywords: set[str] = set()
-
-    for raw_kw in data.get("exact_only_keywords", []):
-        kw = str(raw_kw).strip()
-        if kw:
-            exact_only_keywords.add(kw)
-
-    for rule in data.get("rules", []):
-        keywords = _normalize_keywords(rule.get("keywords"))
-        if not keywords:
-            continue
-
-        target = str(rule.get("key") or rule.get("category") or "").strip()
-        if not target:
-            continue
-
-        priority = int(rule.get("priority", 0)) + layer_priority
-        loaded_rules.append((keywords, target, priority))
-
-        if bool(rule.get("exact_only", False)):
-            exact_only_keywords.update(keywords)
-
-    return loaded_rules, exact_only_keywords
-
-
-def _load_account_mapping_file(path: Path) -> dict[str, str]:
-    """Load canonical key -> beancount account mapping from TOML."""
-    if not path.exists():
-        return {}
-
-    with open(path, "rb") as f:
-        data = tomllib.load(f)
-
-    mapping: dict[str, str] = {}
-    for key, value in data.get("accounts", {}).items():
-        key_str = str(key).strip()
-        value_str = str(value).strip()
-        if key_str and value_str:
-            mapping[key_str] = value_str
-    return mapping
-
-
-def _build_rule_layers(
-    classifier_paths: tuple[Path, ...] | None = None,
-    account_paths: tuple[Path, ...] | None = None,
-) -> tuple[list[tuple[tuple[str, ...], str, int]], set[str], dict[str, str]]:
-    """Build merged rules/exact-only set/account mapping with layered precedence."""
-    p = get_paths()
-    module_default_rules = Path(__file__).resolve().parent / "rules" / "default_item_classifier.toml"
-
+def build_item_category_rule_layers(
+    classifier_configs: Sequence[Mapping[str, Any]] | None = None,
+    account_configs: Sequence[Mapping[str, Any]] | None = None,
+) -> ItemCategoryRuleLayers:
+    """Build merged rules/exact-only set/account mapping from in-memory configs."""
     # Built-in rules remain priority 0 and preserve existing behavior.
-    rules: list[tuple[tuple[str, ...], str, int]] = []
+    rules: list[RuleEntry] = []
     for keywords, target in ITEM_RULES + COSTCO_RULES:
         keyword_tuple = (keywords,) if isinstance(keywords, str) else tuple(keywords)
         rules.append((keyword_tuple, target, 0))
 
     exact_only = set(EXACT_ONLY_KEYWORDS)
+    classifier_configs = classifier_configs or ()
+    for idx, config in enumerate(classifier_configs, start=1):
+        layer_priority = idx * 100
+        for raw_kw in config.get("exact_only_keywords", []):
+            kw = str(raw_kw).strip()
+            if kw:
+                exact_only.add(kw)
 
-    if classifier_paths is None:
-        # Keep default rules discoverable even if runtime root inference differs in tests.
-        seen_paths: set[Path] = set()
-        layered_paths: list[Path] = []
-        for candidate in (module_default_rules, p.default_item_classifier_rules, p.item_classifier_rules):
-            resolved = candidate.resolve()
-            if resolved in seen_paths:
+        for rule in config.get("rules", []):
+            if not isinstance(rule, Mapping):
                 continue
-            seen_paths.add(resolved)
-            layered_paths.append(candidate)
-        classifier_paths = tuple(layered_paths)
-    for idx, cfg_path in enumerate(classifier_paths, start=1):
-        loaded_rules, loaded_exact_only = _load_rule_file(cfg_path, layer_priority=idx * 100)
-        rules.extend(loaded_rules)
-        exact_only.update(loaded_exact_only)
+
+            keywords = _normalize_keywords(rule.get("keywords"))
+            if not keywords:
+                continue
+
+            target = str(rule.get("key") or rule.get("category") or "").strip()
+            if not target:
+                continue
+
+            priority = int(rule.get("priority", 0)) + layer_priority
+            rules.append((keywords, target, priority))
+
+            if bool(rule.get("exact_only", False)):
+                exact_only.update(keywords)
 
     account_mapping = dict(DEFAULT_CATEGORY_ACCOUNTS)
-    if account_paths is None:
-        account_paths = (p.item_category_accounts,)
-    for mapping_path in account_paths:
-        account_mapping.update(_load_account_mapping_file(mapping_path))
+    for config in account_configs or ():
+        accounts = config.get("accounts", {})
+        if not isinstance(accounts, Mapping):
+            continue
+        for key, value in accounts.items():
+            key_str = str(key).strip()
+            value_str = str(value).strip()
+            if key_str and value_str:
+                account_mapping[key_str] = value_str
 
-    return rules, exact_only, account_mapping
+    return ItemCategoryRuleLayers(
+        rules=tuple(rules),
+        exact_only_keywords=frozenset(exact_only),
+        account_mapping=account_mapping,
+    )
 
 
 @lru_cache(maxsize=1)
-def _get_default_rule_layers() -> tuple[list[tuple[tuple[str, ...], str, int]], set[str], dict[str, str]]:
-    """Cached layered rules for normal runtime usage."""
-    return _build_rule_layers()
+def _get_default_rule_layers() -> ItemCategoryRuleLayers:
+    """Built-in-only default rules (no file I/O, no runtime deps)."""
+    return build_item_category_rule_layers()
 
 
 def _char_similarity(s1: str, s2: str) -> float:
@@ -296,8 +266,8 @@ def _fuzzy_contains(keyword: str, description: str, threshold: float | None = No
 
 def _find_all_matches(
     description: str,
-    rules: list[tuple[tuple[str, ...], str, int]],
-    exact_only_keywords: set[str],
+    rules: Sequence[RuleEntry],
+    exact_only_keywords: set[str] | frozenset[str],
 ) -> list[tuple[int, str, str, int]]:
     """Find all matching categories for a description.
 
@@ -327,15 +297,12 @@ def _find_all_matches(
 def classify_item_key(
     description: str,
     default: str | None = None,
-    classifier_paths: tuple[Path, ...] | None = None,
+    rule_layers: ItemCategoryRuleLayers | None = None,
 ) -> str | None:
     """Classify an item to an internal category key or direct account target."""
-    if classifier_paths is None:
-        rules, exact_only_keywords, _ = _get_default_rule_layers()
-    else:
-        rules, exact_only_keywords, _ = _build_rule_layers(classifier_paths=classifier_paths)
+    layers = rule_layers or _get_default_rule_layers()
 
-    matches = _find_all_matches(description, rules, exact_only_keywords)
+    matches = _find_all_matches(description, layers.rules, layers.exact_only_keywords)
 
     if not matches:
         return default
@@ -346,7 +313,7 @@ def classify_item_key(
 
 def _resolve_account_target(
     target: str | None,
-    account_mapping: dict[str, str],
+    account_mapping: Mapping[str, str],
     default: str | None = None,
 ) -> str | None:
     """Resolve an internal key to a concrete beancount account."""
@@ -360,8 +327,7 @@ def _resolve_account_target(
 def categorize_item(
     description: str,
     default: str | None = None,
-    classifier_paths: tuple[Path, ...] | None = None,
-    account_paths: tuple[Path, ...] | None = None,
+    rule_layers: ItemCategoryRuleLayers | None = None,
 ) -> str | None:
     """
     Return expense category for an item description.
@@ -373,38 +339,26 @@ def categorize_item(
     Args:
         description: Item description from receipt (e.g., "LARGE EGGS 18CT")
         default: Category to return if no rule matches
+        rule_layers: Preloaded in-memory rules (typically from runtime loader).
 
     Returns:
         Category string (e.g., "Expenses:Food:Grocery:Dairy") or default if no match
 
-    Examples:
-        >>> categorize_item("LARGE EGGS 18CT")
-        'Expenses:Food:Grocery:Dairy'
-        >>> categorize_item("KIRKLAND CHICKEN DUMPLING")  # DUMPLING wins (later position)
-        'Expenses:Food:Grocery:Frozen:Dumpling'
-        >>> categorize_item("M1LK 2L")  # Fuzzy matches MILK despite OCR error
-        'Expenses:Food:Grocery:Dairy'
+    When rule_layers is omitted, only built-in rules apply.
     """
-    if classifier_paths is None and account_paths is None:
-        rules, exact_only_keywords, account_mapping = _get_default_rule_layers()
-    else:
-        rules, exact_only_keywords, account_mapping = _build_rule_layers(
-            classifier_paths=classifier_paths,
-            account_paths=account_paths,
-        )
+    layers = rule_layers or _get_default_rule_layers()
 
-    matches = _find_all_matches(description, rules, exact_only_keywords)
+    matches = _find_all_matches(description, layers.rules, layers.exact_only_keywords)
     if not matches:
         return default
 
     matches.sort(key=lambda x: x[0], reverse=True)
-    return _resolve_account_target(matches[0][1], account_mapping, default=default)
+    return _resolve_account_target(matches[0][1], layers.account_mapping, default=default)
 
 
 def categorize_item_debug(
     description: str,
-    classifier_paths: tuple[Path, ...] | None = None,
-    account_paths: tuple[Path, ...] | None = None,
+    rule_layers: ItemCategoryRuleLayers | None = None,
 ) -> list[tuple[str, str, float]]:
     """Debug version that returns all matches with scores.
 
@@ -413,16 +367,11 @@ def categorize_item_debug(
     Returns:
         List of (category, matched_keyword, score) tuples, sorted by score descending
     """
-    if classifier_paths is None and account_paths is None:
-        rules, exact_only_keywords, account_mapping = _get_default_rule_layers()
-    else:
-        rules, exact_only_keywords, account_mapping = _build_rule_layers(
-            classifier_paths=classifier_paths,
-            account_paths=account_paths,
-        )
+    layers = rule_layers or _get_default_rule_layers()
 
-    matches = _find_all_matches(description, rules, exact_only_keywords)
+    matches = _find_all_matches(description, layers.rules, layers.exact_only_keywords)
     matches.sort(key=lambda x: x[0], reverse=True)
     return [
-        (_resolve_account_target(cat, account_mapping, default=cat) or cat, kw, score) for score, cat, kw, _ in matches
+        (_resolve_account_target(cat, layers.account_mapping, default=cat) or cat, kw, score)
+        for score, cat, kw, _ in matches
     ]

@@ -14,6 +14,7 @@ Usage:
 """
 
 from beanbeaver.runtime.chequing_rules import load_chequing_categorization_patterns
+from beanbeaver.runtime.item_category_rules import load_item_category_rule_layers
 from beanbeaver.runtime.logging import (
     DEFAULT_LOG_LEVEL,
     LOG_FORMAT,
@@ -46,6 +47,7 @@ __all__ = [
     "LOG_FORMAT_DEBUG",
     # Rules
     "load_known_merchant_keywords",
+    "load_item_category_rule_layers",
     "load_chequing_categorization_patterns",
     "RuleEngine",
     "get_rule_engine",

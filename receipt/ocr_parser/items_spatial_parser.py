@@ -6,7 +6,7 @@ from typing import Any
 
 from beanbeaver.domain.receipt import ReceiptItem, ReceiptWarning
 
-from ..item_categories import categorize_item
+from ..item_categories import ItemCategoryRuleLayers, categorize_item
 from .common import (
     FOOTER_ADDRESS_PATTERNS,
     ITEM_X_THRESHOLD,
@@ -30,6 +30,7 @@ from .common import (
 def _extract_items_with_bbox(
     pages: list[dict[str, Any]],
     warning_sink: list[ReceiptWarning] | None = None,
+    item_category_rule_layers: ItemCategoryRuleLayers | None = None,
 ) -> list[ReceiptItem]:
     """
     Extract items using bounding box spatial data.
@@ -367,7 +368,7 @@ def _extract_items_with_bbox(
                     ReceiptItem(
                         description=description,
                         price=price,
-                        category=categorize_item(description),
+                        category=categorize_item(description, rule_layers=item_category_rule_layers),
                     )
                 )
                 found_item = True
@@ -419,7 +420,7 @@ def _extract_items_with_bbox(
                         ReceiptItem(
                             description=description,
                             price=price,
-                            category=categorize_item(description),
+                            category=categorize_item(description, rule_layers=item_category_rule_layers),
                         )
                     )
                     found_item = True
