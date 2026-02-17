@@ -48,6 +48,16 @@ def test_coors_maps_to_alcoholic_beverage() -> None:
     )
 
 
+def test_chocolate_milk_with_single_char_noise_maps_to_dairy() -> None:
+    assert (
+        categorize_item(
+            "NEILSON JOYYA CHOCOLATE E MILK",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Dairy"
+    )
+
+
 def test_project_rule_key_maps_via_account_config(tmp_path: Path) -> None:
     classifier = tmp_path / "item_classifier.toml"
     classifier.write_text(

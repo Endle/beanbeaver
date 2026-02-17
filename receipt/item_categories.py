@@ -190,6 +190,26 @@ def _get_threshold(kw_len: int) -> float:
         return FUZZY_THRESHOLD_LONG
 
 
+def _contains_with_single_char_noise(keyword: str, description: str) -> tuple[bool, int]:
+    """Match multi-word keyword allowing one single-char OCR token between words."""
+    kw_tokens = [tok for tok in keyword.upper().split() if tok]
+    if len(kw_tokens) < 2:
+        return False, -1
+
+    normalized_desc = re.sub(r"[^A-Z0-9]+", " ", description.upper()).strip()
+    if not normalized_desc:
+        return False, -1
+
+    pattern = r"\b" + re.escape(kw_tokens[0]) + r"\b"
+    for token in kw_tokens[1:]:
+        pattern += r"(?:\s+[A-Z0-9]\b)?\s+\b" + re.escape(token) + r"\b"
+
+    match = re.search(pattern, normalized_desc)
+    if not match:
+        return False, -1
+    return True, match.start()
+
+
 def _fuzzy_contains(keyword: str, description: str, threshold: float | None = None) -> tuple[bool, int, bool]:
     """Check if keyword appears fuzzily in description using n-gram similarity.
 
@@ -224,6 +244,11 @@ def _fuzzy_contains(keyword: str, description: str, threshold: float | None = No
     exact_pos = desc.find(kw)
     if exact_pos != -1:
         return True, exact_pos, True
+
+    # Treat "CHOCOLATE E MILK"-style OCR splits as exact phrase matches.
+    noisy_phrase_match, noisy_phrase_pos = _contains_with_single_char_noise(kw_raw, desc_raw)
+    if noisy_phrase_match:
+        return True, noisy_phrase_pos, True
 
     kw_len = len(kw)
 

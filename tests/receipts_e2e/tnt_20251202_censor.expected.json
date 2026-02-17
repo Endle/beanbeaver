@@ -1,0 +1,41 @@
+{
+  "merchant": "T&T SUPERMARKET",
+  "date": "2025-12-02",
+  "total": "32.70",
+  "critical_items": [
+    {
+      "description": "WHITE POMELO",
+      "price": "2.68",
+      "category": "Expenses:Food:Grocery:Fruit"
+    },
+    {
+      "description": "RED POMELO",
+      "price": "2.32",
+      "category": "Expenses:Food:Grocery:Fruit"
+    },
+    {
+      "description": "BABY BOK CHOY SPROUT",
+      "price": "5.44",
+      "category": "Expenses:Food:Grocery:Vegetable"
+    },
+    {
+      "description": "ORGANIC GINGER",
+      "price": "3.14",
+      "category": "Expenses:Food:Grocery:Seasoning"
+    },
+    {
+      "description": "BAGGED GARLIC",
+      "price": "2.68",
+      "category": "Expenses:Food:Grocery:Seasoning"
+    },
+    {
+      "description": "E MILK",
+      "price": "4.99"
+    },
+    {
+      "description": "WING HING SWT SOY BEVERAGE",
+      "price": "4.47",
+      "category": "Expenses:Food:Grocery:Drink"
+    }
+  ]
+}
