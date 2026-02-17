@@ -21,6 +21,7 @@ import pytest
 from beanbeaver.receipt.formatter import format_parsed_receipt
 from beanbeaver.receipt.ocr_helpers import resize_image_bytes, transform_paddleocr_result
 from beanbeaver.receipt.ocr_result_parser import parse_receipt
+from beanbeaver.runtime.item_category_rules import load_item_category_rule_layers
 
 RECEIPTS_DIR = Path(__file__).parent / "receipts_e2e"
 
@@ -89,7 +90,11 @@ class TestE2EReceiptProcessing:
             raw_ocr_result = json.loads(test_case.ocr_path.read_text())
             ocr_result = transform_paddleocr_result(raw_ocr_result)
             image_name = test_case.jpg_path.name if test_case.jpg_path else f"{test_case.name}.jpg"
-            receipt = parse_receipt(ocr_result, image_filename=image_name)
+            receipt = parse_receipt(
+                ocr_result,
+                image_filename=image_name,
+                item_category_rule_layers=load_item_category_rule_layers(),
+            )
             self._verify_expected(receipt, expected)
             ran_cached = True
         elif e2e_mode == "cached":
@@ -113,7 +118,11 @@ class TestE2EReceiptProcessing:
                 assert response.status_code == 200, f"OCR failed: {response.text}"
                 raw_ocr_result = response.json()
                 ocr_result = transform_paddleocr_result(raw_ocr_result)
-                receipt = parse_receipt(ocr_result, image_filename=test_case.jpg_path.name)
+                receipt = parse_receipt(
+                    ocr_result,
+                    image_filename=test_case.jpg_path.name,
+                    item_category_rule_layers=load_item_category_rule_layers(),
+                )
                 self._verify_expected(receipt, expected)
                 ran_live = True
 

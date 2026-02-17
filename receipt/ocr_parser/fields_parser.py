@@ -27,7 +27,7 @@ def _extract_merchant(
     full_text_upper = full_text.upper()
 
     # Sort by length descending to match longer/more specific names first
-    # Use word boundary matching to avoid matching substrings (e.g., "DOORDASH" in "DOORDASH2X50")
+    # Use word boundary matching to avoid matching substrings
     for merchant in sorted(known_merchants, key=len, reverse=True):
         pattern = r"\b" + re.escape(merchant.upper()) + r"\b"
         if re.search(pattern, full_text_upper):
@@ -99,6 +99,7 @@ def _extract_merchant_with_confidence(pages: list[dict[str, Any]]) -> str | None
             lines_checked += 1
 
     return None
+
 
 # TODO remove it
 def _extract_date(_lines: list[str], full_text: str) -> date | None:

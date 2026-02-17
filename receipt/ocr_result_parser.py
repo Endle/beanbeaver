@@ -5,6 +5,7 @@ from decimal import Decimal
 from beanbeaver.domain.receipt import Receipt, ReceiptItem, ReceiptWarning
 
 from .date_utils import placeholder_receipt_date
+from .item_categories import ItemCategoryRuleLayers
 from .ocr_parser import (
     _extract_date,
     _extract_items,
@@ -20,6 +21,7 @@ from .ocr_parser import (
 
 def parse_receipt(
     ocr_result: dict,
+    item_category_rule_layers: ItemCategoryRuleLayers,
     image_filename: str = "",
     known_merchants: list[str] | tuple[str, ...] | None = None,
 ) -> Receipt:
@@ -30,6 +32,7 @@ def parse_receipt(
 
     Args:
         ocr_result: JSON response from OCR service with 'full_text' and 'pages'
+        item_category_rule_layers: Preloaded item-category rules.
         image_filename: Source image filename for reference
         known_merchants: Optional merchant keywords loaded by runtime components.
 
@@ -63,11 +66,20 @@ def parse_receipt(
     items: list[ReceiptItem] = []
     warnings: list[ReceiptWarning] = []
     if _has_useful_bbox_data(pages) and _is_spatial_layout_receipt(pages, full_text):
-        items = _extract_items_with_bbox(pages, warning_sink=warnings)
+        items = _extract_items_with_bbox(
+            pages,
+            warning_sink=warnings,
+            item_category_rule_layers=item_category_rule_layers,
+        )
 
     # Fall back to text-based parsing if bbox parsing didn't find items
     if not items:
-        items = _extract_items(lines, summary_amounts, warning_sink=warnings)
+        items = _extract_items(
+            lines,
+            summary_amounts,
+            warning_sink=warnings,
+            item_category_rule_layers=item_category_rule_layers,
+        )
 
     return Receipt(
         merchant=merchant,

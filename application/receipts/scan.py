@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Literal
 
 from beanbeaver.receipt.formatter import format_parsed_receipt
 from beanbeaver.receipt.ocr_result_parser import parse_receipt
-from beanbeaver.runtime import load_known_merchant_keywords
+from beanbeaver.runtime import load_item_category_rule_layers, load_known_merchant_keywords
 from beanbeaver.runtime.receipt_pipeline import OCRServiceUnavailable, call_ocr_service, save_ocr_json
 from beanbeaver.runtime.receipt_storage import move_scanned_to_approved, save_scanned_receipt
 
@@ -73,6 +73,7 @@ def run_receipt_scan(request: ReceiptScanRequest) -> ReceiptScanResult:
         ocr_result,
         image_filename=request.image_path.name,
         known_merchants=load_known_merchant_keywords(),
+        item_category_rule_layers=load_item_category_rule_layers(),
     )
     image_sha256 = hashlib.sha256(request.image_path.read_bytes()).hexdigest()
     beancount_content = format_parsed_receipt(receipt, image_sha256=image_sha256)
