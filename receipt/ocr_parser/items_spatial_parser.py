@@ -30,7 +30,8 @@ from .common import (
 def _extract_items_with_bbox(
     pages: list[dict[str, Any]],
     warning_sink: list[ReceiptWarning] | None = None,
-    item_category_rule_layers: ItemCategoryRuleLayers | None = None,
+    *,
+    item_category_rule_layers: ItemCategoryRuleLayers,
 ) -> list[ReceiptItem]:
     """
     Extract items using bounding box spatial data.

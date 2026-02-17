@@ -21,9 +21,9 @@ from .ocr_parser import (
 
 def parse_receipt(
     ocr_result: dict,
+    item_category_rule_layers: ItemCategoryRuleLayers,
     image_filename: str = "",
     known_merchants: list[str] | tuple[str, ...] | None = None,
-    item_category_rule_layers: ItemCategoryRuleLayers | None = None,
 ) -> Receipt:
     """
     Parse OCR result into a Receipt object.
@@ -32,9 +32,9 @@ def parse_receipt(
 
     Args:
         ocr_result: JSON response from OCR service with 'full_text' and 'pages'
+        item_category_rule_layers: Preloaded item-category rules.
         image_filename: Source image filename for reference
         known_merchants: Optional merchant keywords loaded by runtime components.
-        item_category_rule_layers: Optional preloaded item-category rules.
 
     Returns:
         Receipt object with parsed data

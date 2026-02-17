@@ -14,7 +14,6 @@ import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import Any
 
 # Fuzzy matching thresholds (0.0 to 1.0)
@@ -150,12 +149,6 @@ def build_item_category_rule_layers(
         exact_only_keywords=frozenset(exact_only),
         account_mapping=account_mapping,
     )
-
-
-@lru_cache(maxsize=1)
-def _get_default_rule_layers() -> ItemCategoryRuleLayers:
-    """Built-in-only default rules (no file I/O, no runtime deps)."""
-    return build_item_category_rule_layers()
 
 
 def _char_similarity(s1: str, s2: str) -> float:
@@ -296,13 +289,11 @@ def _find_all_matches(
 
 def classify_item_key(
     description: str,
+    rule_layers: ItemCategoryRuleLayers,
     default: str | None = None,
-    rule_layers: ItemCategoryRuleLayers | None = None,
 ) -> str | None:
     """Classify an item to an internal category key or direct account target."""
-    layers = rule_layers or _get_default_rule_layers()
-
-    matches = _find_all_matches(description, layers.rules, layers.exact_only_keywords)
+    matches = _find_all_matches(description, rule_layers.rules, rule_layers.exact_only_keywords)
 
     if not matches:
         return default
@@ -327,7 +318,8 @@ def _resolve_account_target(
 def categorize_item(
     description: str,
     default: str | None = None,
-    rule_layers: ItemCategoryRuleLayers | None = None,
+    *,
+    rule_layers: ItemCategoryRuleLayers,
 ) -> str | None:
     """
     Return expense category for an item description.
@@ -339,26 +331,23 @@ def categorize_item(
     Args:
         description: Item description from receipt (e.g., "LARGE EGGS 18CT")
         default: Category to return if no rule matches
-        rule_layers: Preloaded in-memory rules (typically from runtime loader).
+        rule_layers: Preloaded in-memory rules (required).
 
     Returns:
         Category string (e.g., "Expenses:Food:Grocery:Dairy") or default if no match
 
-    When rule_layers is omitted, only built-in rules apply.
     """
-    layers = rule_layers or _get_default_rule_layers()
-
-    matches = _find_all_matches(description, layers.rules, layers.exact_only_keywords)
+    matches = _find_all_matches(description, rule_layers.rules, rule_layers.exact_only_keywords)
     if not matches:
         return default
 
     matches.sort(key=lambda x: x[0], reverse=True)
-    return _resolve_account_target(matches[0][1], layers.account_mapping, default=default)
+    return _resolve_account_target(matches[0][1], rule_layers.account_mapping, default=default)
 
 
 def categorize_item_debug(
     description: str,
-    rule_layers: ItemCategoryRuleLayers | None = None,
+    rule_layers: ItemCategoryRuleLayers,
 ) -> list[tuple[str, str, float]]:
     """Debug version that returns all matches with scores.
 
@@ -367,11 +356,9 @@ def categorize_item_debug(
     Returns:
         List of (category, matched_keyword, score) tuples, sorted by score descending
     """
-    layers = rule_layers or _get_default_rule_layers()
-
-    matches = _find_all_matches(description, layers.rules, layers.exact_only_keywords)
+    matches = _find_all_matches(description, rule_layers.rules, rule_layers.exact_only_keywords)
     matches.sort(key=lambda x: x[0], reverse=True)
     return [
-        (_resolve_account_target(cat, layers.account_mapping, default=cat) or cat, kw, score)
+        (_resolve_account_target(cat, rule_layers.account_mapping, default=cat) or cat, kw, score)
         for score, cat, kw, _ in matches
     ]

@@ -20,7 +20,8 @@ def _extract_items(
     lines: list[str],
     summary_amounts: set[Decimal] | None = None,
     warning_sink: list[ReceiptWarning] | None = None,
-    item_category_rule_layers: ItemCategoryRuleLayers | None = None,
+    *,
+    item_category_rule_layers: ItemCategoryRuleLayers,
 ) -> list[ReceiptItem]:
     """
     Extract line items from receipt.
