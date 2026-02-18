@@ -4,10 +4,13 @@ This module contains the logic for importing chequing account CSV files,
 extracted from the original process_chequing.py script.
 """
 
+import argparse
 import datetime
-import sys
+from collections.abc import Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
+from typing import Literal
 
 from beanbeaver.application.imports.account_discovery import find_open_accounts, resolve_cc_payment_account
 from beanbeaver.application.imports.csv_routing import detect_chequing_csv as detect_chequing_csv_by_rules
@@ -48,6 +51,29 @@ SCOTIA_ACCOUNT_PATTERNS = [
     "Assets:Bank:Chequing:Scotia*",
     "Assets:Bank:Chequing:*Scotia*",
 ]
+
+ChequingImportStatus = Literal["ok", "aborted", "error"]
+
+
+@dataclass(frozen=True)
+class ChequingImportRequest:
+    """Inputs for chequing statement import workflow."""
+
+    csv_file: str | None = None
+
+
+@dataclass(frozen=True)
+class ChequingImportResult:
+    """Outcome for chequing statement import workflow."""
+
+    status: ChequingImportStatus
+    result_file_path: Path | None = None
+    result_file_name: str | None = None
+    account: str | None = None
+    chequing_type: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    error: str | None = None
 
 
 def detect_chequing_csv() -> str | None:
@@ -100,28 +126,32 @@ def _select_chequing_account(
     )
 
 
-def main() -> None:
-    # Safety check: warn about uncommitted changes
-    confirm_uncommitted_changes()
+def parse_chequing_request(argv: Sequence[str] | None = None) -> ChequingImportRequest:
+    """Parse CLI args into a typed request object."""
+    parser = argparse.ArgumentParser(description="Import chequing transactions")
+    parser.add_argument("csv_file", nargs="?", help="CSV file to import (auto-detect if omitted)")
+    args = parser.parse_args(argv)
+    return ChequingImportRequest(csv_file=args.csv_file)
 
-    # Auto-detect CSV file if not provided
-    csv_file: str | None
-    if len(sys.argv) >= 2:
-        csv_file = sys.argv[1]
-    else:
+
+def run_chequing_import(request: ChequingImportRequest) -> ChequingImportResult:
+    """Run chequing import workflow and return structured result."""
+    if not confirm_uncommitted_changes():
+        return ChequingImportResult(status="aborted")
+
+    csv_file = request.csv_file
+    if not csv_file:
         try:
             csv_file = detect_chequing_csv()
         except RuntimeError as exc:
-            logger.error(str(exc))
-            sys.exit(1)
+            return ChequingImportResult(status="error", error=str(exc))
         if csv_file is None:
-            logger.error("No chequing CSV file found in ~/Downloads")
-            logger.info("Supported files: *Details.csv, Preferred_Package_*.csv")
-            sys.exit(1)
-    assert csv_file is not None
+            return ChequingImportResult(
+                status="error",
+                error="No chequing CSV file found in ~/Downloads\nSupported files: *Details.csv, Preferred_Package_*.csv",
+            )
 
     logger.info("Importing chequing transactions from: %s", csv_file)
-
     target_file_name = TMPDIR / "chequing.csv"
     try:
         copy_statement_csv(
@@ -131,17 +161,14 @@ def main() -> None:
             allow_absolute=True,
         )
     except FileNotFoundError:
-        logger.error("File not found: %s", csv_file)
-        sys.exit(1)
+        return ChequingImportResult(status="error", error=f"File not found: {csv_file}")
 
-    chequing_type = detect_chequing_type(target_file_name)
-    if chequing_type == "eqbank":
-        account = None
-        source_label = "EQ Bank Chequing"
-    else:
-        account = None
-        source_label = "Scotia Chequing"
+    try:
+        chequing_type = detect_chequing_type(target_file_name)
+    except ValueError as exc:
+        return ChequingImportResult(status="error", error=str(exc))
 
+    source_label = "EQ Bank Chequing" if chequing_type == "eqbank" else "Scotia Chequing"
     logger.info("Detected chequing type: %s", chequing_type)
 
     # Read CSV once for parsing + account selection
@@ -159,6 +186,9 @@ def main() -> None:
             label="EQ Bank chequing",
             as_of=as_of,
         )
+        from beanbeaver.importers.eqbank import EQBankChequingImporter
+
+        importer = EQBankChequingImporter(account=account)
     else:
         parsed_rows = parse_scotia_rows(rows)
         as_of = latest_date(parsed_rows)
@@ -167,13 +197,6 @@ def main() -> None:
             label="Scotia chequing",
             as_of=as_of,
         )
-
-    # Import the chequing importer for balance extraction
-    if chequing_type == "eqbank":
-        from beanbeaver.importers.eqbank import EQBankChequingImporter
-
-        importer = EQBankChequingImporter(account=account)
-    else:
         from beanbeaver.importers.scotia_chequing import ScotiaChequingImporter
 
         importer = ScotiaChequingImporter(account=account)
@@ -183,15 +206,11 @@ def main() -> None:
             self.name = name
 
     f = FileMemo(str(target_file_name))
-
     transactions, balances = importer.extract_with_balances(f)
-
     logger.info("Extracted %d transactions", len(transactions))
     logger.info("Extracted %d balance entries", len(balances))
 
     existing_dates = get_existing_transaction_dates(account)
-
-    # Also add dates from new transactions to existing dates
     new_txn_dates = {txn.date for txn in transactions}
 
     # Deduplicate balances by date - keep the FIRST balance for each date
@@ -211,19 +230,16 @@ def main() -> None:
     logger.info("Filtered to %d balance entries on 'quiet' days", len(filtered_balances))
     categorization_patterns = load_chequing_categorization_patterns()
 
-    # Build output content
-    output_lines: list[str] = []
-    output_lines.append(";; -*- mode: beancount -*-")
-    output_lines.append(f";; {source_label} Import from {csv_file}")
-    output_lines.append("")
+    output_lines = [
+        ";; -*- mode: beancount -*-",
+        f";; {source_label} Import from {csv_file}",
+        "",
+    ]
 
     # Process transactions - sorted by date
     entries: list[tuple[datetime.date, str]] = []
-
     cc_cache: dict[str, str | None] = {}
     for date, description, amount_val, _balance_val in parsed_rows:
-        # Determine expense account
-        # First check for CC payments, then categorization patterns
         cc_account = resolve_cc_payment_account(
             description,
             as_of=as_of,
@@ -235,29 +251,19 @@ def main() -> None:
             expense_account = cc_account
         else:
             category = categorize_chequing_transaction(description, patterns=categorization_patterns)
-            if category:
-                expense_account = category
-            else:
-                expense_account = "Expenses:Uncategorized"
+            expense_account = category if category else "Expenses:Uncategorized"
 
         txn_text = format_transaction(date, description, amount_val, account, expense_account)
         entries.append((date, txn_text))
 
-    # Add balance directives
     for balance_date, balance_amount in filtered_balances:
         balance_text = format_balance(balance_date, account, balance_amount)
-        # Insert balance after all transactions of the previous day
         entries.append((balance_date, balance_text))
 
-    # Sort all entries by date
     entries.sort(key=lambda x: x[0])
-
-    for _, entry_text in entries:
-        output_lines.append(entry_text)
-
+    output_lines.extend(entry_text for _, entry_text in entries)
     output_content = "\n".join(output_lines)
 
-    # Auto-detect date range
     start_date, end_date = detect_statement_date_range(
         output_content,
         start_date=None,
@@ -265,12 +271,9 @@ def main() -> None:
         include_balance=True,
     )
     if not start_date or not end_date:
-        logger.error("Could not auto-detect dates from transactions")
-        sys.exit(1)
+        return ChequingImportResult(status="error", error="Could not auto-detect dates from transactions")
 
     logger.info("Date range: %s - %s", start_date, end_date)
-
-    # Build result file path
     result_file_name = build_result_file(start_date, end_date, chequing_type)
     result_file_path = write_import_output(
         output_content=output_content,
@@ -281,7 +284,6 @@ def main() -> None:
     logger.info("Writing result to: %s", result_file_path)
     logger.info("Including %s in yearly summary", result_file_name)
 
-    # Validate via privileged writer layer.
     logger.info("Validating ledger...")
     validation_errors = get_ledger_writer().validate_ledger(ledger_path=MAIN_BEANCOUNT_PATH)
     if validation_errors:
@@ -294,7 +296,30 @@ def main() -> None:
         logger.info("Validation passed!")
 
     print(f"\nImport complete: {result_file_path}")
+    return ChequingImportResult(
+        status="ok",
+        result_file_path=result_file_path,
+        result_file_name=result_file_name,
+        account=account,
+        chequing_type=chequing_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    request = parse_chequing_request(argv)
+    result = run_chequing_import(request)
+    if result.status == "ok":
+        return 0
+    if result.status == "aborted":
+        logger.info("Import aborted by user.")
+        return 0
+    assert result.error is not None
+    for line in result.error.splitlines():
+        logger.error(line)
+    return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

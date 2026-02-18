@@ -26,10 +26,10 @@ def check_uncommitted_changes() -> bool:
     return bool(result.stdout.strip())
 
 
-def confirm_uncommitted_changes() -> None:
+def confirm_uncommitted_changes() -> bool:
     """Warn user about uncommitted changes and ask for confirmation."""
     if not check_uncommitted_changes():
-        return
+        return True
 
     logger.warning("There are uncommitted changes in the repository.")
     print("Uncommitted changes detected. If import fails, you can revert with 'git checkout .'")
@@ -37,7 +37,8 @@ def confirm_uncommitted_changes() -> None:
     response = input().strip().lower()
     if response != "y":
         logger.info("Aborted by user")
-        sys.exit(0)
+        return False
+    return True
 
 
 def detect_csv_files(
