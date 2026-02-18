@@ -81,9 +81,7 @@ def _module_name_for_file(path: Path) -> str:
 
 def _imported_modules(path: Path) -> list[str]:
     module_name = _module_name_for_file(path)
-    current_package = (
-        module_name if path.name == "__init__.py" else module_name.rsplit(".", 1)[0]
-    )
+    current_package = module_name if path.name == "__init__.py" else module_name.rsplit(".", 1)[0]
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
     imports: list[str] = []
@@ -115,9 +113,7 @@ def test_trust_zone_doc_paths_exist() -> None:
             if not path.exists():
                 missing.append(str(path.relative_to(_ROOT)))
 
-    assert not missing, "Trust-zone paths in docs do not exist:\n" + "\n".join(
-        sorted(missing)
-    )
+    assert not missing, "Trust-zone paths in docs do not exist:\n" + "\n".join(sorted(missing))
 
 
 def test_trust_zone_import_boundaries() -> None:
@@ -153,8 +149,6 @@ def test_trust_zone_import_boundaries() -> None:
                 continue
 
             if target_zone not in _ALLOWED_TARGET_ZONES[source_zone]:
-                violations.append(
-                    f"{rel}: {source_zone} imports {module} ({target_zone})"
-                )
+                violations.append(f"{rel}: {source_zone} imports {module} ({target_zone})")
 
     assert not violations, "Trust-zone import violations:\n" + "\n".join(violations)
