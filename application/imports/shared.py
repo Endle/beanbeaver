@@ -7,14 +7,12 @@ import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TypeVar
 
 from beanbeaver.domain.beancount_dates import extract_dates_from_beancount
 from beanbeaver.runtime import get_logger, get_paths
 
 logger = get_logger(__name__)
 _paths = get_paths()
-T = TypeVar("T")
 
 
 def check_uncommitted_changes() -> bool:
@@ -92,7 +90,7 @@ def detect_csv_files(
         raise RuntimeError("Invalid file selection") from None
 
 
-def select_interactive_item(
+def select_interactive_item[T](
     options: Sequence[T],
     *,
     render: Callable[[T], str],
