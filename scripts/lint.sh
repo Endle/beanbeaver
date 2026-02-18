@@ -17,7 +17,7 @@ echo "========================================"
 # Track if any check fails
 FAILED=0
 
-TOTAL=3
+TOTAL=4
 
 # 1. Ruff linting
 echo -e "\n${YELLOW}[1/$TOTAL] Ruff linting...${NC}"
@@ -44,6 +44,22 @@ if mypy --config-file pyproject.toml . --ignore-missing-imports --no-error-summa
     echo -e "${GREEN}✓ Mypy type checking passed${NC}"
 else
     echo -e "${RED}✗ Mypy type checking found issues${NC}"
+    FAILED=1
+fi
+
+# 4. Strict mypy checks for migration readiness
+echo -e "\n${YELLOW}[4/$TOTAL] Mypy strict checks...${NC}"
+if mypy \
+    --config-file pyproject.toml \
+    . \
+    --ignore-missing-imports \
+    --no-error-summary \
+    --disallow-untyped-defs \
+    --warn-redundant-casts \
+    --warn-unreachable 2>/dev/null; then
+    echo -e "${GREEN}✓ Mypy strict checks passed${NC}"
+else
+    echo -e "${RED}✗ Mypy strict checks found issues${NC}"
     FAILED=1
 fi
 
