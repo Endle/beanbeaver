@@ -20,8 +20,7 @@ _ALLOWED_TARGET_ZONES = {
 def _normalize_zone_path(raw: str) -> tuple[str, ...]:
     cleaned = raw.strip().strip("/")
     cleaned = re.sub(r"^vendor/beanbeaver/", "", cleaned)
-    parts = tuple(part for part in cleaned.split("/") if part)
-    return parts
+    return tuple(part for part in cleaned.split("/") if part)
 
 
 def _parse_zone_mapping() -> dict[str, list[tuple[str, ...]]]:
@@ -37,7 +36,11 @@ def _parse_zone_mapping() -> dict[str, list[tuple[str, ...]]]:
             continue
         if not in_mapping:
             continue
-        if stripped in {"Dependency Rules", "Inheritance Rules", "Contributor Checklist"}:
+        if stripped in {
+            "Dependency Rules",
+            "Inheritance Rules",
+            "Contributor Checklist",
+        }:
             break
 
         token_match = re.match(r"^\s*-\s+`([^`]+)`", line)
@@ -58,7 +61,10 @@ def _parse_zone_mapping() -> dict[str, list[tuple[str, ...]]]:
     return mapping
 
 
-def _zone_for_parts(parts: tuple[str, ...], zone_entries: list[tuple[tuple[str, ...], str]]) -> str | None:
+def _zone_for_parts(
+    parts: tuple[str, ...],
+    zone_entries: list[tuple[tuple[str, ...], str]],
+) -> str | None:
     for prefix, zone in zone_entries:
         if len(parts) >= len(prefix) and parts[: len(prefix)] == prefix:
             return zone
@@ -75,7 +81,9 @@ def _module_name_for_file(path: Path) -> str:
 
 def _imported_modules(path: Path) -> list[str]:
     module_name = _module_name_for_file(path)
-    current_package = module_name if path.name == "__init__.py" else module_name.rsplit(".", 1)[0]
+    current_package = (
+        module_name if path.name == "__init__.py" else module_name.rsplit(".", 1)[0]
+    )
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
     imports: list[str] = []
@@ -107,7 +115,9 @@ def test_trust_zone_doc_paths_exist() -> None:
             if not path.exists():
                 missing.append(str(path.relative_to(_ROOT)))
 
-    assert not missing, "Trust-zone paths in docs do not exist:\n" + "\n".join(sorted(missing))
+    assert not missing, "Trust-zone paths in docs do not exist:\n" + "\n".join(
+        sorted(missing)
+    )
 
 
 def test_trust_zone_import_boundaries() -> None:
