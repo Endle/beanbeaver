@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from _pytest.config.argparsing import Parser
 
-def pytest_addoption(parser):
+
+def pytest_addoption(parser: Parser) -> None:
     """Custom pytest option for public receipt e2e tests."""
     parser.addoption(
         "--beanbeaver-e2e-mode",

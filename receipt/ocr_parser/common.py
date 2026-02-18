@@ -178,9 +178,6 @@ def _validate_quantity_price(total_price: Decimal, modifier: dict, tolerance: De
     Returns:
         True if the modifier validates against the total price
     """
-    if modifier is None:
-        return False
-
     pattern_type = modifier.get("pattern_type")
 
     if pattern_type == "count_at_price":

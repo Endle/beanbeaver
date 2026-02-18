@@ -15,9 +15,11 @@ from decimal import Decimal
 from difflib import SequenceMatcher
 from importlib.util import find_spec
 from pathlib import Path
+from typing import Any, cast
 
 import httpx
 import pytest
+from beanbeaver.domain.receipt import Receipt
 from beanbeaver.receipt.formatter import format_parsed_receipt
 from beanbeaver.receipt.ocr_helpers import resize_image_bytes, transform_paddleocr_result
 from beanbeaver.receipt.ocr_result_parser import parse_receipt
@@ -54,9 +56,9 @@ def find_e2e_test_cases() -> list[E2ECase]:
     return sorted(test_cases, key=lambda c: c.name)
 
 
-def load_expected(expected_path: Path) -> dict:
+def load_expected(expected_path: Path) -> dict[str, Any]:
     with open(expected_path) as f:
-        return json.load(f)
+        return cast(dict[str, Any], json.load(f))
 
 
 class TestE2EReceiptProcessing:
@@ -73,7 +75,7 @@ class TestE2EReceiptProcessing:
             return False
 
     @pytest.fixture
-    def e2e_mode(self, request) -> str:
+    def e2e_mode(self, request: pytest.FixtureRequest) -> str:
         return request.config.getoption("--beanbeaver-e2e-mode")
 
     @pytest.mark.parametrize(
@@ -81,7 +83,7 @@ class TestE2EReceiptProcessing:
         find_e2e_test_cases(),
         ids=lambda c: c.name if isinstance(c, E2ECase) else str(c),
     )
-    def test_receipt_extraction(self, ocr_service_url: str, e2e_mode: str, test_case: E2ECase):
+    def test_receipt_extraction(self, ocr_service_url: str, e2e_mode: str, test_case: E2ECase) -> None:
         expected = load_expected(test_case.expected_path)
         ran_cached = False
         ran_live = False
@@ -131,7 +133,7 @@ class TestE2EReceiptProcessing:
             "Check available artifacts (.jpg/.ocr.json)."
         )
 
-    def _verify_expected(self, receipt, expected: dict) -> None:
+    def _verify_expected(self, receipt: Receipt, expected: dict[str, Any]) -> None:
         if "merchant" in expected:
             expected_merchant = expected["merchant"]
             actual_merchant = receipt.merchant or ""
@@ -150,13 +152,13 @@ class TestE2EReceiptProcessing:
         assert receipt.total == expected_total, f"Total mismatch: expected {expected_total}, got {receipt.total}"
 
         if "critical_items" in expected:
-            self._verify_critical_items(receipt, expected["critical_items"])
+            self._verify_critical_items(receipt, cast(list[dict[str, str]], expected["critical_items"]))
 
         beancount_output = format_parsed_receipt(receipt)
         assert len(beancount_output) > 0, "Beancount output should not be empty"
         assert receipt.date.isoformat() in beancount_output, "Date should appear in output"
 
-    def _verify_critical_items(self, receipt, critical_items: list[dict]):
+    def _verify_critical_items(self, receipt: Receipt, critical_items: list[dict[str, str]]) -> None:
         extracted_items: dict[str, list[tuple[Decimal, str | None]]] = {}
         for item in receipt.items:
             desc_upper = item.description.upper()
@@ -169,7 +171,7 @@ class TestE2EReceiptProcessing:
             expected_price = Decimal(critical["price"])
             expected_category = critical.get("category")
 
-            matching_items = []
+            matching_items: list[tuple[Decimal, str | None]] = []
             for desc, items in extracted_items.items():
                 if desc_pattern in desc or desc in desc_pattern:
                     matching_items.extend(items)

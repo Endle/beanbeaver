@@ -103,8 +103,7 @@ def build_item_category_rule_layers(
     # Built-in rules remain priority 0 and preserve existing behavior.
     rules: list[RuleEntry] = []
     for keywords, target in ITEM_RULES + COSTCO_RULES:
-        keyword_tuple = (keywords,) if isinstance(keywords, str) else tuple(keywords)
-        rules.append((keyword_tuple, target, 0))
+        rules.append((tuple(keywords), target, 0))
 
     exact_only = set(EXACT_ONLY_KEYWORDS)
     classifier_configs = classifier_configs or ()

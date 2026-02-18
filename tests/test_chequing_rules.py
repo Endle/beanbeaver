@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from beanbeaver.domain.chequing_categorization import categorize_chequing_transaction
 from beanbeaver.runtime.chequing_rules import load_chequing_categorization_patterns
 
 
-def test_load_chequing_rules_from_toml(tmp_path) -> None:
+def test_load_chequing_rules_from_toml(tmp_path: Path) -> None:
     rules_path = tmp_path / "chequing_rules.toml"
     rules_path.write_text(
         """
@@ -33,14 +35,14 @@ def test_categorize_transaction_uses_supplied_patterns() -> None:
     assert categorize_chequing_transaction("monthly payroll deposit", patterns=patterns) == "Income:Salary"
 
 
-def test_load_chequing_rules_raises_when_missing(tmp_path) -> None:
+def test_load_chequing_rules_raises_when_missing(tmp_path: Path) -> None:
     load_chequing_categorization_patterns.cache_clear()
     missing_path = tmp_path / "does_not_exist.toml"
     with pytest.raises(FileNotFoundError):
         load_chequing_categorization_patterns(str(missing_path))
 
 
-def test_load_chequing_rules_raises_when_empty(tmp_path) -> None:
+def test_load_chequing_rules_raises_when_empty(tmp_path: Path) -> None:
     rules_path = tmp_path / "chequing_rules.toml"
     rules_path.write_text("")
     load_chequing_categorization_patterns.cache_clear()
