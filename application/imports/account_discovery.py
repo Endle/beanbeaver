@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import datetime as dt
-import sys
 from pathlib import Path
 
+from beanbeaver.application.imports.shared import select_interactive_option
 from beanbeaver.ledger_access import get_ledger_reader
 
 CC_PAYMENT_RULES: list[tuple[str, list[str]]] = [
@@ -75,19 +75,16 @@ def resolve_cc_payment_account(
             context.append(f"amount={amount}")
         context_str = f" ({', '.join(context)})" if context else ""
 
-        if not sys.stdin.isatty():
-            raise RuntimeError(
-                "Multiple credit card accounts match payment pattern "
-                f"'{pattern}'{context_str}. Run interactively to choose: {', '.join(matches)}"
-            )
-        print(f"Multiple credit card accounts match payment pattern '{pattern}'{context_str}:")
-        for idx, account in enumerate(matches, 1):
-            print(f"  {idx}. {account}")
-        choice = input("Select account (number): ").strip()
-        try:
-            selected = matches[int(choice) - 1]
-        except (ValueError, IndexError):
-            raise RuntimeError("Invalid account selection") from None
+        selected = select_interactive_option(
+            matches,
+            heading=f"Multiple credit card accounts match payment pattern '{pattern}'{context_str}:",
+            prompt="Select account (number): ",
+            non_tty_error=(
+                f"Multiple credit card accounts match payment pattern '{pattern}'{context_str}. "
+                "Run interactively to choose"
+            ),
+            invalid_choice_error="Invalid account selection",
+        )
         if cache is not None:
             cache[pattern] = selected
         return selected

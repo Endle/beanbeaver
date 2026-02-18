@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import csv
 import datetime
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from beanbeaver.application.imports.shared import select_interactive_item, select_interactive_option
 from beanbeaver.runtime import get_logger, get_paths
 
 logger = get_logger(__name__)
@@ -223,23 +223,14 @@ def detect_download_route(import_type: ImportType | None = None, downloads_dir: 
         logger.info("Auto-detected %s route via %s: %s", selected.import_type, selected.rule_id, selected.file_name)
         return selected
 
-    if not sys.stdin.isatty():
-        labels = ", ".join(route.label for route in routes)
-        raise RuntimeError(
-            "Multiple matching CSV files found in ~/Downloads. "
-            f"Run interactively to choose one, or pass an explicit file. Candidates: {labels}"
-        )
-
-    print("Select file to import:")
-    for idx, route in enumerate(routes, 1):
-        stage = "stage2" if route.stage == 2 else "stage1"
-        print(f"{idx}. {route.label} [{stage}:{route.rule_id}]")
-
-    choice = input("Enter choice (number): ").strip()
-    try:
-        return routes[int(choice) - 1]
-    except (ValueError, IndexError):
-        raise RuntimeError("Invalid choice.") from None
+    return select_interactive_item(
+        routes,
+        render=lambda route: f"{route.label} [{'stage2' if route.stage == 2 else 'stage1'}:{route.rule_id}]",
+        heading="Select file to import:",
+        prompt="Enter choice (number): ",
+        non_tty_error="Multiple matching CSV files found in ~/Downloads. Run interactively to choose one, or pass an explicit file. Candidates",
+        invalid_choice_error="Invalid choice.",
+    )
 
 
 def detect_credit_card_csv(downloads_dir: Path | None = None) -> str | None:
@@ -261,16 +252,10 @@ def detect_credit_card_importer_id(path: Path) -> CardImporterId:
     if len(importer_ids) == 1:
         return importer_ids[0]  # type: ignore[return-value]
 
-    if not sys.stdin.isatty():
-        raise RuntimeError(
-            f"Ambiguous credit card importer for CSV. Run interactively to choose: {', '.join(importer_ids)}"
-        )
-
-    print(f"Ambiguous credit card importer for file: {path.name}")
-    for idx, importer_id in enumerate(importer_ids, 1):
-        print(f"  {idx}. {importer_id}")
-    choice = input("Select importer (number): ").strip()
-    try:
-        return importer_ids[int(choice) - 1]  # type: ignore[return-value]
-    except (ValueError, IndexError):
-        raise RuntimeError("Invalid importer selection") from None
+    return select_interactive_option(
+        importer_ids,
+        heading=f"Ambiguous credit card importer for file: {path.name}",
+        prompt="Select importer (number): ",
+        non_tty_error="Ambiguous credit card importer for CSV. Run interactively to choose",
+        invalid_choice_error="Invalid importer selection",
+    )  # type: ignore[return-value]

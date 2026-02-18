@@ -15,6 +15,7 @@ from beanbeaver.application.imports.shared import (
     confirm_uncommitted_changes,
     copy_statement_csv,
     detect_statement_date_range,
+    select_interactive_option,
     write_import_output,
 )
 from beanbeaver.domain.chequing_categorization import categorize_chequing_transaction
@@ -80,44 +81,23 @@ def get_existing_transaction_dates(account: str) -> set[datetime.date]:
     return existing_dates
 
 
-def _select_scotia_account(as_of: datetime.date | None) -> str:
-    matches = find_open_accounts(SCOTIA_ACCOUNT_PATTERNS, as_of=as_of)
+def _select_chequing_account(
+    patterns: list[str],
+    *,
+    label: str,
+    as_of: datetime.date | None,
+) -> str:
+    matches = find_open_accounts(patterns, as_of=as_of)
     if not matches:
-        raise RuntimeError("No open Scotia chequing accounts found in main ledger.")
-    if len(matches) == 1:
-        return matches[0]
-    if not sys.stdin.isatty():
-        raise RuntimeError(
-            "Multiple Scotia chequing accounts found. Run interactively to choose: " + ", ".join(matches)
-        )
-    print("Multiple Scotia chequing accounts found:")
-    for idx, account in enumerate(matches, 1):
-        print(f"  {idx}. {account}")
-    choice = input("Select account (number): ").strip()
-    try:
-        return matches[int(choice) - 1]
-    except (ValueError, IndexError):
-        raise RuntimeError("Invalid account selection") from None
+        raise RuntimeError(f"No open {label} accounts found in main ledger.")
 
-
-def _select_eqbank_account(as_of: datetime.date | None) -> str:
-    matches = find_open_accounts(EQBANK_ACCOUNT_PATTERNS, as_of=as_of)
-    if not matches:
-        raise RuntimeError("No open EQ Bank chequing accounts found in main ledger.")
-    if len(matches) == 1:
-        return matches[0]
-    if not sys.stdin.isatty():
-        raise RuntimeError(
-            "Multiple EQ Bank chequing accounts found. Run interactively to choose: " + ", ".join(matches)
-        )
-    print("Multiple EQ Bank chequing accounts found:")
-    for idx, account in enumerate(matches, 1):
-        print(f"  {idx}. {account}")
-    choice = input("Select account (number): ").strip()
-    try:
-        return matches[int(choice) - 1]
-    except (ValueError, IndexError):
-        raise RuntimeError("Invalid account selection") from None
+    return select_interactive_option(
+        matches,
+        heading=f"Multiple {label} accounts found:",
+        prompt="Select account (number): ",
+        non_tty_error=f"Multiple {label} accounts found. Run interactively to choose",
+        invalid_choice_error="Invalid account selection",
+    )
 
 
 def main() -> None:
@@ -174,11 +154,19 @@ def main() -> None:
     if chequing_type == "eqbank":
         parsed_rows = parse_eqbank_rows(rows)
         as_of = latest_date(parsed_rows)
-        account = _select_eqbank_account(as_of=as_of)
+        account = _select_chequing_account(
+            EQBANK_ACCOUNT_PATTERNS,
+            label="EQ Bank chequing",
+            as_of=as_of,
+        )
     else:
         parsed_rows = parse_scotia_rows(rows)
         as_of = latest_date(parsed_rows)
-        account = _select_scotia_account(as_of=as_of)
+        account = _select_chequing_account(
+            SCOTIA_ACCOUNT_PATTERNS,
+            label="Scotia chequing",
+            as_of=as_of,
+        )
 
     # Import the chequing importer for balance extraction
     if chequing_type == "eqbank":

@@ -14,6 +14,8 @@ from beancount.core import amount, data, flags
 from beancount.ingest import importer
 from beancount.ingest.cache import _FileMemo
 
+from .chequing_common import next_day
+
 
 @dataclass
 class ChequingTransaction:
@@ -64,19 +66,6 @@ class ChequingTransaction:
         txn.postings.append(chequing_posting)
         txn.postings.append(counter_posting)
         return txn
-
-    def create_balance_directive(self, meta: dict[str, Any] | None = None) -> data.Balance:
-        """Create a beancount Balance directive for the day after this transaction."""
-        # Balance is asserted for the day after the transaction
-        balance_date = self.date + datetime.timedelta(days=1)
-        return data.Balance(
-            meta=meta or {},
-            date=balance_date,
-            account=self.account,
-            amount=amount.Amount(self.balance, self.currency),
-            tolerance=None,
-            diff_amount=None,
-        )
 
 
 class EQBankChequingImporter(importer.ImporterProtocol):
@@ -164,8 +153,7 @@ class EQBankChequingImporter(importer.ImporterProtocol):
 
                 # Record balance for this date (balance is after the transaction)
                 # Balance directive date is the day after the transaction
-                balance_date = txn_data.date + datetime.timedelta(days=1)
-                balances.append((balance_date, txn_data.balance))
+                balances.append((next_day(txn_data.date), txn_data.balance))
 
         return entries, balances
 

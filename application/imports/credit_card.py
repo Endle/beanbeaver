@@ -17,6 +17,7 @@ from beanbeaver.application.imports.shared import (
     confirm_uncommitted_changes,
     copy_statement_csv,
     detect_statement_date_range,
+    select_interactive_option,
     write_import_output,
 )
 from beanbeaver.domain.cc_import import build_result_file
@@ -75,23 +76,14 @@ def _select_account(
 ) -> str:
     if not matches:
         raise RuntimeError(f"No open {account_label} accounts found in main ledger.")
-    if len(matches) == 1:
-        return matches[0]
-    if not sys.stdin.isatty():
-        as_of_text = as_of.isoformat() if as_of else "today"
-        raise RuntimeError(
-            f"Multiple open {account_label} accounts found as of {as_of_text}. "
-            f"Run interactively to choose: {', '.join(matches)}"
-        )
-
-    print(f"Multiple open {account_label} accounts found:")
-    for idx, account in enumerate(matches, 1):
-        print(f"  {idx}. {account}")
-    choice = input("Select account (number): ").strip()
-    try:
-        return matches[int(choice) - 1]
-    except (ValueError, IndexError):
-        raise RuntimeError("Invalid account selection") from None
+    as_of_text = as_of.isoformat() if as_of else "today"
+    return select_interactive_option(
+        matches,
+        heading=f"Multiple open {account_label} accounts found:",
+        prompt="Select account (number): ",
+        non_tty_error=f"Multiple open {account_label} accounts found as of {as_of_text}. Run interactively to choose",
+        invalid_choice_error="Invalid account selection",
+    )
 
 
 def _build_detection_importers() -> list[BaseCardImporter]:

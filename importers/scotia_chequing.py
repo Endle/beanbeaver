@@ -19,6 +19,8 @@ from beancount.ingest.cache import _FileMemo
 from beanbeaver.domain.chequing_categorization import categorize_chequing_transaction
 from beanbeaver.runtime import load_chequing_categorization_patterns
 
+from .chequing_common import next_day
+
 
 @dataclass
 class ScotiaChequingTransaction:
@@ -66,18 +68,6 @@ class ScotiaChequingTransaction:
         txn.postings.append(chequing_posting)
         txn.postings.append(counter_posting)
         return txn
-
-    def create_balance_directive(self, meta: dict[str, Any] | None = None) -> data.Balance:
-        """Create a beancount Balance directive for the day after this transaction."""
-        balance_date = self.date + datetime.timedelta(days=1)
-        return data.Balance(
-            meta=meta or {},
-            date=balance_date,
-            account=self.account,
-            amount=amount.Amount(self.balance, self.currency),
-            tolerance=None,
-            diff_amount=None,
-        )
 
 
 class ScotiaChequingImporter(importer.ImporterProtocol):
@@ -174,8 +164,7 @@ class ScotiaChequingImporter(importer.ImporterProtocol):
                 txn = txn_data.create_beancount_transaction(meta=meta, expense_account=expense_account)
                 entries.append(txn)
 
-                balance_date = txn_data.date + datetime.timedelta(days=1)
-                balances.append((balance_date, txn_data.balance))
+                balances.append((next_day(txn_data.date), txn_data.balance))
 
         return entries, balances
 
