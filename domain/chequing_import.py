@@ -53,6 +53,11 @@ def latest_date(rows: Iterable[tuple[dt.date, str, Decimal, Decimal]]) -> dt.dat
     return max(dates) if dates else None
 
 
+def next_day(value: dt.date) -> dt.date:
+    """Return the next calendar day."""
+    return value + dt.timedelta(days=1)
+
+
 def parse_eqbank_rows(
     rows: list[dict[str, str]],
 ) -> list[tuple[dt.date, str, Decimal, Decimal]]:

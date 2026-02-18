@@ -17,9 +17,8 @@ from beancount.ingest import importer
 from beancount.ingest.cache import _FileMemo
 
 from beanbeaver.domain.chequing_categorization import categorize_chequing_transaction
+from beanbeaver.domain.chequing_import import next_day
 from beanbeaver.runtime import load_chequing_categorization_patterns
-
-from .chequing_common import next_day
 
 
 @dataclass

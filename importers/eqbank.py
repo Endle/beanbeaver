@@ -14,7 +14,7 @@ from beancount.core import amount, data, flags
 from beancount.ingest import importer
 from beancount.ingest.cache import _FileMemo
 
-from .chequing_common import next_day
+from beanbeaver.domain.chequing_import import next_day
 
 
 @dataclass
