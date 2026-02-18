@@ -2,36 +2,23 @@
 
 from pathlib import Path
 
+import pytest
 from beanbeaver.receipt.item_categories import categorize_item
 from beanbeaver.runtime.item_category_rules import load_item_category_rule_layers
 
-# TODO does this file has real usage?
 
-
-def test_corn_oil_maps_to_seasoning() -> None:
+@pytest.mark.parametrize(
+    "description",
+    [
+        "SAPORITO FOODS CORN OIL 2.84L",
+        "FLOWER PERICARPIURN ZANTHOXYLI",
+        "T&T SLICED RED CHILI PEPPER",
+    ],
+)
+def test_seasoning_examples(description: str) -> None:
     assert (
         categorize_item(
-            "SAPORITO FOODS CORN OIL 2.84L",
-            rule_layers=load_item_category_rule_layers(),
-        )
-        == "Expenses:Food:Grocery:Seasoning"
-    )
-
-
-def test_pericarpium_zanthoxyli_maps_to_seasoning() -> None:
-    assert (
-        categorize_item(
-            "FLOWER PERICARPIURN ZANTHOXYLI",
-            rule_layers=load_item_category_rule_layers(),
-        )
-        == "Expenses:Food:Grocery:Seasoning"
-    )
-
-
-def test_red_chili_pepper_maps_to_seasoning() -> None:
-    assert (
-        categorize_item(
-            "T&T SLICED RED CHILI PEPPER",
+            description,
             rule_layers=load_item_category_rule_layers(),
         )
         == "Expenses:Food:Grocery:Seasoning"

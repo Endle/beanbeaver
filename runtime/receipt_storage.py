@@ -67,6 +67,30 @@ def generate_receipt_filename(receipt: Receipt) -> str:
     return f"{date_str}_{merchant_clean}_{amount_str}.beancount"
 
 
+def _save_receipt_to_directory(
+    receipt: Receipt,
+    beancount_content: str,
+    *,
+    target_dir: Path,
+    label: str,
+) -> Path:
+    """Persist receipt content to the target directory with collision handling."""
+    ensure_directories()
+
+    filename = generate_receipt_filename(receipt)
+    filepath = target_dir / filename
+
+    counter = 1
+    base_name = filename.rsplit(".", 1)[0]
+    while filepath.exists():
+        filepath = target_dir / f"{base_name}_{counter}.beancount"
+        counter += 1
+
+    filepath.write_text(beancount_content)
+    logger.info("Saved %s receipt to %s", label, filepath)
+    return filepath
+
+
 def save_approved_receipt(receipt: Receipt, beancount_content: str) -> Path:
     """
     Save an approved receipt to the approved/ directory.
@@ -78,22 +102,12 @@ def save_approved_receipt(receipt: Receipt, beancount_content: str) -> Path:
     Returns:
         Path to the saved file
     """
-    ensure_directories()
-
-    filename = generate_receipt_filename(receipt)
-    filepath = APPROVED_DIR / filename
-
-    # Handle filename collisions by appending a counter
-    counter = 1
-    base_name = filename.rsplit(".", 1)[0]
-    while filepath.exists():
-        filepath = APPROVED_DIR / f"{base_name}_{counter}.beancount"
-        counter += 1
-
-    filepath.write_text(beancount_content)
-    logger.info("Saved approved receipt to %s", filepath)
-
-    return filepath
+    return _save_receipt_to_directory(
+        receipt,
+        beancount_content,
+        target_dir=APPROVED_DIR,
+        label="approved",
+    )
 
 
 def save_scanned_receipt(receipt: Receipt, beancount_content: str) -> Path:
@@ -107,22 +121,12 @@ def save_scanned_receipt(receipt: Receipt, beancount_content: str) -> Path:
     Returns:
         Path to the saved file
     """
-    ensure_directories()
-
-    filename = generate_receipt_filename(receipt)
-    filepath = SCANNED_DIR / filename
-
-    # Handle filename collisions by appending a counter
-    counter = 1
-    base_name = filename.rsplit(".", 1)[0]
-    while filepath.exists():
-        filepath = SCANNED_DIR / f"{base_name}_{counter}.beancount"
-        counter += 1
-
-    filepath.write_text(beancount_content)
-    logger.info("Saved scanned receipt to %s", filepath)
-
-    return filepath
+    return _save_receipt_to_directory(
+        receipt,
+        beancount_content,
+        target_dir=SCANNED_DIR,
+        label="scanned",
+    )
 
 
 def move_scanned_to_approved(receipt_path: Path) -> Path:

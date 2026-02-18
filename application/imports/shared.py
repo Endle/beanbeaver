@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from beanbeaver.domain.beancount_dates import extract_dates_from_beancount
@@ -88,6 +88,60 @@ def detect_csv_files(
         return found_files[idx]
     except (ValueError, IndexError):
         raise RuntimeError("Invalid file selection") from None
+
+
+def select_interactive_item[T](
+    options: Sequence[T],
+    *,
+    render: Callable[[T], str],
+    heading: str,
+    prompt: str,
+    non_tty_error: str,
+    invalid_choice_error: str,
+) -> T:
+    """
+    Return one selected option from a list with TTY/non-TTY handling.
+
+    Raises RuntimeError when no options exist, when non-interactive mode is
+    unable to resolve multiple options, or when the selection is invalid.
+    """
+    if not options:
+        raise RuntimeError("No options available for selection.")
+    if len(options) == 1:
+        return options[0]
+
+    if not sys.stdin.isatty():
+        rendered_options = ", ".join(render(option) for option in options)
+        raise RuntimeError(f"{non_tty_error}: {rendered_options}")
+
+    print(heading)
+    for idx, option in enumerate(options, 1):
+        print(f"  {idx}. {render(option)}")
+
+    choice = input(prompt).strip()
+    try:
+        return options[int(choice) - 1]
+    except (ValueError, IndexError):
+        raise RuntimeError(invalid_choice_error) from None
+
+
+def select_interactive_option(
+    options: Sequence[str],
+    *,
+    heading: str,
+    prompt: str,
+    non_tty_error: str,
+    invalid_choice_error: str,
+) -> str:
+    """String-specialized convenience wrapper around select_interactive_item."""
+    return select_interactive_item(
+        options,
+        render=lambda value: value,
+        heading=heading,
+        prompt=prompt,
+        non_tty_error=non_tty_error,
+        invalid_choice_error=invalid_choice_error,
+    )
 
 
 def copy_statement_csv(
