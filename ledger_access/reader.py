@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import fnmatch
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,9 +17,8 @@ from typing import Any
 from beancount.core import data
 from beancount.loader import load_file
 
-from beanbeaver.runtime import get_logger, get_paths
-
-logger = get_logger(__name__)
+logger = logging.getLogger(f"beancount_local.{__name__}")
+DEFAULT_MAIN_BEANCOUNT_PATH = Path(__file__).resolve().parents[1] / "main.beancount"
 
 
 @dataclass(frozen=True)
@@ -35,7 +35,7 @@ class LedgerReader:
     """Read-only access to Beancount ledger data."""
 
     def __init__(self, default_ledger_path: Path | None = None) -> None:
-        self.default_ledger_path = default_ledger_path or get_paths().main_beancount
+        self.default_ledger_path = default_ledger_path or DEFAULT_MAIN_BEANCOUNT_PATH
 
     def _resolve_path(self, ledger_path: Path | str | None) -> Path:
         if ledger_path is None:

@@ -1,6 +1,6 @@
 Trust Zones
 
-This document defines runtime trust boundaries in `vendor/beanbeaver`.
+This document defines runtime trust boundaries in this repository.
 The goal is simple: keep sensitive operations isolated and keep business logic testable.
 
 Zones
@@ -15,18 +15,24 @@ Zones
 
 Current Directory Mapping
 - `Privileged`
-  - `vendor/beanbeaver/ledger_access/`
+  - `ledger_access/`
 - `Orchestrator`
-  - `vendor/beanbeaver/cli/`
-  - `vendor/beanbeaver/application/`
-  - `vendor/beanbeaver/runtime/`
-  - `vendor/beanbeaver/importers/`
+  - `cli/`
+  - `application/`
+  - `runtime/`
+  - `importers/`
 - `Pure`
-  - `vendor/beanbeaver/domain/`
-  - `vendor/beanbeaver/receipt/`
-  - `vendor/beanbeaver/receipt/rules/` (data/config only)
-  - `vendor/beanbeaver/util/`
+  - `domain/`
+  - `receipt/`
+  - `receipt/rules/` (data/config only)
+  - `util/`
 - Tooling, tests, and metadata are not part of runtime trust zoning:
+
+Dependency Rules
+- `Pure` may import only `Pure`.
+- `Orchestrator` may import `Orchestrator`, `Pure`, and `Privileged`.
+- `Privileged` may import only `Privileged` and `Pure`.
+- Violations are enforced in CI by `tests/test_trust_zone_boundaries.py`.
 
 Inheritance Rules
 - Subdirectories inherit the nearest parent zone unless explicitly documented.
