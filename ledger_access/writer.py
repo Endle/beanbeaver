@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import date
 from pathlib import Path
@@ -10,9 +11,9 @@ from typing import Any
 from beancount.loader import load_file
 
 from beanbeaver.domain.match import comment_block, find_transaction_end
-from beanbeaver.runtime import get_logger, get_paths
 
-logger = get_logger(__name__)
+logger = logging.getLogger(f"beancount_local.{__name__}")
+DEFAULT_MAIN_BEANCOUNT_PATH = Path(__file__).resolve().parents[1] / "main.beancount"
 _TXN_START_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\s+[*!?A-Za-z](?:\s|$)")
 _INCLUDE_RE = re.compile(r'^\s*include\s+"([^"]+)"(?:\s*;.*)?$')
 
@@ -21,7 +22,7 @@ class LedgerWriter:
     """Privileged write access for controlled ledger mutations."""
 
     def __init__(self, default_ledger_path: Path | None = None) -> None:
-        self.default_ledger_path = default_ledger_path or get_paths().main_beancount
+        self.default_ledger_path = default_ledger_path or DEFAULT_MAIN_BEANCOUNT_PATH
 
     def _resolve_path(self, ledger_path: Path | str | None) -> Path:
         if ledger_path is None:

@@ -2,15 +2,14 @@
 
 import datetime
 import decimal
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from beancount.core import amount, data, flags
 from beancount.core.number import D
 
-from beanbeaver.runtime import get_logger
-
-logger = get_logger(__name__)
+logger = logging.getLogger(f"beancount_local.{__name__}")
 
 
 def create_simple_posting(
