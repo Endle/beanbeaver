@@ -1,0 +1,48 @@
+; === PARSED RECEIPT - AWAITING CC MATCH ===
+; @merchant: T&T SUPERMARKET
+; @date: 2025-12-02
+; @total: 32.70
+; @items: 8
+; @image: receipt_20260217_200222.jpg
+; @image_filename: receipt_20260217_200222.jpg
+; @image_sha256: ef7b57c88c4da8ea0169111acaa251f5e7b1a81fff6e52119e56eae8bcd8a38f
+
+2025-12-02 * "T&T SUPERMARKET" "Receipt scan"
+  Liabilities:CreditCard:PENDING   -32.70 CAD
+  Expenses:Food:Grocery:Fruit        2.68 CAD  ; WHITE POMELO
+  Expenses:Food:Grocery:Fruit        2.32 CAD  ; RED POMELO
+  Expenses:Food:Grocery:Vegetable    5.44 CAD  ; BABY BOK CHOY SPROUT
+  Expenses:Food:Grocery:Seasoning    3.14 CAD  ; ORGANIC GINGER
+  Expenses:Food:Grocery:Seasoning    2.68 CAD  ; BAGGED GARLIC
+  Expenses:Food:Grocery:Dairy        4.99 CAD  ; NEILSON JOYYA CHOCOLATE MILK
+  Expenses:Food:Grocery:Drink        4.47 CAD  ; WING HING SWT SOY BEVERAGE
+  Expenses:Food:Grocery:Vegetable    6.98 CAD  ; FF SHEPHERDS PURSE FILLING
+
+; --- Raw OCR Text (for reference) ---
+; T&T Supermarket
+; 12/02/25
+; $0.00
+; PRODUCE W $2.68
+; (SALE) WHITE POMELO
+; (SALE) RED POMELO W $2.32
+; BABY BOK CHOY SPROUT W $5.44
+; 0.825 kg @ $6.59/kg
+; ORGANIC GINGER W $3.14
+; 0.715 kg @ $4.39/kg
+; (SALE) BAGGED GARLIC W $2.68
+; DELI W $4.99
+; NEILSON JOYYA CHOCOLATE MILK
+; JOYYA55
+; (SALE) WING HING SWT SOY BEVERAGE
+; 2 @2/$4.47 W $4.47
+; 690245
+; FF SHEPHERDS PURSE FILLING
+; 2 @ $3.49ea. W $6.98
+; Points
+; 20 $0.00
+; TOTAL $32.70
+; Master $32.70
+; Total points in this transaction: 20
+; Points balance
+; Item count: 10
+; 12/02/25
