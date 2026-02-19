@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import sys
 
+from _pytest.monkeypatch import MonkeyPatch
 from beanbeaver.application.imports import chequing as chequing_import
 from beanbeaver.application.imports import credit_card as credit_card_import
 from beanbeaver.cli import main as unified_cli
 
 
-def test_unified_cli_cc_import_handoff_does_not_mutate_sys_argv(monkeypatch) -> None:
+def test_unified_cli_cc_import_handoff_does_not_mutate_sys_argv(monkeypatch: MonkeyPatch) -> None:
     captured_request: credit_card_import.CreditCardImportRequest | None = None
 
     def fake_run(request: credit_card_import.CreditCardImportRequest) -> credit_card_import.CreditCardImportResult:
@@ -32,7 +33,7 @@ def test_unified_cli_cc_import_handoff_does_not_mutate_sys_argv(monkeypatch) -> 
     )
 
 
-def test_unified_cli_chequing_import_handoff_does_not_mutate_sys_argv(monkeypatch) -> None:
+def test_unified_cli_chequing_import_handoff_does_not_mutate_sys_argv(monkeypatch: MonkeyPatch) -> None:
     captured_request: chequing_import.ChequingImportRequest | None = None
 
     def fake_run(request: chequing_import.ChequingImportRequest) -> chequing_import.ChequingImportResult:
@@ -51,7 +52,7 @@ def test_unified_cli_chequing_import_handoff_does_not_mutate_sys_argv(monkeypatc
     assert captured_request == chequing_import.ChequingImportRequest(csv_file="Preferred_Package_foo.csv")
 
 
-def test_credit_card_main_parses_argv_into_typed_request(monkeypatch) -> None:
+def test_credit_card_main_parses_argv_into_typed_request(monkeypatch: MonkeyPatch) -> None:
     captured_request: credit_card_import.CreditCardImportRequest | None = None
 
     def fake_run(request: credit_card_import.CreditCardImportRequest) -> credit_card_import.CreditCardImportResult:
@@ -71,7 +72,7 @@ def test_credit_card_main_parses_argv_into_typed_request(monkeypatch) -> None:
     )
 
 
-def test_chequing_main_parses_argv_into_typed_request(monkeypatch) -> None:
+def test_chequing_main_parses_argv_into_typed_request(monkeypatch: MonkeyPatch) -> None:
     captured_request: chequing_import.ChequingImportRequest | None = None
 
     def fake_run(request: chequing_import.ChequingImportRequest) -> chequing_import.ChequingImportResult:
