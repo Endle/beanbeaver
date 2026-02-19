@@ -101,7 +101,7 @@ def _line_has_trailing_price(text: str) -> bool:
     """Return True if the line itself ends with a price."""
     if not text:
         return False
-    return re.search(r"\d+\.\d{2}\s*[HhTt]?\s*$", text.strip()) is not None
+    return re.search(r"\d+\.\d{2}\s*[HhTtJj]?\s*$", text.strip()) is not None
 
 
 GENERIC_PRICED_ITEM_LABELS = {"MEAT"}
