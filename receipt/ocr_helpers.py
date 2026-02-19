@@ -4,6 +4,8 @@ import io
 import re
 from typing import Any
 
+from .detection_normalization import normalize_detections
+
 MAX_IMAGE_DIMENSION = 3000  # Resize if either dimension exceeds this
 OCR_IMAGE_PADDING = 50  # White padding around image to prevent edge truncation
 
@@ -351,6 +353,12 @@ def transform_paddleocr_result(raw_result: dict[str, Any], padding: int = OCR_IM
                 "min_x": min_x,
             }
         )
+
+    detection_data = normalize_detections(
+        detection_data,
+        image_width=image_width,
+        image_height=image_height,
+    )
 
     detection_data = _filter_overlapping_bob_markers(detection_data)
 
