@@ -70,12 +70,27 @@ def _strip_leading_receipt_codes(text: str) -> str:
     """Remove leading quantity/SKU prefixes from an OCR item line."""
     if not text:
         return text
-    cleaned = text.strip()
-    # Optional quantity prefix like "(2)" often precedes SKU on grocery receipts.
-    cleaned = re.sub(r"^\(\d+\)\s*", "", cleaned)
-    # Remove long leading SKU codes.
-    cleaned = re.sub(r"^\d{6,}\s*", "", cleaned)
+    _, cleaned = _extract_leading_item_id(text)
     return cleaned.strip()
+
+
+def _extract_leading_item_id(text: str) -> tuple[str | None, str]:
+    """
+    Extract a leading numeric item identifier and return (item_id, remaining_text).
+
+    Supports OCR lines where an item code appears before the description, optionally
+    after a quantity prefix like "(2) 62843020000 DOUGHNUTS MRJ".
+    """
+    if not text:
+        return None, text
+    cleaned = text.strip()
+    cleaned = re.sub(r"^\(\d+\)\s*", "", cleaned)
+    match = re.match(r"^(?P<item_id>\d{6,14})(?:\s+|$)", cleaned)
+    if not match:
+        return None, cleaned.strip()
+    item_id = match.group("item_id")
+    remaining = cleaned[match.end() :].strip()
+    return item_id, remaining
 
 
 def _looks_like_summary_line(text: str) -> bool:
