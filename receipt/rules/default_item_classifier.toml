@@ -238,3 +238,11 @@ keywords = ["KS HOME BAG", "HOME BAG"]
 category = "Expenses:Home:HouseholdSupply"
 priority = 0
 exact_only = false
+
+
+[[rules]]
+id = "legacy_0041"
+keywords = ["KS IBU", "KIRKLAND IBU", "IBUPROFEN", "IBU 400M"]
+category = "Expenses:Health:Pharmacy"
+priority = 0
+exact_only = false
