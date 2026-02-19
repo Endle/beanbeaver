@@ -1,6 +1,7 @@
 """Pure OCR transformation helpers for receipt parsing."""
 
 import io
+import re
 from typing import Any
 
 MAX_IMAGE_DIMENSION = 3000  # Resize if either dimension exceeds this
@@ -158,6 +159,45 @@ def _distance_to_line_span(det: dict, line: list[dict]) -> float:
     return center_y - line_max
 
 
+def _is_bob_marker_text(text: str) -> bool:
+    """Return True for Costco Bottom-Of-Basket marker rows."""
+    upper = text.upper()
+    has_bottom_banner = "BOTTOM OF BAS" in upper
+    has_bob_count_marker = "BOB COUNT" in upper and bool(re.search(r"[X*]{4,}", upper))
+    return has_bottom_banner or has_bob_count_marker
+
+
+def _filter_overlapping_bob_markers(detections: list[dict]) -> list[dict]:
+    """
+    Remove BOB marker detections when they overlap real item rows.
+
+    Costco receipts sometimes contain marker text like:
+    - "*xxxxxxxxxxBottom of Baske...*"
+    - "*x*********BOB Count 3"
+    on the same Y band as an item+price pair. Keeping those markers can
+    hijack line grouping and disconnect the real item description from price.
+    """
+    if not detections:
+        return detections
+
+    filtered: list[dict] = []
+    for det in detections:
+        if not _is_bob_marker_text(det["text"]):
+            filtered.append(det)
+            continue
+
+        overlaps_non_marker = any(
+            other is not det
+            and not _is_bob_marker_text(other["text"])
+            and _boxes_overlap_y(det, other, min_overlap_ratio=0.25)
+            for other in detections
+        )
+        if not overlaps_non_marker:
+            filtered.append(det)
+
+    return filtered
+
+
 def _group_detections_by_y_overlap(detections: list[dict], image_width: int = 1000) -> list[list[dict]]:
     """Group detections into lines using item-first matching."""
     if not detections:
@@ -311,6 +351,8 @@ def transform_paddleocr_result(raw_result: dict[str, Any], padding: int = OCR_IM
                 "min_x": min_x,
             }
         )
+
+    detection_data = _filter_overlapping_bob_markers(detection_data)
 
     # Sort by y-coordinate first, then x-coordinate
     detection_data.sort(key=lambda d: (d["center_y"], d["min_x"]))
