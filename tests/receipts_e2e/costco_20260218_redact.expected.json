@@ -1,0 +1,21 @@
+{
+    "merchant": "COSTCO",
+    "date": "2026-02-18",
+    "total": "221.97",
+    "critical_items": [
+        {
+            "description": "COKE ZERO",
+            "price": "17.19",
+            "category": "Expenses:Food:Grocery:Drink:CocaCola"
+        },
+        {
+            "description": "2% FINE-FILT",
+            "price": "6.69",
+            "category": "Expenses:Food:Grocery:Dairy"
+        },
+        {
+            "description": "DOORDASH2X50",
+            "price": "79.99"
+        }
+    ]
+}

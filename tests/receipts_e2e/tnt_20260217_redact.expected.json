@@ -1,0 +1,26 @@
+{
+    "date": "2026-02-17",
+    "total": "27.02",
+    "critical_items": [
+        {
+            "description": "WASABI IN TUBE",
+            "price": "6.59",
+            "category": "Expenses:Food:Grocery:Seasoning"
+        },
+        {
+            "description": "TOMAX STEAM MEAT 5 SPICES PDR",
+            "price": "2.99",
+            "category": "Expenses:Food:Grocery:Seasoning"
+        },
+        {
+            "description": "WJ LIGHT PRSUD MUSTARD STEM",
+            "price": "6.97",
+            "category": "Expenses:Food:Grocery:Seasoning"
+        },
+        {
+            "description": "MAMA TRUFFLE INSTANT NOODLE",
+            "price": "4.49",
+            "category": "Expenses:Food:Grocery:Staple"
+        }
+    ]
+}
