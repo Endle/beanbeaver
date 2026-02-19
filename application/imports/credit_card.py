@@ -1,10 +1,13 @@
 """Credit card import workflow."""
 
+import argparse
 import datetime
 import io
 import os
-import sys
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from beanbeaver.application.imports.account_discovery import find_open_accounts
 from beanbeaver.application.imports.csv_routing import (
@@ -50,6 +53,30 @@ MBNA_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:MBNA*"]
 PCF_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:PCFinancial*", "Liabilities:CreditCard:PC*"]
 CTFS_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:CTFS*"]
 AMEX_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:Amex*", "Liabilities:CreditCard:AmericanExpress*"]
+
+CreditCardImportStatus = Literal["ok", "aborted", "error"]
+
+
+@dataclass(frozen=True)
+class CreditCardImportRequest:
+    """Inputs for credit-card statement import workflow."""
+
+    csv_file: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+
+
+@dataclass(frozen=True)
+class CreditCardImportResult:
+    """Outcome for credit-card statement import workflow."""
+
+    status: CreditCardImportStatus
+    result_file_path: Path | None = None
+    result_file_name: str | None = None
+    card_account: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    error: str | None = None
 
 
 def detect_credit_card_csv() -> str | None:
@@ -279,33 +306,47 @@ def _resolve_importer(
     raise RuntimeError(f"Unsupported importer type: {detected_importer.__class__.__name__}")
 
 
-def main() -> None:
-    # Safety check: warn about uncommitted changes
-    confirm_uncommitted_changes()
+def parse_credit_card_request(argv: Sequence[str] | None = None) -> CreditCardImportRequest:
+    """Parse CLI args into a typed request object."""
+    parser = argparse.ArgumentParser(description="Import credit card transactions")
+    parser.add_argument("csv_file", nargs="?", help="CSV file to import (auto-detect if omitted)")
+    parser.add_argument("start_date", nargs="?", help="Start date override (MMDD)")
+    parser.add_argument("end_date", nargs="?", help="End date override (MMDD)")
+    args = parser.parse_args(argv)
+    return CreditCardImportRequest(
+        csv_file=args.csv_file,
+        start_date=args.start_date,
+        end_date=args.end_date,
+    )
 
-    # Auto-detect CSV file if not provided
-    csv_file: str | None
-    if len(sys.argv) >= 2:
-        csv_file = sys.argv[1]
-    else:
+
+def run_credit_card_import(request: CreditCardImportRequest) -> CreditCardImportResult:
+    """Run credit-card import workflow and return structured result."""
+    if (request.start_date is None) != (request.end_date is None):
+        return CreditCardImportResult(
+            status="error",
+            error="Provide both start_date and end_date together, or neither.",
+        )
+
+    if not confirm_uncommitted_changes():
+        return CreditCardImportResult(status="aborted")
+
+    csv_file = request.csv_file
+    if not csv_file:
         try:
             csv_file = detect_credit_card_csv()
         except RuntimeError as exc:
-            logger.error(str(exc))
-            sys.exit(1)
+            return CreditCardImportResult(status="error", error=str(exc))
         if csv_file is None:
-            logger.error("No credit card CSV file found in ~/Downloads")
-            logger.info(
-                "Supported files: CIBC.csv, statement.csv, report.csv, Transactions.csv, "
-                "activity.csv, plat.csv, *AMEX*.csv, SIMPLII*.csv, *Scotiabank*.csv, "
-                "Transaction History_*.csv, *MBNA*.csv"
+            return CreditCardImportResult(
+                status="error",
+                error=(
+                    "No credit card CSV file found in ~/Downloads\n"
+                    "Supported files: CIBC.csv, statement.csv, report.csv, Transactions.csv, "
+                    "activity.csv, plat.csv, *AMEX*.csv, SIMPLII*.csv, *Scotiabank*.csv, "
+                    "Transaction History_*.csv, *MBNA*.csv"
+                ),
             )
-            sys.exit(1)
-    assert csv_file is not None
-
-    # Optional manual date override (dates are auto-detected if not provided)
-    start_date: str | None = sys.argv[2] if len(sys.argv) >= 4 else None
-    end_date: str | None = sys.argv[3] if len(sys.argv) >= 4 else None
 
     target_file_name = TMPDIR / os.path.basename(csv_file)
     try:
@@ -316,14 +357,13 @@ def main() -> None:
             allow_absolute=False,
         )
     except FileNotFoundError:
-        logger.error("File not found: %s", csv_file)
-        sys.exit(1)
+        return CreditCardImportResult(status="error", error=f"File not found: {csv_file}")
 
     try:
         importer, card_account, as_of = _resolve_importer(target_file_name, csv_file)
     except RuntimeError as exc:
-        logger.error(str(exc))
-        sys.exit(1)
+        return CreditCardImportResult(status="error", error=str(exc))
+
     logger.info("Importing for %s", card_account)
     if as_of is not None:
         logger.info("Using account discovery as-of date: %s", as_of.isoformat())
@@ -334,27 +374,29 @@ def main() -> None:
 
     printer.print_entries(entries, file=output_buffer)
     beancount_output = output_buffer.getvalue()
-
     if not beancount_output.strip():
-        logger.error("Importer produced no output - CSV may be empty or importer may have failed")
-        sys.exit(1)
+        return CreditCardImportResult(
+            status="error",
+            error="Importer produced no output - CSV may be empty or importer may have failed",
+        )
 
-    explicit_dates = start_date is not None and end_date is not None
+    explicit_dates = request.start_date is not None and request.end_date is not None
     start_date, end_date = detect_statement_date_range(
         beancount_output,
-        start_date=start_date,
-        end_date=end_date,
+        start_date=request.start_date,
+        end_date=request.end_date,
         include_balance=False,
     )
-    if start_date and end_date:
-        if not explicit_dates:
-            logger.info("Auto-detected date range: %s - %s", start_date, end_date)
-    else:
-        logger.error("Could not auto-detect dates from transactions")
+    if not start_date or not end_date:
         # TODO(security): This may include merchant/account/amount details from statements.
         # Keep only for localhost-only operation; redact before non-localhost deployment.
         logger.error("Importer output:\n%s", beancount_output[:500] if beancount_output else "(empty)")
-        sys.exit(1)
+        return CreditCardImportResult(
+            status="error",
+            error="Could not auto-detect dates from transactions",
+        )
+    if not explicit_dates:
+        logger.info("Auto-detected date range: %s - %s", start_date, end_date)
 
     result_file_name = build_result_file(card_account, start_date, end_date)
     result_file_path = write_import_output(
@@ -365,7 +407,29 @@ def main() -> None:
     )
     logger.info("Result file writing to: %s", result_file_path)
     logger.info("Including %s in yearly summary", result_file_name)
+    return CreditCardImportResult(
+        status="ok",
+        result_file_path=result_file_path,
+        result_file_name=result_file_name,
+        card_account=card_account,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    request = parse_credit_card_request(argv)
+    result = run_credit_card_import(request)
+    if result.status == "ok":
+        return 0
+    if result.status == "aborted":
+        logger.info("Import aborted by user.")
+        return 0
+    assert result.error is not None
+    for line in result.error.splitlines():
+        logger.error(line)
+    return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

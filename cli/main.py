@@ -1,12 +1,38 @@
 #!/usr/bin/env python3
 
 import argparse
-import sys
+from collections.abc import Callable, Sequence
 
 from beanbeaver.application.imports.csv_routing import detect_download_route
 
 
-def main() -> None:
+def _coerce_exit_code(code: object) -> int:
+    if code is None:
+        return 0
+    if isinstance(code, int):
+        return code
+    return 1
+
+
+def _run_legacy_command(command: Callable[[argparse.Namespace], None], args: argparse.Namespace) -> int:
+    """
+    Normalize legacy command handlers that still call sys.exit().
+
+    This keeps process termination centralized in this module's entrypoint.
+    """
+    try:
+        command(args)
+    except SystemExit as exc:
+        return _coerce_exit_code(exc.code)
+    return 0
+
+
+def _print_error(error: str) -> None:
+    for line in error.splitlines():
+        print(line)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
     """Main entry point for the CLI."""
     parser = argparse.ArgumentParser(
         description="Beancount utilities CLI",
@@ -74,11 +100,11 @@ Notes:
         help="Path to beancount ledger file (default: main.beancount)",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.command is None:
         parser.print_help()
-        sys.exit(1)
+        return 1
 
     if args.command == "import":
         if args.import_type is None:
@@ -86,67 +112,80 @@ Notes:
                 route = detect_download_route()
             except RuntimeError as exc:
                 print(str(exc))
-                sys.exit(1)
+                return 1
 
             if route is None:
                 print("No matching CSV files found in ~/Downloads.")
                 print("Expected patterns: credit card or chequing CSVs. Provide a file path or name.")
-                sys.exit(1)
+                return 1
             args.import_type = route.import_type
             args.csv_file = route.file_name
 
         if args.import_type == "cc":
-            from beanbeaver.application.imports.credit_card import main as cc_main
+            from beanbeaver.application.imports.credit_card import CreditCardImportRequest, run_credit_card_import
 
-            # Pass args to the cc import main
-            sys.argv = ["credit_card_import"]
-            csv_file = getattr(args, "csv_file", None)
-            start_date = getattr(args, "start_date", None)
-            end_date = getattr(args, "end_date", None)
-            if csv_file:
-                sys.argv.append(csv_file)
-            if start_date and end_date:
-                sys.argv.extend([start_date, end_date])
-            cc_main()
-        elif args.import_type == "chequing":
-            from beanbeaver.application.imports.chequing import main as chequing_main
+            cc_result = run_credit_card_import(
+                CreditCardImportRequest(
+                    csv_file=getattr(args, "csv_file", None),
+                    start_date=getattr(args, "start_date", None),
+                    end_date=getattr(args, "end_date", None),
+                )
+            )
+            if cc_result.status == "error":
+                assert cc_result.error is not None
+                _print_error(cc_result.error)
+                return 1
+            return 0
 
-            # Pass args to the chequing import main
-            sys.argv = ["chequing_import"]
-            csv_file = getattr(args, "csv_file", None)
-            if csv_file:
-                sys.argv.append(csv_file)
-            chequing_main()
+        if args.import_type == "chequing":
+            from beanbeaver.application.imports.chequing import ChequingImportRequest, run_chequing_import
+
+            chequing_result = run_chequing_import(
+                ChequingImportRequest(
+                    csv_file=getattr(args, "csv_file", None),
+                )
+            )
+            if chequing_result.status == "error":
+                assert chequing_result.error is not None
+                _print_error(chequing_result.error)
+                return 1
+            return 0
+
+        print(f"Unsupported import type: {args.import_type}")
+        return 1
 
     elif args.command == "scan":
         from beanbeaver.cli.receipt import cmd_scan
 
-        cmd_scan(args)
+        return _run_legacy_command(cmd_scan, args)
     elif args.command == "serve":
         from beanbeaver.cli.receipt import cmd_serve
 
-        cmd_serve(args)
+        return _run_legacy_command(cmd_serve, args)
     elif args.command == "list-approved":
         from beanbeaver.cli.receipt import cmd_list_approved
 
-        cmd_list_approved(args)
+        return _run_legacy_command(cmd_list_approved, args)
     elif args.command == "list-scanned":
         from beanbeaver.cli.receipt import cmd_list_scanned
 
-        cmd_list_scanned(args)
+        return _run_legacy_command(cmd_list_scanned, args)
     elif args.command == "edit":
         from beanbeaver.cli.receipt import cmd_edit
 
-        cmd_edit(args)
+        return _run_legacy_command(cmd_edit, args)
     elif args.command == "re-edit":
         from beanbeaver.cli.receipt import cmd_re_edit
 
-        cmd_re_edit(args)
-    elif args.command == "match":
+        return _run_legacy_command(cmd_re_edit, args)
+
+    if args.command == "match":
         from beanbeaver.application.receipts.match import cmd_match
 
-        cmd_match(args)
+        return _run_legacy_command(cmd_match, args)
+
+    return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

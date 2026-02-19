@@ -312,12 +312,12 @@ def cmd_debug_overlay(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
-def main() -> None:
+def main() -> int:
     """Compatibility entrypoint; delegates to the unified CLI parser."""
     from beanbeaver.cli.main import main as unified_main
 
-    unified_main()
+    return unified_main()
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
