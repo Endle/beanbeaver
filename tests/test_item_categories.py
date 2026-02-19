@@ -45,6 +45,24 @@ def test_chocolate_milk_with_single_char_noise_maps_to_dairy() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "description",
+    [
+        "LYSOL BATH P 059631882930",
+        "LYS0L BATH P 059631882930",
+        "LYSDL BATH P 059631882930",
+    ],
+)
+def test_lysol_with_d_o_0_noise_maps_to_household_supply(description: str) -> None:
+    assert (
+        categorize_item(
+            description,
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Home:HouseholdSupply"
+    )
+
+
 def test_project_rule_key_maps_via_account_config(tmp_path: Path) -> None:
     classifier = tmp_path / "item_classifier.toml"
     classifier.write_text(

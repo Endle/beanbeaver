@@ -189,6 +189,11 @@ def _get_threshold(kw_len: int) -> float:
         return FUZZY_THRESHOLD_LONG
 
 
+def _normalize_ocr_confusables(text: str) -> str:
+    """Normalize common OCR-confused glyphs used in item matching."""
+    return text.translate(str.maketrans({"0": "O", "D": "O"}))
+
+
 def _contains_with_single_char_noise(keyword: str, description: str) -> tuple[bool, int]:
     """Match multi-word keyword allowing one single-char OCR token between words."""
     kw_tokens = [tok for tok in keyword.upper().split() if tok]
@@ -226,6 +231,9 @@ def _fuzzy_contains(keyword: str, description: str, threshold: float | None = No
     # Normalize: uppercase, remove spaces
     desc_raw = description.upper()
     kw_raw = keyword.upper().strip()
+    desc_conf_raw = _normalize_ocr_confusables(desc_raw)
+    kw_conf_raw = _normalize_ocr_confusables(kw_raw)
+    exact_only = threshold is not None and threshold >= 1.0
 
     # Very short keywords (1-3 chars): exact whole-word match only
     # This avoids false positives like TEA matching in STEAK.
@@ -234,20 +242,35 @@ def _fuzzy_contains(keyword: str, description: str, threshold: float | None = No
         match = re.search(r"\b" + re.escape(kw_raw) + r"\b", desc_raw)
         if match:
             return True, match.start(), True
+        # Optional OCR-tolerant exact for confusable glyphs (e.g., D/O/0).
+        if not exact_only:
+            for token_match in re.finditer(r"[A-Z0-9]+", desc_raw):
+                if _normalize_ocr_confusables(token_match.group(0)) == kw_conf_raw:
+                    return True, token_match.start(), True
         return False, -1, False
 
     desc = desc_raw.replace(" ", "")
     kw = kw_raw.replace(" ", "")
+    desc_conf = desc_conf_raw.replace(" ", "")
+    kw_conf = kw_conf_raw.replace(" ", "")
 
     # Exact containment (fast path)
     exact_pos = desc.find(kw)
     if exact_pos != -1:
         return True, exact_pos, True
+    if not exact_only:
+        exact_pos_conf = desc_conf.find(kw_conf)
+        if exact_pos_conf != -1:
+            return True, exact_pos_conf, True
 
     # Treat "CHOCOLATE E MILK"-style OCR splits as exact phrase matches.
     noisy_phrase_match, noisy_phrase_pos = _contains_with_single_char_noise(kw_raw, desc_raw)
     if noisy_phrase_match:
         return True, noisy_phrase_pos, True
+    if not exact_only:
+        noisy_phrase_match_conf, noisy_phrase_pos_conf = _contains_with_single_char_noise(kw_conf_raw, desc_conf_raw)
+        if noisy_phrase_match_conf:
+            return True, noisy_phrase_pos_conf, True
 
     kw_len = len(kw)
 
@@ -264,12 +287,12 @@ def _fuzzy_contains(keyword: str, description: str, threshold: float | None = No
     best_similarity = 0.0
     best_position = -1
 
-    for start in range(len(desc) - kw_len + 2):
-        window = desc[start : start + window_size]
+    for start in range(len(desc_conf) - kw_len + 2):
+        window = desc_conf[start : start + window_size]
 
         # Use bigram similarity for all keywords (order-sensitive)
         # Character frequency is too permissive (ignores order completely)
-        similarity = _bigram_similarity(kw, window)
+        similarity = _bigram_similarity(kw_conf, window)
 
         if similarity > best_similarity:
             best_similarity = similarity
