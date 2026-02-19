@@ -48,4 +48,3 @@ def normalize_detections(
     for operation in operations or ():
         normalized = operation(normalized, context)
     return normalized
-

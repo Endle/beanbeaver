@@ -13,4 +13,3 @@ def test_normalize_detections_noop_passthrough() -> None:
 
     assert out == detections
     assert out is not detections
-
