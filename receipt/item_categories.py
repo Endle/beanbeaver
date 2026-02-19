@@ -73,6 +73,7 @@ DEFAULT_CATEGORY_ACCOUNTS: dict[str, str] = {
 
 
 RuleEntry = tuple[tuple[str, ...], str, int]
+OCR_CONFUSABLE_TRANS_TABLE = str.maketrans("0D", "OO")
 
 
 @dataclass(frozen=True)
@@ -191,7 +192,7 @@ def _get_threshold(kw_len: int) -> float:
 
 def _normalize_ocr_confusables(text: str) -> str:
     """Normalize common OCR-confused glyphs used in item matching."""
-    return text.translate(str.maketrans({"0": "O", "D": "O"}))
+    return text.translate(OCR_CONFUSABLE_TRANS_TABLE)
 
 
 def _contains_with_single_char_noise(keyword: str, description: str) -> tuple[bool, int]:
