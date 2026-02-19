@@ -13,6 +13,7 @@ class ReceiptItem:
     price: Decimal
     quantity: int = 1
     category: str | None = None  # e.g., "Expenses:Food:Grocery:Dairy"
+    item_id: str | None = None  # Merchant-provided item/SKU/PLU identifier
 
     @property
     def total(self) -> Decimal:

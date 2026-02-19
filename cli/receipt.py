@@ -70,8 +70,9 @@ def cmd_scan(args: argparse.Namespace) -> None:
     print(f"\nItems ({len(receipt.items)}):")
     for i, item in enumerate(receipt.items, 1):
         qty_str = f" x{item.quantity}" if item.quantity > 1 else ""
+        id_str = f" [item_id:{item.item_id}]" if item.item_id else ""
         cat_str = f" [{item.category}]" if item.category else ""
-        print(f"  {i}. {item.description}{qty_str} - ${item.price:.2f}{cat_str}")
+        print(f"  {i}. {item.description}{qty_str}{id_str} - ${item.price:.2f}{cat_str}")
     print("=" * 60)
 
     print(f"\nSaved draft to: {result.scanned_path}")

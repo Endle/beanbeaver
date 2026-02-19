@@ -4,7 +4,7 @@ import re
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from beanbeaver.domain.receipt import Receipt, ReceiptWarning
+from beanbeaver.domain.receipt import Receipt, ReceiptItem, ReceiptWarning
 
 if TYPE_CHECKING:
     from .matcher import MatchResult
@@ -108,6 +108,18 @@ def _inject_posting_warnings(
     return output
 
 
+def _format_item_comment(item: ReceiptItem) -> str:
+    """Build stable item posting comment text."""
+    desc_clean = item.description.replace('"', "'")
+    if item.quantity > 1:
+        comment = f"{desc_clean} (qty {item.quantity})"
+    else:
+        comment = desc_clean
+    if item.item_id:
+        comment = f"{comment} [item_id:{item.item_id}]"
+    return comment
+
+
 def format_parsed_receipt(
     receipt: Receipt,
     credit_card_account: str = "Liabilities:CreditCard:PENDING",
@@ -173,12 +185,7 @@ def format_parsed_receipt(
         posting_idx = len(postings)
         category = item.category or "Expenses:FIXME"
         price_str = f"{item.price:.2f}"
-        desc_clean = item.description.replace('"', "'")
-
-        if item.quantity > 1:
-            postings.append((category, f"{price_str} CAD", f"{desc_clean} (qty {item.quantity})"))
-        else:
-            postings.append((category, f"{price_str} CAD", desc_clean))
+        postings.append((category, f"{price_str} CAD", _format_item_comment(item)))
         item_posting_indexes.append(posting_idx)
 
         items_total += item.price
@@ -260,13 +267,7 @@ def format_draft_beancount(receipt: Receipt, credit_card_account: str = "Liabili
         posting_idx = len(postings)
         category = item.category or default_expense
         price_str = f"{item.price:.2f}"
-        desc_clean = item.description.replace('"', "'")
-
-        # Add quantity note if > 1
-        if item.quantity > 1:
-            postings.append((category, f"{price_str} CAD", f"{desc_clean} (qty {item.quantity})"))
-        else:
-            postings.append((category, f"{price_str} CAD", desc_clean))
+        postings.append((category, f"{price_str} CAD", _format_item_comment(item)))
         item_posting_indexes.append(posting_idx)
 
         items_total += item.price
@@ -388,12 +389,7 @@ def format_enriched_transaction(
     for item in receipt.items:
         category = item.category or expense_base
         price_str = f"{item.price:.2f}"
-        desc_clean = item.description.replace('"', "'")
-
-        if item.quantity > 1:
-            postings.append((category, f"{price_str} CAD", f"{desc_clean} (qty {item.quantity})"))
-        else:
-            postings.append((category, f"{price_str} CAD", desc_clean))
+        postings.append((category, f"{price_str} CAD", _format_item_comment(item)))
 
         items_total += item.price
 

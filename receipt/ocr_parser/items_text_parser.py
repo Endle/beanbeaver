@@ -7,6 +7,7 @@ from beanbeaver.domain.receipt import ReceiptItem, ReceiptWarning
 
 from ..item_categories import ItemCategoryRuleLayers, categorize_item
 from .common import (
+    _extract_leading_item_id,
     _is_section_header_text,
     _looks_like_quantity_expression,
     _looks_like_summary_line,
@@ -187,12 +188,13 @@ def _extract_items(
 
             # Get description from same line (before the price)
             desc_part = line[: match.start()].strip()
+            item_id: str | None = None
             # Promo lines like "REG$8.99 5.99" should use the previous line as description
             force_backward = "REG$" in line_upper or "@REG" in line_upper
 
             # Clean up description - remove item codes at start
             if desc_part:
-                desc_part = re.sub(r"^\d{8,}\s*", "", desc_part)
+                item_id, desc_part = _extract_leading_item_id(desc_part)
 
             # Priced aisle/section headers (e.g., "33-BAKERY INSTORE 12.00") should
             # use a nearby SKU-led item line, not the header text itself.
@@ -238,6 +240,7 @@ def _extract_items(
                         description=desc_part,
                         price=price,
                         category=categorize_item(desc_part, rule_layers=item_category_rule_layers),
+                        item_id=item_id,
                     )
                 )
             else:
@@ -338,6 +341,8 @@ def _extract_items(
                 if found_desc:
                     quantity = 1
                     description_suffix = ""
+                    found_item_id, normalized_found_desc = _extract_leading_item_id(found_desc)
+                    item_desc = normalized_found_desc if normalized_found_desc else found_desc
 
                     # Extract quantity from validated modifiers
                     if qty_modifiers:
@@ -357,13 +362,14 @@ def _extract_items(
 
                     items.append(
                         ReceiptItem(
-                            description=found_desc + description_suffix,
+                            description=item_desc + description_suffix,
                             price=price,
                             quantity=quantity,
                             category=categorize_item(
-                                found_desc,
+                                item_desc,
                                 rule_layers=item_category_rule_layers,
                             ),  # Categorize on item name only
+                            item_id=found_item_id,
                         )
                     )
                 elif warning_sink is not None and price > Decimal("0"):

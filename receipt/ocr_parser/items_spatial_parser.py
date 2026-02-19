@@ -15,6 +15,7 @@ from .common import (
     PRICE_X_THRESHOLD,
     Y_TOLERANCE,
     _clean_description,
+    _extract_leading_item_id,
     _get_word_x_center,
     _get_word_y_center,
     _is_price_word,
@@ -360,7 +361,9 @@ def _extract_items_with_bbox(
         if closest_line and closest_distance <= Y_TOLERANCE:
             line_y, _, left_text, _ = closest_line
             # Clean up the description
-            description = _clean_description(left_text)
+            item_id, left_without_item_id = _extract_leading_item_id(left_text)
+            description_source = left_without_item_id if left_without_item_id else left_text
+            description = _clean_description(description_source)
 
             if description and len(description) > 2:
                 # Mark this item line as used
@@ -370,6 +373,7 @@ def _extract_items_with_bbox(
                         description=description,
                         price=price,
                         category=categorize_item(description, rule_layers=item_category_rule_layers),
+                        item_id=item_id,
                     )
                 )
                 found_item = True
@@ -413,7 +417,9 @@ def _extract_items_with_bbox(
                 if alpha_count < len(left_text_for_ratio) * 0.4:
                     continue
 
-                description = _clean_description(left_text)
+                item_id, left_without_item_id = _extract_leading_item_id(left_text)
+                description_source = left_without_item_id if left_without_item_id else left_text
+                description = _clean_description(description_source)
                 if description and len(description) > 2:
                     # Mark this item line as used
                     used_item_y_positions.add(line_y)
@@ -422,6 +428,7 @@ def _extract_items_with_bbox(
                             description=description,
                             price=price,
                             category=categorize_item(description, rule_layers=item_category_rule_layers),
+                            item_id=item_id,
                         )
                     )
                     found_item = True

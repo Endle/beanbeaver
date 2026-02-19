@@ -321,6 +321,7 @@ def parse_receipt_from_beancount(filepath: Path) -> Receipt:
                 continue
 
             description = match.group(3).strip()
+            item_id: str | None = None
 
             # Skip tax line (handled separately)
             if "Tax:HST" in category or "Tax:GST" in category:
@@ -330,6 +331,12 @@ def parse_receipt_from_beancount(filepath: Path) -> Receipt:
             # Skip FIXME placeholders for unaccounted amounts
             if "FIXME: unaccounted" in description:
                 continue
+
+            # Parse item ID from formatter comment suffix.
+            item_id_match = re.search(r"\[item_id:([^\]\s]+)\]", description)
+            if item_id_match:
+                item_id = item_id_match.group(1)
+                description = re.sub(r"\s*\[item_id:[^\]\s]+\]", "", description).strip()
 
             # Parse quantity from description if present
             quantity = 1
@@ -344,6 +351,7 @@ def parse_receipt_from_beancount(filepath: Path) -> Receipt:
                     price=price,
                     quantity=quantity,
                     category=category,
+                    item_id=item_id,
                 )
             )
 
