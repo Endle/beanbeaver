@@ -1,0 +1,16 @@
+{
+    "merchant": "Walmart",
+    "date": "2026-02-18",
+    "total": "27.30",
+    "critical_items": [
+        {
+            "description": "CRLSH ZER0",
+            "price": "8.28"
+        },
+        {
+            "description": "LYSOL BATH",
+            "price": "3.97",
+            "category": "Expenses:Home:HouseholdSupply"
+        }
+    ]
+}
