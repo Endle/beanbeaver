@@ -129,10 +129,10 @@ def _extract_items(
         # e.g., "3 @ $1.99", "2 /for $3.00", "1.22 lb @ $2.99/lb"
         # EXCEPT: Loblaw format "2 @ 2/$5.00 5.00" has trailing total price on same line
         is_qty_line = _looks_like_quantity_expression(line)
-        has_trailing_total = re.search(r"\s+\d+\.\d{2}\s*[HhTt]?\s*$", line)
+        has_trailing_total = re.search(r"\s+\d+\.\d{2}\s*[HhTtJj]?\s*$", line)
         if is_qty_line and not has_trailing_total:
             if warning_sink is not None and "/for" in line.lower():
-                tail_token_match = re.search(r"([0-9A-Za-z]\.[0-9A-Za-z]{2,3}[HhTt]?)\s*$", line)
+                tail_token_match = re.search(r"([0-9A-Za-z]\.[0-9A-Za-z]{2,3}[HhTtJj]?)\s*$", line)
                 tail_token = tail_token_match.group(1) if tail_token_match else ""
                 if tail_token and any(c.isalpha() for c in tail_token):
                     context = line.strip()
@@ -151,13 +151,13 @@ def _extract_items(
 
         # Skip lines that are just parenthetical codes like "( nel #44)", "(HHIT)".
         # Keep parenthetical promo lines that still carry a trailing item total.
-        if re.match(r"^\([^)]*\)?$", line) and not re.search(r"\d+\.\d{2}\s*[HhTt]?\s*$", line):
+        if re.match(r"^\([^)]*\)?$", line) and not re.search(r"\d+\.\d{2}\s*[HhTtJj]?\s*$", line):
             continue
 
         # Pattern 1: Price at end of line with optional H/tax marker
         # e.g., "SKITTLES GUMM 8.00 H" or "8.00 H" or "24.84"
         # Also handle discounts: "9.00- H" or "9.00-"
-        match = re.search(r"(\d+\.\d{2})(-?)\s*[HhTt]?\s*$", line)
+        match = re.search(r"(\d+\.\d{2})(-?)\s*[HhTtJj]?\s*$", line)
         if match:
             price = Decimal(match.group(1))
             is_discount = match.group(2) == "-"
@@ -171,7 +171,7 @@ def _extract_items(
             if "REG$" in line_upper or "@REG" in line_upper:
                 prices = re.findall(r"(\d+\.\d{2})", line)
                 # If previous line already contains a price, this is just promo info; skip it.
-                if len(prices) > 1 and i > 0 and re.search(r"\d+\.\d{2}\s*[HhTt]?\s*$", lines[i - 1]):
+                if len(prices) > 1 and i > 0 and re.search(r"\d+\.\d{2}\s*[HhTtJj]?\s*$", lines[i - 1]):
                     continue
 
             # Skip if this is a summary line (contains TOTAL/SUBTOTAL keywords)
@@ -208,7 +208,7 @@ def _extract_items(
                         continue
                     if _looks_like_summary_line(next_line):
                         break
-                    next_price_match = re.search(r"(\d+\.\d{2})(-?)\s*[HhTt]?\s*$", next_line)
+                    next_price_match = re.search(r"(\d+\.\d{2})(-?)\s*[HhTtJj]?\s*$", next_line)
                     if next_price_match:
                         next_price = Decimal(next_price_match.group(1))
                         if next_price_match.group(2) == "-":
@@ -259,10 +259,10 @@ def _extract_items(
                             continue
                         if _looks_like_quantity_expression(next_line):
                             continue
-                        if re.search(r"(\d+\.\d{2})(-?)\s*[HhTt]?\s*$", next_line):
+                        if re.search(r"(\d+\.\d{2})(-?)\s*[HhTtJj]?\s*$", next_line):
                             # This line is a standalone priced item; do not borrow it.
                             continue
-                        if re.match(r"^\$?\d+\.\d{2}\s*[HhTt]?\s*$", next_line):
+                        if re.match(r"^\$?\d+\.\d{2}\s*[HhTtJj]?\s*$", next_line):
                             continue
                         if re.match(r"^\d{8,}\s*$", next_line):
                             continue
@@ -284,7 +284,7 @@ def _extract_items(
                     for j in range(i - 1, max(i - 6, -1), -1):
                         prev_line = lines[j].strip()
                         # Skip if it's a price line, skip line, or item code
-                        if re.match(r"^[\d.]+\s*[HhTt]?\s*$", prev_line):
+                        if re.match(r"^[\d.]+\s*[HhTtJj]?\s*$", prev_line):
                             continue
                         if re.match(r"^\d{8,}$", prev_line):
                             continue
@@ -382,7 +382,7 @@ def _extract_items(
         elif warning_sink is not None:
             # OCR can corrupt trailing prices (e.g., "8l.99", "1I.50"), causing
             # otherwise valid item lines to be skipped. Emit a review hint.
-            malformed_price = re.search(r"(\d+[Il]\.\d{2}|\d+\.[Il]\d|\d+\.\d[Il])\s*[HhTt]?\s*$", line)
+            malformed_price = re.search(r"(\d+[Il]\.\d{2}|\d+\.[Il]\d|\d+\.\d[Il])\s*[HhTtJj]?\s*$", line)
             if malformed_price:
                 token = malformed_price.group(1)
                 context = line.strip()
@@ -396,8 +396,8 @@ def _extract_items(
                 )
             # Multi-buy rows can also carry malformed totals like "2 /for S.OOH".
             # These indicate a likely missed item when no parseable trailing total exists.
-            elif "/for" in line.lower() and re.search(r"\b[0-9A-Za-z]\.[0-9A-Za-z]{2,3}[HhTt]?\s*$", line):
-                tail_token_match = re.search(r"([0-9A-Za-z]\.[0-9A-Za-z]{2,3}[HhTt]?)\s*$", line)
+            elif "/for" in line.lower() and re.search(r"\b[0-9A-Za-z]\.[0-9A-Za-z]{2,3}[HhTtJj]?\s*$", line):
+                tail_token_match = re.search(r"([0-9A-Za-z]\.[0-9A-Za-z]{2,3}[HhTtJj]?)\s*$", line)
                 tail_token = tail_token_match.group(1) if tail_token_match else ""
                 if any(c.isalpha() for c in tail_token):
                     context = line.strip()
