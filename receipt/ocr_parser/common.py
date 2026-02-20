@@ -17,8 +17,8 @@ MAX_ITEM_DISTANCE = 0.08  # Max vertical distance to associate price with item
 
 # Section headers to skip (not actual items)
 SECTION_HEADERS = {"MEAT", "SEAFOOD", "PRODUCE", "DELI", "GROCERY", "BAKERY", "FROZEN"}
-SECTION_HEADER_WITH_AISLE = re.compile(r"^\d{1,2}\s*[-:]\s*[A-Z]{3,}$")
-SECTION_AISLE_PREFIX = re.compile(r"^\d{1,2}\s*[-:]")
+SECTION_HEADER_WITH_AISLE = re.compile(r"^[^A-Z0-9]*\d{1,2}\s*[-:]\s*[A-Z]{3,}$")
+SECTION_AISLE_PREFIX = re.compile(r"^[^A-Z0-9]*\d{1,2}\s*[-:]")
 
 # Summary line patterns to exclude
 SUMMARY_PATTERNS = re.compile(
