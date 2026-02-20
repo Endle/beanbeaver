@@ -16,7 +16,7 @@ from beanbeaver.domain.match import (
     match_key,
     transaction_charge_amount,
 )
-from beanbeaver.ledger_access import get_ledger_writer
+from beanbeaver.ledger_access import apply_receipt_match, list_transactions
 from beanbeaver.runtime import get_logger, get_paths
 
 logger = get_logger(__name__)
@@ -106,7 +106,6 @@ def _select_receipts_for_match(
 
 def cmd_match(args: argparse.Namespace) -> None:
     """Match all approved receipts against ledger."""
-    from beanbeaver.ledger_access import get_ledger_reader
     from beanbeaver.receipt.formatter import format_enriched_transaction
     from beanbeaver.receipt.matcher import format_match_for_display, match_receipt_to_transactions
     from beanbeaver.runtime.receipt_storage import (
@@ -116,7 +115,6 @@ def cmd_match(args: argparse.Namespace) -> None:
         move_to_matched,
         parse_receipt_from_beancount,
     )
-    from beancount.core import data as beancount_data
 
     if not sys.stdin.isatty():
         print("Error: bb match requires an interactive TTY.")
@@ -140,11 +138,10 @@ def cmd_match(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     print(f"Loading ledger from {ledger_path}...")
-    ledger_reader = get_ledger_reader()
-    loaded = ledger_reader.load(ledger_path=ledger_path)
-    if loaded.errors:
-        logger.warning("Loaded ledger with %d beancount error(s); matching may be unreliable.", len(loaded.errors))
-    transactions = [e for e in loaded.entries if isinstance(e, beancount_data.Transaction)]
+    snapshot = list_transactions(ledger_path=ledger_path)
+    if snapshot.errors:
+        logger.warning("Loaded ledger with %d beancount error(s); matching may be unreliable.", len(snapshot.errors))
+    transactions = snapshot.transactions
     print(f"Loaded {len(transactions)} transactions")
 
     pending = list_approved_receipts()
@@ -163,7 +160,6 @@ def cmd_match(args: argparse.Namespace) -> None:
     skipped_count = 0
     used_matches: set[tuple[str, int]] = set()
     stopped_early = False
-    ledger_writer = get_ledger_writer()
 
     for path, merchant, receipt_date, amount in selected_receipts:
         date_str = receipt_date.isoformat() if receipt_date else "UNKNOWN"
@@ -263,7 +259,7 @@ def cmd_match(args: argparse.Namespace) -> None:
             include_rel = enriched_path.relative_to(matched_file.parent).as_posix()
 
             try:
-                status = ledger_writer.apply_receipt_match(
+                status = apply_receipt_match(
                     ledger_path=ledger_path,
                     statement_path=matched_file,
                     line_number=selected_match.line_number,
@@ -280,12 +276,12 @@ def cmd_match(args: argparse.Namespace) -> None:
                 used_matches.add(key)
 
                 # Reload transactions so next matches use updated line numbers/content.
-                reloaded = ledger_reader.load(ledger_path=ledger_path)
+                reloaded = list_transactions(ledger_path=ledger_path)
                 if reloaded.errors:
                     print("  Warning: ledger reload has errors; stopping session.")
                     stopped_early = True
                     break
-                transactions = [e for e in reloaded.entries if isinstance(e, beancount_data.Transaction)]
+                transactions = reloaded.transactions
             except Exception as exc:
                 print(f"  Failed to apply match: {exc}")
                 skipped_count += 1

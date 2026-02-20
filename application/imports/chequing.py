@@ -30,7 +30,7 @@ from beanbeaver.domain.chequing_import import (
     parse_eqbank_rows,
     parse_scotia_rows,
 )
-from beanbeaver.ledger_access import get_ledger_reader, get_ledger_writer
+from beanbeaver.ledger_access import transaction_dates_for_account, validate_ledger
 from beanbeaver.runtime import TMPDIR, get_logger, get_paths, load_chequing_categorization_patterns
 
 logger = get_logger(__name__)
@@ -102,7 +102,7 @@ def get_existing_transaction_dates(account: str) -> set[datetime.date]:
 
     Uses privileged ledger reader to find transaction dates for the account.
     """
-    existing_dates = get_ledger_reader().transaction_dates_for_account(account, ledger_path=MAIN_BEANCOUNT_PATH)
+    existing_dates = transaction_dates_for_account(account, ledger_path=MAIN_BEANCOUNT_PATH)
     logger.info("Found %d existing transaction dates for %s", len(existing_dates), account)
     return existing_dates
 
@@ -285,7 +285,7 @@ def run_chequing_import(request: ChequingImportRequest) -> ChequingImportResult:
     logger.info("Including %s in yearly summary", result_file_name)
 
     logger.info("Validating ledger...")
-    validation_errors = get_ledger_writer().validate_ledger(ledger_path=MAIN_BEANCOUNT_PATH)
+    validation_errors = validate_ledger(ledger_path=MAIN_BEANCOUNT_PATH)
     if validation_errors:
         logger.error("Ledger validation found errors:")
         for err in validation_errors[:20]:
