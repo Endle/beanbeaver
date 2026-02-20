@@ -211,6 +211,15 @@ def _looks_like_quantity_expression(text: str) -> bool:
     if _parse_quantity_modifier(text):
         return True
 
+    # Malformed OCR promo fragments often look like:
+    # "(@6.99(1/$1.98", "(J@6.99(1/$1.98)"
+    # They are quantity/offer metadata, not item descriptions.
+    upper = text.upper()
+    if upper.startswith("(") and "@" in upper and "/$" in upper:
+        alpha_count = sum(1 for c in upper if c.isalpha())
+        if alpha_count <= 2:
+            return True
+
     # Additional quantity/offer formats seen in receipts
     return bool(
         re.match(r"^\d+\s*/\s*for\b", text, re.IGNORECASE)

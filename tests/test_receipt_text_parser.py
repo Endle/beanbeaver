@@ -46,3 +46,26 @@ def test_extract_items_keeps_priced_meat_label_as_item() -> None:
 
 def test_section_header_with_symbol_prefix_is_detected() -> None:
     assert _is_section_header_text("&& 06-Frozen")
+
+
+def test_extract_items_skips_malformed_offer_fragments_with_price() -> None:
+    lines = [
+        "XBL - Spicy Crawfish Past 1.98",
+        "(J@6.99(1/$1.98)",
+        "1 @ $1.98",
+        "XBL - Spicy Crawfish Past 1.98",
+        "(@6.99(1/$1.98",
+        "1 @ $1.98",
+        "SUB Total 3.96",
+        "Total after Tax 3.96",
+    ]
+
+    items = _extract_items(
+        lines,
+        summary_amounts={Decimal("3.96")},
+        item_category_rule_layers=load_item_category_rule_layers(),
+    )
+
+    matching = [item for item in items if item.price == Decimal("1.98")]
+    assert len(matching) == 2
+    assert all(item.description == "XBL - Spicy Crawfish Past" for item in matching)
