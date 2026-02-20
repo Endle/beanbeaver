@@ -35,6 +35,16 @@ def test_coors_maps_to_alcoholic_beverage() -> None:
     )
 
 
+def test_sonicare_maps_to_personal_care_tooth() -> None:
+    assert (
+        categorize_item(
+            "SONICARE TOOTHBRUSH HEADS",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:PersonalCare:Tooth"
+    )
+
+
 def test_chocolate_milk_with_single_char_noise_maps_to_dairy() -> None:
     assert (
         categorize_item(

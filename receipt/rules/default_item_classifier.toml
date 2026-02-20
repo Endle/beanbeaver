@@ -192,7 +192,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0031"
-keywords = ["TOOTHPASTE", "TOOTHBRUSH", "MOUTHWASH", "DENTAL FLOSS", "FLOSS"]
+keywords = ["TOOTHPASTE", "TOOTHBRUSH", "MOUTHWASH", "DENTAL FLOSS", "FLOSS", "SONICARE"]
 category = "Expenses:PersonalCare:Tooth"
 priority = 0
 exact_only = false
