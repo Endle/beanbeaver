@@ -45,6 +45,28 @@ def test_sonicare_maps_to_personal_care_tooth() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("description", "expected"),
+    [
+        ("HLY - Fish Cracker Seawee", "Expenses:Food:Grocery:Snacks"),
+        ("TY - Lemon Tea", "Expenses:Food:Grocery:Drink"),
+        ("LHL - Malatang Slightly S", "Expenses:Food:Grocery:Staple"),
+        ("Pork Lard", "Expenses:Food:Grocery:Seasoning"),
+        ("BQ - Frozen Raw Peeled Un", "Expenses:Food:Grocery:Seafood:Shrimp"),
+        ("BAKERY", "Expenses:Food:Grocery:Bakery"),
+        ("Hot Food", "Expenses:Food:Grocery:PreparedMeal"),
+    ],
+)
+def test_public_default_foodmart_overrides(description: str, expected: str) -> None:
+    assert (
+        categorize_item(
+            description,
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == expected
+    )
+
+
 def test_chocolate_milk_with_single_char_noise_maps_to_dairy() -> None:
     assert (
         categorize_item(
