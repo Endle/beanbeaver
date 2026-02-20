@@ -55,7 +55,7 @@ class LedgerTransactionList:
 def _map_posting(posting: data.Posting) -> LedgerPosting:
     units = posting.units
     mapped_units = None
-    if units is not None:
+    if units is not None and units.number is not None and units.currency is not None:
         mapped_units = LedgerAmount(number=units.number, currency=units.currency)
     return LedgerPosting(account=posting.account, units=mapped_units)
 
