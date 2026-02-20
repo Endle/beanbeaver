@@ -192,7 +192,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0031"
-keywords = ["TOOTHPASTE", "TOOTHBRUSH", "MOUTHWASH", "DENTAL FLOSS", "FLOSS"]
+keywords = ["TOOTHPASTE", "TOOTHBRUSH", "MOUTHWASH", "DENTAL FLOSS", "FLOSS", "SONICARE"]
 category = "Expenses:PersonalCare:Tooth"
 priority = 0
 exact_only = false
@@ -237,4 +237,61 @@ id = "legacy_0040"
 keywords = ["KS HOME BAG", "HOME BAG"]
 category = "Expenses:Home:HouseholdSupply"
 priority = 0
+exact_only = false
+
+
+[[rules]]
+id = "legacy_0041"
+keywords = ["KS IBU", "KIRKLAND IBU", "IBUPROFEN", "IBU 400M"]
+category = "Expenses:Health:Pharmacy"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0042"
+keywords = ["FISH CRACKER SEAWEE"]
+category = "Expenses:Food:Grocery:Snacks"
+priority = 80
+exact_only = false
+
+[[rules]]
+id = "legacy_0043"
+keywords = ["LEMON TEA"]
+category = "Expenses:Food:Grocery:Drink"
+priority = 70
+exact_only = false
+
+[[rules]]
+id = "legacy_0044"
+keywords = ["MALATANG"]
+category = "Expenses:Food:Grocery:Staple"
+priority = 70
+exact_only = false
+
+[[rules]]
+id = "legacy_0045"
+keywords = ["LARD", "PORK LARD"]
+category = "Expenses:Food:Grocery:Seasoning"
+priority = 60
+exact_only = false
+
+[[rules]]
+id = "legacy_0046"
+keywords = ["PEELED"]
+category = "Expenses:Food:Grocery:Seafood:Shrimp"
+priority = -150
+exact_only = true
+
+[[rules]]
+id = "legacy_0047"
+keywords = ["BAKERY"]
+category = "Expenses:Food:Grocery:Bakery"
+priority = 20
+exact_only = true
+
+[[rules]]
+id = "legacy_0048"
+keywords = ["HOT FOOD"]
+category = "Expenses:Food:Grocery:PreparedMeal"
+priority = 40
 exact_only = false

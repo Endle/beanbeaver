@@ -17,8 +17,8 @@ MAX_ITEM_DISTANCE = 0.08  # Max vertical distance to associate price with item
 
 # Section headers to skip (not actual items)
 SECTION_HEADERS = {"MEAT", "SEAFOOD", "PRODUCE", "DELI", "GROCERY", "BAKERY", "FROZEN"}
-SECTION_HEADER_WITH_AISLE = re.compile(r"^\d{1,2}\s*[-:]\s*[A-Z]{3,}$")
-SECTION_AISLE_PREFIX = re.compile(r"^\d{1,2}\s*[-:]")
+SECTION_HEADER_WITH_AISLE = re.compile(r"^[^A-Z0-9]*\d{1,2}\s*[-:]\s*[A-Z]{3,}$")
+SECTION_AISLE_PREFIX = re.compile(r"^[^A-Z0-9]*\d{1,2}\s*[-:]")
 
 # Summary line patterns to exclude
 SUMMARY_PATTERNS = re.compile(
@@ -210,6 +210,15 @@ def _looks_like_quantity_expression(text: str) -> bool:
     # Structured patterns handled by _parse_quantity_modifier()
     if _parse_quantity_modifier(text):
         return True
+
+    # Malformed OCR promo fragments often look like:
+    # "(@6.99(1/$1.98", "(J@6.99(1/$1.98)"
+    # They are quantity/offer metadata, not item descriptions.
+    upper = text.upper()
+    if upper.startswith("(") and "@" in upper and "/$" in upper:
+        alpha_count = sum(1 for c in upper if c.isalpha())
+        if alpha_count <= 2:
+            return True
 
     # Additional quantity/offer formats seen in receipts
     return bool(
