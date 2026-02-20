@@ -1,9 +1,25 @@
 """Centralized ledger access for Beancount files."""
 
-from beanbeaver.ledger_access.reader import get_ledger_reader
-from beanbeaver.ledger_access.writer import get_ledger_writer
+from beanbeaver.ledger_access.api import (
+    LedgerAmount,
+    LedgerPosting,
+    LedgerTransaction,
+    LedgerTransactionList,
+    apply_receipt_match,
+    list_transactions,
+    open_accounts,
+    transaction_dates_for_account,
+    validate_ledger,
+)
 
 __all__ = [
-    "get_ledger_reader",
-    "get_ledger_writer",
+    "LedgerAmount",
+    "LedgerPosting",
+    "LedgerTransaction",
+    "LedgerTransactionList",
+    "apply_receipt_match",
+    "list_transactions",
+    "open_accounts",
+    "transaction_dates_for_account",
+    "validate_ledger",
 ]

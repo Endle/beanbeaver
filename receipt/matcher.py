@@ -11,18 +11,33 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-
-# TODO we may remove this beancount import in future
-from beancount.core import data
+from typing import Any, Protocol, cast
 
 from beanbeaver.domain.receipt import Receipt
+
+
+class AmountLike(Protocol):
+    number: Decimal
+    currency: str
+
+
+class PostingLike(Protocol):
+    account: str
+    units: AmountLike | None
+
+
+class TransactionLike(Protocol):
+    date: date
+    payee: str | None
+    narration: str | None
+    postings: Sequence[PostingLike]
 
 
 @dataclass
 class MatchResult:
     """Result of matching a receipt to a transaction."""
 
-    transaction: data.Transaction
+    transaction: TransactionLike
     file_path: str
     line_number: int
     confidence: float  # 0.0 to 1.0
@@ -154,7 +169,7 @@ def _try_match_receipt(
 
 def find_matching_transactions(
     receipt: Receipt,
-    ledger_entries: Sequence[data.Directive],
+    ledger_entries: Sequence[object],
     config: MatchConfig | None = None,
 ) -> list[MatchResult]:
     """
@@ -171,13 +186,12 @@ def find_matching_transactions(
     if config is None:
         config = MatchConfig()
 
-    transactions = [e for e in ledger_entries if isinstance(e, data.Transaction)]
-    return match_receipt_to_transactions(receipt, transactions, config)
+    return match_receipt_to_transactions(receipt, list(ledger_entries), config)
 
 
 def match_receipt_to_transactions(
     receipt: Receipt,
-    transactions: list[data.Transaction],
+    transactions: Sequence[object],
     config: MatchConfig | None = None,
 ) -> list[MatchResult]:
     """
@@ -197,7 +211,7 @@ def match_receipt_to_transactions(
     matches = []
 
     for txn in transactions:
-        result = _try_match(receipt, txn, config)
+        result = _try_match(receipt, cast(TransactionLike, txn), config)
         if result:
             matches.append(result)
 
@@ -209,7 +223,7 @@ def match_receipt_to_transactions(
 
 def _try_match(
     receipt: Receipt,
-    txn: data.Transaction,
+    txn: TransactionLike,
     config: MatchConfig,
 ) -> MatchResult | None:
     """
@@ -271,9 +285,18 @@ def _try_match(
     else:
         details.append(f"merchant: partial match ({merchant_score:.0%})")
 
-    # Get file info from metadata
-    file_path = txn.meta.get("filename", "unknown")
-    line_number = txn.meta.get("lineno", 0)
+    # Prefer DTO-provided source location; fall back to beancount-like metadata.
+    file_path = str(getattr(txn, "file_path", "unknown"))
+    line_number = int(getattr(txn, "line_number", 0))
+    if file_path == "unknown" and line_number == 0:
+        meta = getattr(txn, "meta", {})
+        if isinstance(meta, dict):
+            file_path = str(meta.get("filename", "unknown"))
+            raw_lineno: Any = meta.get("lineno", 0)
+            try:
+                line_number = int(raw_lineno)
+            except (TypeError, ValueError):
+                line_number = 0
 
     return MatchResult(
         transaction=txn,

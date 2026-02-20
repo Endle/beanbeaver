@@ -6,7 +6,7 @@ import datetime as dt
 from pathlib import Path
 
 from beanbeaver.application.imports.shared import select_interactive_option
-from beanbeaver.ledger_access import get_ledger_reader
+from beanbeaver.ledger_access import open_accounts
 
 CC_PAYMENT_RULES: list[tuple[str, list[str]]] = [
     (
@@ -30,7 +30,7 @@ def find_open_accounts(
     ledger_path: Path | None = None,
 ) -> list[str]:
     """Return open account names matching any of the patterns."""
-    return get_ledger_reader().open_accounts(
+    return open_accounts(
         patterns=patterns,
         as_of=as_of,
         ledger_path=ledger_path,
