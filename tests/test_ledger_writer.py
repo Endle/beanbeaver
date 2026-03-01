@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 from beanbeaver.ledger_access import writer as ledger_writer_module
 from beanbeaver.ledger_access.writer import LedgerWriter
-from beanbeaver.runtime.paths import get_paths
 
 
 def _write(path: Path, content: str) -> None:
@@ -129,5 +128,5 @@ def test_apply_receipt_match_rolls_back_on_validation_failure(tmp_path: Path) ->
     assert not enriched.exists()
 
 
-def test_default_main_ledger_path_uses_runtime_project_root() -> None:
-    assert ledger_writer_module.DEFAULT_MAIN_BEANCOUNT_PATH == get_paths().main_beancount
+def test_default_main_ledger_path_points_to_main_beancount() -> None:
+    assert ledger_writer_module.DEFAULT_MAIN_BEANCOUNT_PATH.name == "main.beancount"

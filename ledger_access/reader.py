@@ -17,10 +17,10 @@ from typing import Any
 from beancount.core import data
 from beancount.loader import load_file
 
-from beanbeaver.runtime.paths import get_paths
+from beanbeaver.ledger_access._paths import default_main_beancount_path
 
 logger = logging.getLogger(f"beancount_local.{__name__}")
-DEFAULT_MAIN_BEANCOUNT_PATH = get_paths().main_beancount
+DEFAULT_MAIN_BEANCOUNT_PATH = default_main_beancount_path()
 
 
 @dataclass(frozen=True)
