@@ -20,8 +20,10 @@ def test_refund_preserves_detected_category() -> None:
 
     assert rendered is not None
     assert rendered.postings[0].account == "Liabilities:CreditCard:Dan:BMO:Porter"
+    assert rendered.postings[0].units is not None
     assert rendered.postings[0].units.number == Decimal("8.99")
     assert rendered.postings[1].account == "Expenses:Food:Grocery"
+    assert rendered.postings[1].units is not None
     assert rendered.postings[1].units.number == Decimal("-8.99")
 
 
@@ -37,6 +39,8 @@ def test_small_uncategorized_purchase_uses_not_assigned_bucket() -> None:
 
     assert rendered is not None
     assert rendered.postings[0].account == "Liabilities:CreditCard:Dan:BMO:Porter"
+    assert rendered.postings[0].units is not None
     assert rendered.postings[0].units.number == Decimal("-4.96")
     assert rendered.postings[1].account == "Expenses:Shopping:NotAssigned"
+    assert rendered.postings[1].units is not None
     assert rendered.postings[1].units.number == Decimal("4.96")

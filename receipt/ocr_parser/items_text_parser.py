@@ -197,8 +197,10 @@ def _extract_items(
 
             # Priced aisle/section headers (e.g., "33-BAKERY INSTORE 12.00") should
             # use a nearby SKU-led item line, not the header text itself.
-            is_priced_section_header = bool(desc_part) and _is_section_header_text(desc_part) and not _is_priced_generic_item_label(
-                desc_part, line
+            is_priced_section_header = (
+                bool(desc_part)
+                and _is_section_header_text(desc_part)
+                and not _is_priced_generic_item_label(desc_part, line)
             )
             skip_section_header_price = False
             if is_priced_section_header:
