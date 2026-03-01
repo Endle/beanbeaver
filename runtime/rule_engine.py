@@ -85,7 +85,8 @@ class RuleEngine:
 
         return rules
 
-    def _load_public_rules(self) -> list[dict[str, Any]]:
+    @staticmethod
+    def _load_public_rules() -> list[dict[str, Any]]:
         """Return built-in public fallback rules."""
         return [
             {"keywords": [keyword.upper() for keyword in keywords], "category": category}
