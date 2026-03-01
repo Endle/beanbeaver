@@ -80,9 +80,7 @@ def _rollback_applied_matches(applied: Sequence[_AppliedMatchUndo]) -> tuple[int
                     approved_receipt_path=undo.approved_receipt_path,
                 )
             else:
-                warnings.append(
-                    f"Matched receipt not found during rollback: {undo.matched_receipt_path}"
-                )
+                warnings.append(f"Matched receipt not found during rollback: {undo.matched_receipt_path}")
             reverted_count += 1
         except Exception as exc:
             warnings.append(f"Rollback failed for {undo.approved_receipt_path.name}: {exc}")
@@ -269,9 +267,11 @@ def cmd_match(args: argparse.Namespace) -> None:
         if not available_matches and matches:
             print("  All candidates were already used in this run.")
             while True:
-                reuse_choice = input(
-                    "  [u] Show used candidates | [s] Skip | [x] Save-and-exit | [a] Abort session: "
-                ).strip().lower()
+                reuse_choice = (
+                    input("  [u] Show used candidates | [s] Skip | [x] Save-and-exit | [a] Abort session: ")
+                    .strip()
+                    .lower()
+                )
                 if reuse_choice in {"s", "skip"}:
                     print("  Skipped")
                     skipped_count += 1

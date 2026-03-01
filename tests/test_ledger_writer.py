@@ -127,5 +127,7 @@ def test_apply_receipt_match_rolls_back_on_validation_failure(tmp_path: Path) ->
 
     assert statement.read_text() == original_statement
     assert not enriched.exists()
+
+
 def test_default_main_ledger_path_points_to_main_beancount() -> None:
     assert ledger_writer_module.DEFAULT_MAIN_BEANCOUNT_PATH == default_main_beancount_path()

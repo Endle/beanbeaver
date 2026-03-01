@@ -51,5 +51,7 @@ def test_open_credit_card_accounts_uses_scoped_prefix(tmp_path: Path) -> None:
     accounts = reader.open_credit_card_accounts(as_of=date(2023, 1, 1))
 
     assert accounts == ["Liabilities:CreditCard:CardA"]
+
+
 def test_default_main_ledger_path_points_to_main_beancount() -> None:
     assert ledger_reader_module.DEFAULT_MAIN_BEANCOUNT_PATH == default_main_beancount_path()
