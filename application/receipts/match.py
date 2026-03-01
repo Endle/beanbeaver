@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 from beanbeaver.domain.match import (
     itemized_receipt_total,
@@ -87,6 +88,25 @@ def _rollback_applied_matches(applied: Sequence[_AppliedMatchUndo]) -> tuple[int
             warnings.append(f"Rollback failed for {undo.approved_receipt_path.name}: {exc}")
 
     return reverted_count, warnings
+
+
+def _format_ledger_errors(errors: Sequence[Any], *, limit: int = 5) -> list[str]:
+    """Render a concise list of Beancount loader errors for CLI output."""
+    formatted: list[str] = []
+    for err in list(errors)[:limit]:
+        source = getattr(err, "source", None)
+        message = getattr(err, "message", None) or str(err)
+        if isinstance(source, dict):
+            filename = source.get("filename")
+            lineno = source.get("lineno")
+            if filename and lineno:
+                formatted.append(f"{filename}:{lineno} - {message}")
+                continue
+            if filename:
+                formatted.append(f"{filename} - {message}")
+                continue
+        formatted.append(str(message))
+    return formatted
 
 
 def _ensure_git_clean_before_match() -> bool:
@@ -208,7 +228,12 @@ def cmd_match(args: argparse.Namespace) -> None:
     ledger_reader = get_ledger_reader()
     loaded = ledger_reader.load(ledger_path=ledger_path)
     if loaded.errors:
-        logger.warning("Loaded ledger with %d beancount error(s); matching may be unreliable.", len(loaded.errors))
+        print(f"Error: ledger has {len(loaded.errors)} Beancount error(s). Fix ledger errors before matching.")
+        for line in _format_ledger_errors(loaded.errors, limit=5):
+            print(f"  - {line}")
+        if len(loaded.errors) > 5:
+            print(f"  ... and {len(loaded.errors) - 5} more")
+        return
     transactions = [e for e in loaded.entries if isinstance(e, beancount_data.Transaction)]
     print(f"Loaded {len(transactions)} transactions")
 
