@@ -6,6 +6,7 @@ from datetime import date
 from pathlib import Path
 
 from beanbeaver.ledger_access import reader as ledger_reader_module
+from beanbeaver.ledger_access._paths import default_main_beancount_path
 from beanbeaver.ledger_access.reader import LedgerReader
 
 
@@ -50,7 +51,5 @@ def test_open_credit_card_accounts_uses_scoped_prefix(tmp_path: Path) -> None:
     accounts = reader.open_credit_card_accounts(as_of=date(2023, 1, 1))
 
     assert accounts == ["Liabilities:CreditCard:CardA"]
-
-
 def test_default_main_ledger_path_points_to_main_beancount() -> None:
-    assert ledger_reader_module.DEFAULT_MAIN_BEANCOUNT_PATH.name == "main.beancount"
+    assert ledger_reader_module.DEFAULT_MAIN_BEANCOUNT_PATH == default_main_beancount_path()
