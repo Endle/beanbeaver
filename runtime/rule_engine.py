@@ -92,7 +92,6 @@ class RuleEngine:
             {"keywords": [keyword.upper() for keyword in keywords], "category": category}
             for keywords, category in _PUBLIC_KEYWORD_RULES
         ]
-
     def register_rule(self, rule_func: Callable[[CategorizationInput], str | None]) -> None:
         """Register a Python rule function.
 
