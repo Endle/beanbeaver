@@ -22,6 +22,20 @@ CC_PAYMENT_RULES: list[tuple[str, list[str]]] = [
     ("AMEX BILL PYMT", ["Liabilities:CreditCard:Amex*", "Liabilities:CreditCard:AmericanExpress*"]),
 ]
 
+BANK_TRANSFER_RULES: list[tuple[str, list[str]]] = [
+    ("CIBC", ["Assets:Bank:*CIBC*"]),
+    ("SCOTIABANK", ["Assets:Bank:*Scotia*"]),
+    ("SCOTIA", ["Assets:Bank:*Scotia*"]),
+    ("EQ BANK", ["Assets:Bank:*EQBank*"]),
+    ("EQBANK", ["Assets:Bank:*EQBank*"]),
+    ("TANGERINE", ["Assets:Bank:*Tangerine*"]),
+    ("BMO", ["Assets:Bank:*BMO*"]),
+    ("HSBC", ["Assets:Bank:*HSBC*"]),
+    ("MANULIFE", ["Assets:Bank:*Manulife*"]),
+]
+
+_CC_TRANSFER_HINTS = ("MASTERCARD", "VISA", "AMEX", "CREDIT CARD")
+
 
 def find_open_accounts(
     patterns: list[str],
@@ -88,5 +102,79 @@ def resolve_cc_payment_account(
         if cache is not None:
             cache[pattern] = selected
         return selected
+
+    return None
+
+
+def resolve_bank_transfer_account(
+    description: str,
+    *,
+    as_of: dt.date | None = None,
+    ledger_path: Path | None = None,
+    source_account: str | None = None,
+    cache: dict[str, str | None] | None = None,
+) -> str | None:
+    """
+    Resolve an internal bank transfer description to an open bank account.
+
+    Returns None when no reliable target match is found.
+    """
+    desc_upper = description.upper()
+    if "TRANSFER TO" not in desc_upper and "TRANSFER FROM" not in desc_upper:
+        return None
+    if any(token in desc_upper for token in _CC_TRANSFER_HINTS):
+        return None
+
+    if "TRANSFER TO" in desc_upper:
+        target_segment = desc_upper.split("TRANSFER TO", 1)[1]
+    elif "TRANSFER FROM" in desc_upper:
+        target_segment = desc_upper.split("TRANSFER FROM", 1)[1]
+    else:
+        target_segment = desc_upper
+
+    seen_labels: set[str] = set()
+    candidate_labels: list[str] = []
+    for label, _patterns in BANK_TRANSFER_RULES:
+        if label in target_segment and label not in seen_labels:
+            seen_labels.add(label)
+            candidate_labels.append(label)
+    for label, _patterns in BANK_TRANSFER_RULES:
+        if label in desc_upper and label not in seen_labels:
+            seen_labels.add(label)
+            candidate_labels.append(label)
+
+    for label in candidate_labels:
+        cache_key = f"bank-transfer:{label}:{source_account or ''}"
+        if cache is not None and cache_key in cache:
+            return cache[cache_key]
+
+        patterns = next((rule_patterns for rule_label, rule_patterns in BANK_TRANSFER_RULES if rule_label == label), [])
+        matches = find_open_accounts(patterns, as_of=as_of, ledger_path=ledger_path)
+        if source_account is not None:
+            matches = [account for account in matches if account != source_account]
+
+        if not matches:
+            if cache is not None:
+                cache[cache_key] = None
+            continue
+        if len(matches) == 1:
+            if cache is not None:
+                cache[cache_key] = matches[0]
+            return matches[0]
+
+        normalized_label = label.replace(" ", "").upper()
+        narrowed = [
+            account
+            for account in matches
+            if normalized_label in account.replace("-", "").replace("_", "").replace(" ", "").upper()
+        ]
+        if len(narrowed) == 1:
+            if cache is not None:
+                cache[cache_key] = narrowed[0]
+            return narrowed[0]
+
+        if cache is not None:
+            cache[cache_key] = None
+        return None
 
     return None

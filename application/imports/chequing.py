@@ -12,7 +12,11 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 
-from beanbeaver.application.imports.account_discovery import find_open_accounts, resolve_cc_payment_account
+from beanbeaver.application.imports.account_discovery import (
+    find_open_accounts,
+    resolve_bank_transfer_account,
+    resolve_cc_payment_account,
+)
 from beanbeaver.application.imports.csv_routing import detect_chequing_csv as detect_chequing_csv_by_rules
 from beanbeaver.application.imports.shared import (
     confirm_uncommitted_changes,
@@ -239,6 +243,7 @@ def run_chequing_import(request: ChequingImportRequest) -> ChequingImportResult:
     # Process transactions - sorted by date
     entries: list[tuple[datetime.date, str]] = []
     cc_cache: dict[str, str | None] = {}
+    transfer_cache: dict[str, str | None] = {}
     for date, description, amount_val, _balance_val in parsed_rows:
         cc_account = resolve_cc_payment_account(
             description,
@@ -250,8 +255,17 @@ def run_chequing_import(request: ChequingImportRequest) -> ChequingImportResult:
         if cc_account:
             expense_account = cc_account
         else:
-            category = categorize_chequing_transaction(description, patterns=categorization_patterns)
-            expense_account = category if category else "Expenses:Uncategorized"
+            transfer_account = resolve_bank_transfer_account(
+                description,
+                as_of=as_of,
+                source_account=account,
+                cache=transfer_cache,
+            )
+            if transfer_account:
+                expense_account = transfer_account
+            else:
+                category = categorize_chequing_transaction(description, patterns=categorization_patterns)
+                expense_account = category if category else "Expenses:Uncategorized"
 
         txn_text = format_transaction(date, description, amount_val, account, expense_account)
         entries.append((date, txn_text))
