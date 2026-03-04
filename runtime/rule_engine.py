@@ -40,18 +40,28 @@ class RuleEngine:
         """
         paths = get_paths()
         project_config_path = Path(config_path) if config_path is not None else paths.merchant_rules
-        default_config_path = paths.default_merchant_rules
+        default_candidates = [paths.default_merchant_rules]
+        legacy_default = getattr(paths, "legacy_default_merchant_rules", None)
+        if isinstance(legacy_default, Path):
+            default_candidates.append(legacy_default)
 
         project_rules = self._load_toml(project_config_path)
-        public_rules = self._load_toml(default_config_path)
+        public_rules: list[dict[str, Any]] = []
+        seen_default_paths: set[Path] = set()
+        for candidate in default_candidates:
+            resolved = candidate.resolve()
+            if resolved in seen_default_paths:
+                continue
+            seen_default_paths.add(resolved)
+            public_rules.extend(self._load_toml(candidate))
         self.toml_rules: list[dict[str, Any]] = [*project_rules, *public_rules]
         self.python_rules: list[Callable[[CategorizationInput], str | None]] = []
         logger.debug(
-            "Loaded %d project rules from %s and %d public default rules from %s",
+            "Loaded %d project rules from %s and %d public default rules from %d path(s)",
             len(project_rules),
             project_config_path,
             len(public_rules),
-            default_config_path,
+            len(seen_default_paths),
         )
 
     def _load_toml(self, config_path: Path) -> list[dict[str, Any]]:

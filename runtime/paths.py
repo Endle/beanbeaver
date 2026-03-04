@@ -61,8 +61,18 @@ class ProjectPaths:
         return self.config / "merchant_rules.toml"
 
     @property
+    def rules(self) -> Path:
+        """Vendor shared default rules directory."""
+        return self.src / "rules"
+
+    @property
     def default_merchant_rules(self) -> Path:
-        """Vendor default merchant categorization rules TOML file."""
+        """Vendor default merchant categorization rules TOML file (canonical)."""
+        return self.rules / "default_merchant_rules.toml"
+
+    @property
+    def legacy_default_merchant_rules(self) -> Path:
+        """Legacy vendor default merchant rules path."""
         return self.src / "runtime" / "rules" / "default_merchant_rules.toml"
 
     @property
@@ -82,7 +92,12 @@ class ProjectPaths:
 
     @property
     def default_item_classifier_rules(self) -> Path:
-        """Vendor default receipt item classifier rules TOML file."""
+        """Vendor default receipt item classifier rules TOML file (canonical)."""
+        return self.rules / "default_item_classifier.toml"
+
+    @property
+    def legacy_default_item_classifier_rules(self) -> Path:
+        """Legacy vendor default receipt item classifier rules path."""
         return self.src / "receipt" / "rules" / "default_item_classifier.toml"
 
     # --- Records/ledger paths ---
