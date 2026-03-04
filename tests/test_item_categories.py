@@ -136,3 +136,23 @@ def test_pork_large_intestine_prefers_meat_over_lard_false_positive() -> None:
         )
         == "Expenses:Food:Grocery:Meat"
     )
+
+
+def test_fruit_ft_header_maps_to_fruit() -> None:
+    assert (
+        categorize_item(
+            "&& Fruit (FT)",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Fruit"
+    )
+
+
+def test_wing_hing_sweet_soy_bever_prefix_maps_to_drink() -> None:
+    assert (
+        categorize_item(
+            "Wing Hing Sweet Soy Bever",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Drink"
+    )

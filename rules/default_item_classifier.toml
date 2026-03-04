@@ -295,3 +295,17 @@ keywords = ["HOT FOOD"]
 category = "Expenses:Food:Grocery:PreparedMeal"
 priority = 40
 exact_only = false
+
+[[rules]]
+id = "legacy_0049"
+keywords = ["FRUIT (FT)"]
+category = "Expenses:Food:Grocery:Fruit"
+priority = 20
+exact_only = true
+
+[[rules]]
+id = "legacy_0050"
+keywords = ["WING HING SWEET SOY BEVER"]
+category = "Expenses:Food:Grocery:Drink"
+priority = -5
+exact_only = false
