@@ -242,9 +242,20 @@ def _extract_items_with_bbox(
 
         def is_valid_item_line(line_y: float, left_text: str, full_text: str) -> bool:
             """Check if a line is a valid item description."""
+            left_text_for_ratio = _strip_leading_receipt_codes(left_text)
+            if not left_text_for_ratio:
+                return False
+            short_alpha_word = re.sub(r"[^A-Za-z]", "", left_text_for_ratio)
+            # Allow short produce-like single words (e.g., "Napa") while still
+            # rejecting symbol-heavy OCR noise.
+            is_short_alpha_item = bool(re.fullmatch(r"[A-Za-z]{3,}", short_alpha_word))
             if not left_text:
                 return False
-            if len(left_text) < 5 and not _is_priced_generic_item_label(left_text, full_text):
+            if (
+                len(left_text) < 5
+                and not _is_priced_generic_item_label(left_text, full_text)
+                and not is_short_alpha_item
+            ):
                 return False
             if total_line_y is not None and line_y > total_line_y + Y_TOLERANCE:
                 return False
@@ -258,9 +269,6 @@ def _extract_items_with_bbox(
             # Skip bare item/SKU code lines, but allow SKU-prefixed item descriptions.
             if re.match(r"^\d{8,}\s*$", full_text):
                 return False
-            left_text_for_ratio = _strip_leading_receipt_codes(left_text)
-            if not left_text_for_ratio:
-                return False
             alpha_count = sum(1 for c in left_text_for_ratio if c.isalpha())
             if alpha_count / len(left_text_for_ratio) < 0.5:
                 return False
@@ -269,7 +277,12 @@ def _extract_items_with_bbox(
                 return False
             # Skip short single-word garbage (likely failed OCR)
             # Valid items usually have multiple words or are longer
-            if len(left_text) < 8 and " " not in left_text and not _is_priced_generic_item_label(left_text, full_text):
+            if (
+                len(left_text) < 8
+                and " " not in left_text
+                and not _is_priced_generic_item_label(left_text, full_text)
+                and not is_short_alpha_item
+            ):
                 return False
             if FOOTER_ADDRESS_PATTERNS.search(full_text):
                 return False

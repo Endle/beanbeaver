@@ -126,3 +126,13 @@ grocery_staple = "Expenses:Food:Grocery:Staple"
         )
         == "Expenses:Food:Grocery:Staple"
     )
+
+
+def test_pork_large_intestine_prefers_meat_over_lard_false_positive() -> None:
+    assert (
+        categorize_item(
+            "Pork Large Intestine",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Meat"
+    )

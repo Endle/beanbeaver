@@ -273,7 +273,7 @@ id = "legacy_0045"
 keywords = ["LARD", "PORK LARD"]
 category = "Expenses:Food:Grocery:Seasoning"
 priority = 60
-exact_only = false
+exact_only = true
 
 [[rules]]
 id = "legacy_0046"
