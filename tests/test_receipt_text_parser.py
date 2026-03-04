@@ -69,3 +69,26 @@ def test_extract_items_skips_malformed_offer_fragments_with_price() -> None:
     matching = [item for item in items if item.price == Decimal("1.98")]
     assert len(matching) == 2
     assert all(item.description == "XBL - Spicy Crawfish Past" for item in matching)
+
+
+def test_extract_items_skips_reg_marker_only_price_lines() -> None:
+    lines = [
+        "&& Frozen",
+        "*Shirakiku Frozen Imitatio 1.99",
+        "(9)@REG$3.99",
+        "*Frozen Raw Vannanei White",
+        "(@REG15.99",
+        "3 @ $10.99 32.97",
+        "SUB Total 34.96",
+        "Total after Tax 34.96",
+    ]
+
+    items = _extract_items(
+        lines,
+        summary_amounts={Decimal("34.96")},
+        item_category_rule_layers=load_item_category_rule_layers(),
+    )
+
+    assert [item.price for item in items] == [Decimal("1.99"), Decimal("32.97")]
+    assert items[0].description == "*Shirakiku Frozen Imitatio"
+    assert items[1].description == "*Frozen Raw Vannanei White"

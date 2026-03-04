@@ -166,11 +166,19 @@ def _extract_items(
                 price = -price
 
             line_upper = line.upper()
+            desc_part = line[: match.start()].strip()
             # Handle @REG$/REG$ promo lines.
             # If line is just a reg-price marker (single price), skip it.
             # If line includes both reg and sale prices, treat as price line for the item above.
-            if "REG$" in line_upper or "@REG" in line_upper:
+            if "REG$" in line_upper or "@REG" in line_upper or "0REG" in line_upper or "OREG" in line_upper:
                 prices = re.findall(r"(\d+\.\d{2})", line)
+                if len(prices) == 1:
+                    # Marker-only rows like "(9)@REG$3.99" are metadata, not payable totals.
+                    # Keep descriptive rows such as "ITEM @REG$8.99" for fallback matching.
+                    marker = re.sub(r"[^A-Z0-9]", "", desc_part.upper())
+                    marker = re.sub(r"^\d+", "", marker)
+                    if marker in {"REG", "0REG", "OREG"}:
+                        continue
                 # If previous line already contains a price, this is just promo info; skip it.
                 if len(prices) > 1 and i > 0 and re.search(r"\d+\.\d{2}\s*[HhTtJj]?\s*$", lines[i - 1]):
                     continue
@@ -187,7 +195,6 @@ def _extract_items(
                     continue
 
             # Get description from same line (before the price)
-            desc_part = line[: match.start()].strip()
             # Promo lines like "REG$8.99 5.99" should use the previous line as description
             force_backward = "REG$" in line_upper or "@REG" in line_upper
 
