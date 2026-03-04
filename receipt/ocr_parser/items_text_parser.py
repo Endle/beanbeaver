@@ -170,14 +170,21 @@ def _extract_items(
             # Handle @REG$/REG$ promo lines.
             # If line is just a reg-price marker (single price), skip it.
             # If line includes both reg and sale prices, treat as price line for the item above.
-            if "REG$" in line_upper or "@REG" in line_upper or "0REG" in line_upper or "OREG" in line_upper:
+            has_reg_marker = (
+                "REG$" in line_upper
+                or "@REG" in line_upper
+                or "0REG" in line_upper
+                or "OREG" in line_upper
+                or re.search(r"(?:^|[^A-Z0-9])[0-9OI]?REG\$?\d+\.\d{2}", line_upper) is not None
+            )
+            if has_reg_marker:
                 prices = re.findall(r"(\d+\.\d{2})", line)
                 if len(prices) == 1:
                     # Marker-only rows like "(9)@REG$3.99" are metadata, not payable totals.
                     # Keep descriptive rows such as "ITEM @REG$8.99" for fallback matching.
                     marker = re.sub(r"[^A-Z0-9]", "", desc_part.upper())
                     marker = re.sub(r"^\d+", "", marker)
-                    if marker in {"REG", "0REG", "OREG"}:
+                    if marker in {"REG", "0REG", "OREG", "IREG"}:
                         continue
                 # If previous line already contains a price, this is just promo info; skip it.
                 if len(prices) > 1 and i > 0 and re.search(r"\d+\.\d{2}\s*[HhTtJj]?\s*$", lines[i - 1]):

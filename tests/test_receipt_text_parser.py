@@ -92,3 +92,23 @@ def test_extract_items_skips_reg_marker_only_price_lines() -> None:
     assert [item.price for item in items] == [Decimal("1.99"), Decimal("32.97")]
     assert items[0].description == "*Shirakiku Frozen Imitatio"
     assert items[1].description == "*Frozen Raw Vannanei White"
+
+
+def test_extract_items_skips_reg_marker_without_dollar_or_at_symbol() -> None:
+    lines = [
+        "*Vita Hongkong Style Milk 2.99",
+        "(1REG8.99",
+        "*KsF Big Instant Noodles ( 6.99",
+        "SUB Total 9.98",
+        "Total after Tax 9.98",
+    ]
+
+    items = _extract_items(
+        lines,
+        summary_amounts={Decimal("9.98")},
+        item_category_rule_layers=load_item_category_rule_layers(),
+    )
+
+    assert [item.price for item in items] == [Decimal("2.99"), Decimal("6.99")]
+    assert items[0].description == "*Vita Hongkong Style Milk"
+    assert items[1].description == "*KsF Big Instant Noodles ("
