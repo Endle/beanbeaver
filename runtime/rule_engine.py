@@ -16,10 +16,6 @@ from beanbeaver.runtime.paths import get_paths
 
 logger = get_logger(__name__)
 
-_PUBLIC_KEYWORD_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
-    (("STRUC-TUBE", "STRUC TUBE"), "Expenses:Home:Furniture"),
-)
-
 
 class CategorizationInput(Protocol):
     """Minimal input contract required by the rules engine."""
@@ -42,18 +38,20 @@ class RuleEngine:
         Args:
             config_path: Path to the TOML config file. If None, uses default location.
         """
-        if config_path is None:
-            config_path = get_paths().merchant_rules
+        paths = get_paths()
+        project_config_path = Path(config_path) if config_path is not None else paths.merchant_rules
+        default_config_path = paths.default_merchant_rules
 
-        project_rules = self._load_toml(config_path)
-        public_rules = self._load_public_rules()
+        project_rules = self._load_toml(project_config_path)
+        public_rules = self._load_toml(default_config_path)
         self.toml_rules: list[dict[str, Any]] = [*project_rules, *public_rules]
         self.python_rules: list[Callable[[CategorizationInput], str | None]] = []
         logger.debug(
-            "Loaded %d project TOML rules from %s and %d built-in public fallback rules",
+            "Loaded %d project rules from %s and %d public default rules from %s",
             len(project_rules),
-            config_path,
+            project_config_path,
             len(public_rules),
+            default_config_path,
         )
 
     def _load_toml(self, config_path: Path) -> list[dict[str, Any]]:
@@ -84,14 +82,6 @@ class RuleEngine:
             rule["keywords"] = [kw.upper() for kw in rule.get("keywords", [])]
 
         return rules
-
-    @staticmethod
-    def _load_public_rules() -> list[dict[str, Any]]:
-        """Return built-in public fallback rules."""
-        return [
-            {"keywords": [keyword.upper() for keyword in keywords], "category": category}
-            for keywords, category in _PUBLIC_KEYWORD_RULES
-        ]
 
     def register_rule(self, rule_func: Callable[[CategorizationInput], str | None]) -> None:
         """Register a Python rule function.

@@ -38,8 +38,16 @@ class ProjectPaths:
     # --- Source code paths ---
     @property
     def src(self) -> Path:
-        """Bean Beaver code directory (vendor/beanbeaver/)."""
-        return self.root / "vendor" / "beanbeaver"
+        """Bean Beaver code directory.
+
+        Supports both:
+        - host project layout: <root>/vendor/beanbeaver/
+        - standalone beanbeaver layout: <root>/
+        """
+        vendored = self.root / "vendor" / "beanbeaver"
+        if vendored.exists():
+            return vendored
+        return self.root
 
     # --- Configuration paths ---
     @property
@@ -49,8 +57,13 @@ class ProjectPaths:
 
     @property
     def merchant_rules(self) -> Path:
-        """Merchant categorization rules TOML file."""
+        """Project-local merchant categorization rules TOML file."""
         return self.config / "merchant_rules.toml"
+
+    @property
+    def default_merchant_rules(self) -> Path:
+        """Vendor default merchant categorization rules TOML file."""
+        return self.src / "runtime" / "rules" / "default_merchant_rules.toml"
 
     @property
     def chequing_rules(self) -> Path:
