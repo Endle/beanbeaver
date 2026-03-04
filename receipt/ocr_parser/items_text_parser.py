@@ -241,6 +241,15 @@ def _extract_items(
             # Check if desc_part is valid: not empty, not too short, not a quantity expression
             # Quantity expressions like "2 @ 2/$5.00" should trigger backward search instead
             # Also handle promotional patterns like "(1 /for $2.99) 1 /for" from C&C receipts
+            is_malformed_price_marker = bool(
+                desc_part
+                and desc_part.startswith("(")
+                and "$" in desc_part
+                and " " not in desc_part
+                and len(desc_part) <= 16
+                and "@" not in desc_part
+                and "REG" not in desc_part.upper()
+            )
             is_qty_expr = (
                 (
                     _looks_like_quantity_expression(desc_part)
@@ -250,6 +259,8 @@ def _extract_items(
                 if desc_part
                 else False
             )
+            if is_malformed_price_marker:
+                continue
 
             if desc_part and len(desc_part) > 2 and not is_qty_expr and not force_backward:
                 items.append(

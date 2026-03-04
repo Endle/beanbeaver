@@ -112,3 +112,23 @@ def test_extract_items_skips_reg_marker_without_dollar_or_at_symbol() -> None:
     assert [item.price for item in items] == [Decimal("2.99"), Decimal("6.99")]
     assert items[0].description == "*Vita Hongkong Style Milk"
     assert items[1].description == "*KsF Big Instant Noodles ("
+
+
+def test_extract_items_skips_malformed_parenthesized_price_marker() -> None:
+    lines = [
+        "*Samyang Buldak Artificial 5.99",
+        "(=kx(EG$8.99",
+        "Wing Hing Sweet Soy Bever 2.99",
+        "SUB Total 8.98",
+        "Total after Tax 8.98",
+    ]
+
+    items = _extract_items(
+        lines,
+        summary_amounts={Decimal("8.98")},
+        item_category_rule_layers=load_item_category_rule_layers(),
+    )
+
+    assert [item.price for item in items] == [Decimal("5.99"), Decimal("2.99")]
+    assert items[0].description == "*Samyang Buldak Artificial"
+    assert items[1].description == "Wing Hing Sweet Soy Bever"
