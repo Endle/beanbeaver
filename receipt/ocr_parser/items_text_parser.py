@@ -9,6 +9,7 @@ from ..item_categories import ItemCategoryRuleLayers, categorize_item
 from .common import (
     _is_priced_generic_item_label,
     _is_section_header_text,
+    _line_has_trailing_price,
     _looks_like_quantity_expression,
     _looks_like_summary_line,
     _normalize_decimal_spacing,
@@ -222,6 +223,7 @@ def _extract_items(
 
             line_upper = line.upper()
             desc_part = line[: match.start()].strip()
+            compact_line = re.sub(r"\s+", "", line_upper)
             # Handle @REG$/REG$ promo lines.
             # If line is just a reg-price marker (single price), skip it.
             # If line includes both reg and sale prices, treat as price line for the item above.
@@ -243,6 +245,13 @@ def _extract_items(
                         continue
                 # If previous line already contains a price, this is just promo info; skip it.
                 if len(prices) > 1 and i > 0 and re.search(r"\d+\.\d{2}\s*[HhTtJj]?\s*$", lines[i - 1]):
+                    continue
+
+            # Compact promo marker tokens (e.g., "EG2.99", "REG$2.99") can be
+            # OCR artifacts from regular-price metadata and should not create
+            # a synthetic item by backfilling to a prior priced row.
+            if re.match(r"^[A-Z]{1,5}\$?\d+\.\d{2}[HHTTJJ]?$", compact_line):
+                if i > 0 and _line_has_trailing_price(lines[i - 1]):
                     continue
 
             # Skip if this is a summary line (contains TOTAL/SUBTOTAL keywords)
@@ -317,7 +326,28 @@ def _extract_items(
                 else False
             )
             if is_malformed_price_marker:
-                continue
+                # Recover cases where OCR split a multi-buy marker across lines, e.g.:
+                #   "*Item x2"
+                #   "($2F 3.99"
+                #   "(2 /for $3.99) 2 /for"
+                # In this shape, treat current row as a price-only row and search
+                # backwards for the unpriced descriptive line.
+                prev_line = lines[i - 1].strip() if i > 0 else ""
+                next_line = lines[i + 1].strip() if i + 1 < len(lines) else ""
+                prev_looks_like_description = bool(
+                    prev_line
+                    and not skip_regex.search(prev_line)
+                    and not _looks_like_summary_line(prev_line)
+                    and not _looks_like_quantity_expression(prev_line)
+                    and not _line_has_trailing_price(prev_line)
+                )
+                next_supports_multi_buy = bool(next_line and _looks_like_quantity_expression(next_line))
+                if prev_looks_like_description and next_supports_multi_buy:
+                    force_backward = True
+                    desc_part = ""
+                    is_qty_expr = False
+                else:
+                    continue
             # Lines like "2 @ 9.69" are quantity/unit-price metadata, not item names.
             if is_quantity_stub:
                 continue

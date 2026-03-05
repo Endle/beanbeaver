@@ -267,3 +267,51 @@ def test_extract_items_keeps_priced_bakery_generic_label() -> None:
     assert len(items) == 1
     assert items[0].description == "BAKERY"
     assert items[0].price == Decimal("6.99")
+
+
+def test_extract_items_recovers_item_from_split_multibuy_price_marker() -> None:
+    lines = [
+        "SunriseTofu 700g",
+        "() 5.99",
+        "*Kam Yen Jan Chinese Sausa",
+        "*Yo Yan Soya Drink Sweet x2",
+        "($2F 3.99",
+        "(2 /for $3.99) 2 /for",
+        "&& Taxed Grocery",
+        "\"Orion Potato Chips-Orig x1",
+        "(2 /for $5.00) 2 /for 5.00H",
+        "SUB Total 14.98",
+        "Total after Tax 14.98",
+    ]
+
+    items = _extract_items(
+        lines,
+        summary_amounts={Decimal("14.98")},
+        item_category_rule_layers=load_item_category_rule_layers(),
+    )
+
+    assert any(item.description == "SunriseTofu 700g" and item.price == Decimal("5.99") for item in items)
+    assert any(item.description == "*Yo Yan Soya Drink Sweet x2" and item.price == Decimal("3.99") for item in items)
+    assert any(item.description == "\"Orion Potato Chips-Orig x1" and item.price == Decimal("5.00") for item in items)
+
+
+def test_extract_items_skips_compact_promo_marker_ghost_price_line() -> None:
+    lines = [
+        "*Asahi Rich Calpis Drink 1.99",
+        "EG2.99",
+        "JHL. Fried Red Onion 227g 6.99",
+        "SUB Total 8.98",
+        "Total after Tax 8.98",
+    ]
+
+    items = _extract_items(
+        lines,
+        summary_amounts={Decimal("8.98")},
+        item_category_rule_layers=load_item_category_rule_layers(),
+    )
+
+    assert len(items) == 2
+    assert items[0].description == "*Asahi Rich Calpis Drink"
+    assert items[0].price == Decimal("1.99")
+    assert items[1].description == "JHL. Fried Red Onion 227g"
+    assert items[1].price == Decimal("6.99")
