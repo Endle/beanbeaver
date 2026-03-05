@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from .common import MIN_LINE_CONFIDENCE
+from .common import MIN_LINE_CONFIDENCE, _normalize_decimal_spacing
 
 
 def _extract_merchant(
@@ -185,6 +185,16 @@ def _extract_total(lines: list[str]) -> Decimal:
         if any(phrase in line_upper for phrase in excluded_phrases):
             continue
         if "TOTAL" in line_upper and "SUBTOTAL" not in line_upper:
+            prev_upper = lines[idx - 1].upper() if idx > 0 else ""
+            next_upper = lines[idx + 1].upper() if idx + 1 < len(lines) else ""
+            # Skip footer discount totals like:
+            #   TOTAL NUMBER OF ITEMS SOLD
+            #   TOTAL $ 5.00
+            #   DISCOUNT(S)
+            if "DISCOUNT" in next_upper:
+                continue
+            if "TOTAL NUMBER OF ITEMS SOLD" in prev_upper:
+                continue
             # Try to find price on same line
             amount = _extract_price_from_line(line)
             if amount:
@@ -210,23 +220,8 @@ def _extract_tax(lines: list[str]) -> Decimal | None:
     """Extract tax amount (HST, GST, PST, TAX)."""
     if not lines:
         return None
-
-    # Prefer tax in the summary block near the bottom of the receipt.
-    # Anchor the search to the first summary-like line in the bottom half.
-    anchor_idx = None
-    start_search = max(0, len(lines) - max(20, len(lines) // 2))
-    for i in range(start_search, len(lines)):
-        upper = lines[i].upper()
-        if "SUBTOTAL" in upper or "SUB TOTAL" in upper or "TOTAL AFTER TAX" in upper or upper.startswith("TOTAL"):
-            anchor_idx = i
-            break
-
-    if anchor_idx is None:
-        # Fallback: bottom quarter of receipt
-        anchor_idx = max(0, len(lines) - max(10, len(lines) // 4))
-
-    search_range = range(anchor_idx, len(lines))
-    for i in search_range:
+    # Scan bottom-up to prefer summary/footer tax lines while avoiding over-narrow anchors.
+    for i in range(len(lines) - 1, -1, -1):
         line = lines[i]
         line_upper = line.upper()
         # Skip lines that are about subtotal or total (with or without space)
@@ -299,6 +294,7 @@ def _extract_subtotal(lines: list[str]) -> Decimal | None:
 
 def _extract_price_from_line(line: str) -> Decimal | None:
     """Extract a price from a line of text."""
+    line = _normalize_decimal_spacing(line)
     # Look for price patterns: $XX.XX, XX.XX, etc.
     patterns = [
         r"\$?\s*(\d+\.\d{2})\s*$",  # Price at end of line

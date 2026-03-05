@@ -306,6 +306,7 @@ def _extract_items(
                 and "@" not in desc_part
                 and "REG" not in desc_part.upper()
             )
+            is_quantity_stub = bool(re.match(r"^\d+\s*@\s*$", desc_part))
             is_qty_expr = (
                 (
                     _looks_like_quantity_expression(desc_part)
@@ -316,6 +317,9 @@ def _extract_items(
                 else False
             )
             if is_malformed_price_marker:
+                continue
+            # Lines like "2 @ 9.69" are quantity/unit-price metadata, not item names.
+            if is_quantity_stub:
                 continue
 
             if desc_part and len(desc_part) > 2 and not is_qty_expr and not force_backward:
