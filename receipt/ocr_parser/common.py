@@ -15,6 +15,9 @@ ITEM_X_THRESHOLD = 0.6  # Item names typically appear on left side (X < this)
 Y_TOLERANCE = 0.02  # How close Y coordinates must be to be "same row"
 MAX_ITEM_DISTANCE = 0.08  # Max vertical distance to associate price with item
 
+# OCR sometimes inserts a space after decimal points, e.g. "3. 50".
+SPACED_DECIMAL_PATTERN = re.compile(r"(?<=\d)\.\s+(?=\d{2}\b)")
+
 # Section headers to skip (not actual items)
 SECTION_HEADERS = {"MEAT", "SEAFOOD", "PRODUCE", "DELI", "GROCERY", "BAKERY", "FROZEN"}
 SECTION_HEADER_WITH_AISLE = re.compile(r"^[^A-Z0-9]*\d{1,2}\s*[-:]\s*[A-Z]{3,}$")
@@ -46,6 +49,13 @@ QUANTITY_MODIFIER_PATTERNS = [
     # "2 /for $3.00" or "(2 /for $3.00)"
     (re.compile(r"^\(?(\d+)\s*/\s*for\s+\$?(\d+\.\d{2})\)?"), "multi_for_price"),
 ]
+
+
+def _normalize_decimal_spacing(text: str) -> str:
+    """Normalize OCR-split decimal tokens like ``3. 50`` to ``3.50``."""
+    if not text:
+        return text
+    return SPACED_DECIMAL_PATTERN.sub(".", text)
 
 
 def _is_section_header_text(text: str) -> bool:
