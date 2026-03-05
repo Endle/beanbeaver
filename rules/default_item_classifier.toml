@@ -372,3 +372,46 @@ keywords = ["1457015 GLIDE ADV", "GLIDE ADV"]
 category = "Expenses:PersonalCare:Tooth"
 priority = -80
 exact_only = false
+
+[[rules]]
+id = "legacy_0060"
+keywords = ["1968518 WHITE RABBIT", "WHITE RABBIT"]
+category = "Expenses:Food:Grocery:Snacks"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0061"
+keywords = ["443404 MARC ANTHONY", "MARC ANTHONY"]
+category = "Expenses:PersonalCare"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0062"
+keywords = ["1796144 TOLIET 2PK", "TOLIET 2PK"]
+category = "Expenses:Home:HouseholdSupply"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0063"
+keywords = ["3966510 FO TANK S", "FO TANK S", "TPD TANK TOP", "TANK TOP"]
+category = "Expenses:Shopping:Clothing"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0064"
+keywords = ["599010 LAVAZZA 1KG", "LAVAZZA 1KG", "LAVAZZA"]
+category = "Expenses:Food:Grocery:Drink:Coffee"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0065"
+keywords = ["1355285 IOG0 VAN 2KG", "1355285 TOGO VAN 2KG", "IOG0 VAN 2KG", "TOGO VAN 2KG"]
+category = "Expenses:Food:Grocery:Dairy"
+priority = -80
+exact_only = false
+

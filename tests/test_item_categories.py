@@ -246,3 +246,94 @@ def test_glide_adv_maps_to_tooth_care_with_low_priority_public_rule() -> None:
         )
         == "Expenses:PersonalCare:Tooth"
     )
+
+
+def test_white_rabbit_maps_to_snacks_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "1968518 WHITE RABBIT",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Snacks"
+    )
+
+
+def test_marc_anthony_maps_to_personal_care_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "443404 MARC ANTHONY",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:PersonalCare"
+    )
+
+
+def test_toliet_2pk_maps_to_household_supply_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "1796144 TOLIET 2PK",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Home:HouseholdSupply"
+    )
+
+
+def test_fo_tank_s_maps_to_clothing_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "3966510 FO TANK S",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Shopping:Clothing"
+    )
+
+
+def test_lavazza_1kg_maps_to_coffee_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "599010 LAVAZZA 1KG",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Drink:Coffee"
+    )
+
+
+def test_togo_van_2kg_maps_to_dairy_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "1355285 TOGO VAN 2KG",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Dairy"
+    )
+
+
+def test_tpd_discount_codes_map_with_low_priority_public_rules() -> None:
+    assert (
+        categorize_item(
+            "2046069 TPD/1696237",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Snacks"
+    )
+    assert (
+        categorize_item(
+            "2046398 TPD/2773717",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Drink"
+    )
+    assert (
+        categorize_item(
+            "2031650 TPU/599010",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Drink:Coffee"
+    )
+    assert (
+        categorize_item(
+            "2043894 T D/1355285",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Dairy"
+    )
