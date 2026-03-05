@@ -11,15 +11,10 @@ You can use either mode on its own, but using both brings the synergy of semi-au
 
 ## Example
 
-Input: [Loblaw receipt](https://github.com/Endle/beanbeaver/blob/master/tests/receipts_e2e/loblaw_20260211_censor.jpg)
-Output:
-```
-2026-02-01 * "LOBLAW" "Receipt scan"
-  Liabilities:CreditCard:PENDING   -16.41 CAD
-  Expenses:Food:AlcoholicBeverage   13.99 CAD  ; COORS LIGHT 6 PK HQ
-  Expenses:FIXME                     0.60 CAD  ; DEPOSIT 1 anuojal astgA.etteupit
-  Expenses:FIXME                     1.82 CAD  ; H=HST 13% 13.99 @ 13.000%
-```
+[Input: T&T receipt](https://github.com/Endle/beanbeaver/blob/master/demo/receipt_groups/tnt_20251202/receipt_20260217_200222.jpg)
+
+[Output: Itemized Beancount Record](https://github.com/Endle/beanbeaver/blob/master/demo/receipt_groups/tnt_20251202/2025-12-02_t_t_supermarket_32_70.beancount)
+
 
 ## CLI Usage
 
