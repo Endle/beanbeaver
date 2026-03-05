@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from beanbeaver.receipt.ocr_parser.common import _is_spatial_layout_receipt
 from beanbeaver.receipt.ocr_parser.items_spatial_parser import _extract_items_with_bbox
 from beanbeaver.runtime.item_category_rules import load_item_category_rule_layers
 
@@ -80,3 +81,40 @@ def test_extract_items_with_bbox_keeps_short_produce_name_alignment() -> None:
     assert ("Soybean Sprout", Decimal("1.03")) in pairs
     assert ("Fresh Baby Shanghai Miu", Decimal("3.37")) in pairs
     assert ("Coriander", Decimal("3.00")) in pairs
+
+
+def test_is_spatial_layout_receipt_detects_nofrills() -> None:
+    assert _is_spatial_layout_receipt([], "NOFRILLS\nPETER & SUZI'S NF MARKHAM\nTOTAL 46.56")
+
+
+def test_extract_items_with_bbox_accepts_spaced_decimal_price_words() -> None:
+    lines = [
+        {
+            "text": "(2)05707200195 LUNCH MEAT MRJ",
+            "words": [
+                _word("(2)05707200195 LUNCH MEAT", 0.06, 0.167, 0.59, 0.189),
+                _word("MRJ", 0.664, 0.172, 0.741, 0.191),
+            ],
+        },
+        {
+            "text": "2 @ $1.75 3. 50",
+            "words": [
+                _word("2 @ $1.75", 0.099, 0.188, 0.297, 0.207),
+                _word("3. 50", 0.856, 0.190, 0.955, 0.210),
+            ],
+        },
+        {
+            "text": "TOTAL 3.50",
+            "words": [
+                _word("TOTAL", 0.08, 0.520, 0.18, 0.540),
+                _word("3.50", 0.86, 0.520, 0.94, 0.540),
+            ],
+        },
+    ]
+
+    items = _extract_items_with_bbox(
+        pages=[{"lines": lines}],
+        item_category_rule_layers=load_item_category_rule_layers(),
+    )
+
+    assert any(item.description == "LUNCH MEAT" and item.price == Decimal("3.50") for item in items)

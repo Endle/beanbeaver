@@ -15,9 +15,8 @@ ITEM_X_THRESHOLD = 0.6  # Item names typically appear on left side (X < this)
 Y_TOLERANCE = 0.02  # How close Y coordinates must be to be "same row"
 MAX_ITEM_DISTANCE = 0.08  # Max vertical distance to associate price with item
 
-# OCR sometimes inserts a space after decimal points, e.g. "3. 50".
+# OCR sometimes inserts spaces inside decimal amounts, e.g. "3. 50".
 SPACED_DECIMAL_PATTERN = re.compile(r"(?<=\d)\.\s+(?=\d{2}\b)")
-
 # Section headers to skip (not actual items)
 SECTION_HEADERS = {"MEAT", "SEAFOOD", "PRODUCE", "DELI", "GROCERY", "BAKERY", "FROZEN"}
 SECTION_HEADER_WITH_AISLE = re.compile(r"^[^A-Z0-9]*\d{1,2}\s*[-:]\s*[A-Z]{3,}$")
@@ -111,7 +110,8 @@ def _line_has_trailing_price(text: str) -> bool:
     """Return True if the line itself ends with a price."""
     if not text:
         return False
-    return re.search(r"\d+\.\d{2}\s*[HhTtJj]?\s*$", text.strip()) is not None
+    normalized = _normalize_decimal_spacing(text.strip())
+    return re.search(r"\d+\.\d{2}\s*[HhTtJj]?\s*$", normalized) is not None
 
 
 GENERIC_PRICED_ITEM_LABELS = {"MEAT"}
@@ -140,7 +140,7 @@ def _parse_quantity_modifier(line: str) -> dict | None:
         dict with keys: quantity, unit_price (optional), weight (optional),
         pattern_type, raw_line; or None if not a modifier line
     """
-    line = line.strip()
+    line = _normalize_decimal_spacing(line.strip())
 
     for pattern, pattern_type in QUANTITY_MODIFIER_PATTERNS:
         match = pattern.match(line)
@@ -213,7 +213,7 @@ def _looks_like_quantity_expression(text: str) -> bool:
     This intentionally avoids broad slash-based matching so product names like
     "50/70 SHRIMP" are not misclassified as quantity lines.
     """
-    text = text.strip()
+    text = _normalize_decimal_spacing(text.strip())
     if not text:
         return False
 
@@ -259,7 +259,7 @@ def _is_price_word(word: dict[str, Any]) -> Decimal | None:
     """Check if a word is a price pattern. Returns the price or None."""
     text = word.get("text", "")
     # Normalize common prefixes like "W $18.99" used by some receipts (e.g., T&T)
-    text = text.strip()
+    text = _normalize_decimal_spacing(text.strip())
     text = re.sub(r"^[Ww]\s*", "", text)
     # Match $X.XX or X.XX patterns
     match = re.match(r"^\$?(\d+\.\d{2})$", text)
@@ -331,6 +331,8 @@ def _is_spatial_layout_receipt(_pages: list[dict[str, Any]], full_text: str) -> 
         "SUPERSTORE",
         "C&C",
         "C & C",
+        "NOFRILLS",
+        "NO FRILLS",
     ]
     for merchant in spatial_merchants:
         if merchant in full_text_upper:

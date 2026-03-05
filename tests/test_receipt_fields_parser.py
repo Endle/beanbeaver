@@ -46,3 +46,40 @@ def test_extract_date_does_not_slice_into_yyyy_mm_dd() -> None:
     ]
 
     assert _extract_date(lines, "\n".join(lines)) == date(2026, 3, 3)
+
+def test_extract_date_prefers_datetime_label_for_yy_mm_dd() -> None:
+    lines = [
+        "NOFRILLS",
+        "DateTime: 26/03/03 19:47:12",
+        "TOTAL 46.56",
+    ]
+
+    assert _extract_date(lines, "\n".join(lines)) == date(2026, 3, 3)
+
+
+def test_extract_date_defaults_to_mm_dd_yy_when_ambiguous() -> None:
+    lines = [
+        "Date: 03/04/26",
+        "TOTAL 10.00",
+    ]
+
+    assert _extract_date(lines, "\n".join(lines)) == date(2026, 3, 4)
+
+
+def test_extract_date_supports_dd_mm_yy_when_month_is_impossible() -> None:
+    lines = [
+        "Date: 31/01/24",
+        "TOTAL 10.00",
+    ]
+
+    assert _extract_date(lines, "\n".join(lines)) == date(2024, 1, 31)
+
+
+def test_extract_date_keeps_four_digit_year_dates() -> None:
+    lines = [
+        "Bestco Fresh Foodmart",
+        "2026/02/20 15:15 Rece1pt# P9260220151502",
+        "TOTAL 84.67",
+    ]
+
+    assert _extract_date(lines, "\n".join(lines)) == date(2026, 2, 20)

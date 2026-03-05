@@ -173,7 +173,6 @@ def _extract_date(lines: list[str], full_text: str) -> date | None:
     """Extract date from receipt (returns None if unknown)."""
     if not full_text and not lines:
         return None
-
     source_lines = lines or [line.strip() for line in full_text.split("\n") if line.strip()]
     month_map = {
         "jan": 1,
@@ -190,14 +189,22 @@ def _extract_date(lines: list[str], full_text: str) -> date | None:
         "dec": 12,
     }
     current_year = date.today().year
+    current_yy = current_year % 100
 
     ranked_candidates: list[tuple[int, int, int, date]] = []
     for line_idx, line in enumerate(source_lines):
-        hint_bonus = 40 if _DATE_CONTEXT_HINT.search(line) else 0
+        normalized_line = _normalize_decimal_spacing(line)
+        hint_bonus = 40 if _DATE_CONTEXT_HINT.search(normalized_line) else 0
+        prefer_year_first = hint_bonus > 0
 
-        for match in _SEPARATED_DATE_PATTERN.finditer(line):
+        for match in _SEPARATED_DATE_PATTERN.finditer(normalized_line):
             part1, part2, part3 = match.groups()
             for parsed, kind in _numeric_date_candidates(part1, part2, part3):
+                if kind == "ymd2":
+                    # Treat ambiguous short dates as YY/MM/DD only in date-labeled context.
+                    year_token = int(part1)
+                    if not (prefer_year_first and 20 <= year_token <= current_yy + 1):
+                        continue
                 base = {
                     "ymd4": 35,
                     "ymd2": 28,
@@ -209,18 +216,18 @@ def _extract_date(lines: list[str], full_text: str) -> date | None:
                 # Keep a weak North America bias for ambiguous short dates.
                 if kind == "mdy2":
                     base += 2
-                if kind == "ymd2" and hint_bonus:
+                if kind == "ymd2" and prefer_year_first:
                     base += 3
                 year_score = max(0, 10 - abs(parsed.year - current_year))
                 ranked_candidates.append((base + hint_bonus + year_score, line_idx, match.start(), parsed))
 
-        for match in _COMPACT_DATE_PATTERN.finditer(line):
+        for match in _COMPACT_DATE_PATTERN.finditer(normalized_line):
             parsed = _safe_date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
             if parsed is not None:
                 year_score = max(0, 10 - abs(parsed.year - current_year))
                 ranked_candidates.append((30 + hint_bonus + year_score, line_idx, match.start(), parsed))
 
-        for match in _MONTH_NAME_DATE_PATTERN.finditer(line):
+        for match in _MONTH_NAME_DATE_PATTERN.finditer(normalized_line):
             month = month_map.get(match.group(1)[:3].lower())
             if month is None:
                 continue
