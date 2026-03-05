@@ -196,3 +196,43 @@ def test_swiffer_dust_maps_to_household_supply_with_low_priority_public_rule() -
         )
         == "Expenses:Home:HouseholdSupply"
     )
+
+
+def test_tide_maps_to_household_supply_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "3458556 TIDE CQLDWTR",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Home:HouseholdSupply"
+    )
+
+
+def test_skechers_maps_to_clothing_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "2946010 SKECHERSGLID",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Shopping:Clothing"
+    )
+
+
+def test_cascade_plus_maps_to_household_supply_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "1727590 CASCADE PLUS",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Home:HouseholdSupply"
+    )
+
+
+def test_baking_soda_prefers_staple_over_cocacola_soda_keyword() -> None:
+    assert (
+        categorize_item(
+            "1185 BAKING SODA",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Staple"
+    )

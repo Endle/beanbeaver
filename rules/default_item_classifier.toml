@@ -337,3 +337,31 @@ keywords = ["1218587 SWIFFER DUST", "SWIFFER DUST"]
 category = "Expenses:Home:HouseholdSupply"
 priority = -80
 exact_only = false
+
+[[rules]]
+id = "legacy_0055"
+keywords = ["3458556 TIDE CQLDWTR", "TIDE CQLDWTR", "TIDE"]
+category = "Expenses:Home:HouseholdSupply"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0056"
+keywords = ["2946010 SKECHERSGLID", "SKECHERSGLID", "SKECHERS"]
+category = "Expenses:Shopping:Clothing"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0057"
+keywords = ["1727590 CASCADE PLUS", "CASCADE PLUS", "CASCADE"]
+category = "Expenses:Home:HouseholdSupply"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0058"
+keywords = ["BAKING SODA"]
+category = "Expenses:Food:Grocery:Staple"
+priority = 80
+exact_only = false
