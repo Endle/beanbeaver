@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from .common import MIN_LINE_CONFIDENCE
+from .common import MIN_LINE_CONFIDENCE, _normalize_decimal_spacing
 
 
 def _extract_merchant(
@@ -299,6 +299,7 @@ def _extract_subtotal(lines: list[str]) -> Decimal | None:
 
 def _extract_price_from_line(line: str) -> Decimal | None:
     """Extract a price from a line of text."""
+    line = _normalize_decimal_spacing(line)
     # Look for price patterns: $XX.XX, XX.XX, etc.
     patterns = [
         r"\$?\s*(\d+\.\d{2})\s*$",  # Price at end of line

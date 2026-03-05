@@ -11,6 +11,7 @@ from .common import (
     _is_section_header_text,
     _looks_like_quantity_expression,
     _looks_like_summary_line,
+    _normalize_decimal_spacing,
     _parse_quantity_modifier,
     _strip_leading_receipt_codes,
     _validate_quantity_price,
@@ -37,6 +38,8 @@ def _extract_items(
     items: list[ReceiptItem] = []
     if summary_amounts is None:
         summary_amounts = set()
+    # Normalize OCR-split decimals once so all downstream regex checks stay consistent.
+    lines = [_normalize_decimal_spacing(line) for line in lines]
 
     # Skip header/footer sections
     skip_patterns = [
@@ -340,7 +343,7 @@ def _extract_items(
                             continue
                         # Skip incomplete parentheticals - start with ( but don't end with )
                         # These are often garbled OCR of Chinese text, e.g., "(Hi N" from "青蔥"
-                        if prev_line.startswith("(") and not prev_line.endswith(")"):
+                        if prev_line.startswith("(") and ")" not in prev_line:
                             continue
                         # Skip promotional/sale lines like "(#)<ON SALE)", "(KAE)<ON SALE)"
                         if re.match(r"^\([^)]*\)\s*<?\s*ON\s*SALE", prev_line, re.IGNORECASE):
@@ -353,7 +356,7 @@ def _extract_items(
                             continue
                         # Strip leading item code (digits) before calculating alpha ratio
                         # This handles Costco format: "1214759 GARLIC 3 LB"
-                        desc_for_ratio = re.sub(r"^\d+\s*", "", prev_line)
+                        desc_for_ratio = _strip_leading_receipt_codes(prev_line)
                         # Calculate alpha ratio to filter garbled OCR lines
                         alpha_count = sum(1 for c in desc_for_ratio if c.isalpha())
                         alpha_ratio = alpha_count / len(desc_for_ratio) if desc_for_ratio else 0
@@ -362,8 +365,10 @@ def _extract_items(
                             continue
                         if len(prev_line) > 2 and not re.match(r"^[\d.]+$", prev_line):
                             # Found a valid description - use it (proximity wins)
-                            found_desc = prev_line
-                            break
+                            cleaned_prev = _strip_leading_receipt_codes(prev_line)
+                            if cleaned_prev:
+                                found_desc = cleaned_prev
+                                break
 
                 if found_desc:
                     quantity = 1

@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from beanbeaver.receipt.ocr_parser.common import _is_section_header_text
+from beanbeaver.receipt.ocr_parser.fields_parser import _extract_price_from_line
 from beanbeaver.receipt.ocr_parser.items_text_parser import _extract_items
 from beanbeaver.runtime.item_category_rules import load_item_category_rule_layers
 
@@ -132,3 +133,31 @@ def test_extract_items_skips_malformed_parenthesized_price_marker() -> None:
     assert [item.price for item in items] == [Decimal("5.99"), Decimal("2.99")]
     assert items[0].description == "*Samyang Buldak Artificial"
     assert items[1].description == "Wing Hing Sweet Soy Bever"
+
+
+def test_extract_items_handles_spaced_decimal_quantities_and_prefixed_sku_lines() -> None:
+    lines = [
+        "(2)05707200195 LUNCH MEAT MRJ",
+        "2 @ $1.75 3. 50",
+        "06780000102 VEG OIL MRJ 6. 99",
+        "(2)4050 CANTALOUPE MRJ",
+        "2 @ $1.99 3. 98",
+        "SUBTOTAL 14.47",
+        "TOTAL 14.47",
+    ]
+
+    items = _extract_items(
+        lines,
+        summary_amounts={Decimal("14.47")},
+        item_category_rule_layers=load_item_category_rule_layers(),
+    )
+
+    pairs = {(item.description, item.price) for item in items}
+    assert ("LUNCH MEAT MRJ", Decimal("3.50")) in pairs
+    assert ("VEG OIL MRJ", Decimal("6.99")) in pairs
+    assert ("4050 CANTALOUPE MRJ", Decimal("3.98")) in pairs
+
+
+def test_extract_price_from_line_accepts_spaced_decimals() -> None:
+    assert _extract_price_from_line("2 @ $1.75 3. 50") == Decimal("3.50")
+    assert _extract_price_from_line("06780000102 VEG OIL MRJ 6. 99") == Decimal("6.99")
