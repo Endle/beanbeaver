@@ -362,6 +362,13 @@ exact_only = false
 [[rules]]
 id = "legacy_0058"
 keywords = ["BAKING SODA"]
-category = "Expenses:Food:Grocery:Staple"
+category = "Expenses:Home:HouseholdSupply"
 priority = 80
+exact_only = false
+
+[[rules]]
+id = "legacy_0059"
+keywords = ["1457015 GLIDE ADV", "GLIDE ADV"]
+category = "Expenses:PersonalCare:Tooth"
+priority = -80
 exact_only = false

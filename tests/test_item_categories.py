@@ -228,11 +228,21 @@ def test_cascade_plus_maps_to_household_supply_with_low_priority_public_rule() -
     )
 
 
-def test_baking_soda_prefers_staple_over_cocacola_soda_keyword() -> None:
+def test_baking_soda_prefers_household_supply_over_cocacola_soda_keyword() -> None:
     assert (
         categorize_item(
             "1185 BAKING SODA",
             rule_layers=load_item_category_rule_layers(),
         )
-        == "Expenses:Food:Grocery:Staple"
+        == "Expenses:Home:HouseholdSupply"
+    )
+
+
+def test_glide_adv_maps_to_tooth_care_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "1457015 GLIDE ADV",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:PersonalCare:Tooth"
     )
