@@ -309,3 +309,17 @@ keywords = ["WING HING SWEET SOY BEVER"]
 category = "Expenses:Food:Grocery:Drink"
 priority = -5
 exact_only = false
+
+[[rules]]
+id = "legacy_0051"
+keywords = ["1944033 CHAMP SHORT", "CHAMP SHORT"]
+category = "Expenses:Shopping:Clothing"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0052"
+keywords = ["295619 KS BAGS 60", "KS BAGS 60"]
+category = "Expenses:Home:HouseholdSupply"
+priority = -80
+exact_only = false

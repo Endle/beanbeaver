@@ -156,3 +156,23 @@ def test_wing_hing_sweet_soy_bever_prefix_maps_to_drink() -> None:
         )
         == "Expenses:Food:Grocery:Drink"
     )
+
+
+def test_champ_short_maps_to_clothing_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "1944033 CHAMP SHORT",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Shopping:Clothing"
+    )
+
+
+def test_ks_bags_60_maps_to_household_supply_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "295619 KS BAGS 60",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Home:HouseholdSupply"
+    )
