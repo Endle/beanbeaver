@@ -224,3 +224,46 @@ def test_extract_items_skips_quantity_stub_price_lines() -> None:
     assert all(desc != "2 @" for desc in descriptions)
     assert Decimal("12.99") in prices
     assert Decimal("19.38") in prices
+
+
+def test_extract_items_skips_unit_price_fragment_ghost_lines() -> None:
+    lines = [
+        "HLY - Fish Cracker Tomato 2.59H",
+        "@2.592/$3.50",
+        "1 @ $2.59",
+        "LZJ - Ice Cream 0.79H",
+        "62g)@0.794/$1.99",
+        "1 @ $0.79",
+        "SUB Total 3.38",
+        "Total after Tax 3.38",
+    ]
+
+    items = _extract_items(
+        lines,
+        summary_amounts={Decimal("3.38")},
+        item_category_rule_layers=load_item_category_rule_layers(),
+    )
+
+    assert any(item.description == "HLY - Fish Cracker Tomato" and item.price == Decimal("2.59") for item in items)
+    assert any(item.description == "LZJ - Ice Cream" and item.price == Decimal("0.79") for item in items)
+    assert all("@" not in item.description for item in items)
+    assert all("/$" not in item.description for item in items)
+
+
+def test_extract_items_keeps_priced_bakery_generic_label() -> None:
+    lines = [
+        "&&14-Bakery 1",
+        "BAKERY 6.99",
+        "SUB Total 6.99",
+        "Total after Tax 6.99",
+    ]
+
+    items = _extract_items(
+        lines,
+        summary_amounts={Decimal("6.99")},
+        item_category_rule_layers=load_item_category_rule_layers(),
+    )
+
+    assert len(items) == 1
+    assert items[0].description == "BAKERY"
+    assert items[0].price == Decimal("6.99")

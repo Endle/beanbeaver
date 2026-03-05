@@ -42,7 +42,7 @@ FOOTER_ADDRESS_PATTERNS = re.compile(
 # These patterns detect lines like "3 @ $1.99", "1.22 lb @ $2.99/lb", "2 /for $3.00"
 QUANTITY_MODIFIER_PATTERNS = [
     # "3 @ $1.99" - count at unit price
-    (re.compile(r"^(\d+)\s*@\s*\$?(\d+\.\d{2})"), "count_at_price"),
+    (re.compile(r"^(\d+)\s*@\s*\$?(-?\d+\.\d{2})"), "count_at_price"),
     # "1.22 lb @ $2.99/lb" or "1.22 lk @ $2.99/1b" (OCR errors: lk=lb, k9/kg=kg, 1b=lb)
     (re.compile(r"^(\d+\.?\d*)\s*(?:lb|lk|kg|k[g9]|1b|1k)\s*@", re.IGNORECASE), "weight_at_price"),
     # "2 /for $3.00" or "(2 /for $3.00)"
@@ -114,7 +114,7 @@ def _line_has_trailing_price(text: str) -> bool:
     return re.search(r"\d+\.\d{2}\s*[HhTtJj]?\s*$", normalized) is not None
 
 
-GENERIC_PRICED_ITEM_LABELS = {"MEAT"}
+GENERIC_PRICED_ITEM_LABELS = {"MEAT", "BAKERY"}
 
 
 def _is_priced_generic_item_label(left_text: str, full_text: str) -> bool:
@@ -229,6 +229,20 @@ def _looks_like_quantity_expression(text: str) -> bool:
         alpha_count = sum(1 for c in upper if c.isalpha())
         if alpha_count <= 2:
             return True
+
+    # Additional OCR variants for unit-price metadata, e.g.:
+    # "33g@2.592/$3.50", "@2.592/$3.50", "62g)@0.794/$1.99"
+    if "@" in upper and "/$" in upper:
+        compact = re.sub(r"\s+", "", upper)
+        alpha_count = sum(1 for c in compact if c.isalpha())
+        digit_count = sum(1 for c in compact if c.isdigit())
+        if digit_count >= 3 and alpha_count <= 4:
+            return True
+
+    # Quantity lines can occasionally carry a negative unit price for returns,
+    # e.g. "1 @ $-0.38".
+    if re.match(r"^\d+\s*@\s*\$?-?\d+\.\d{2}\s*$", text, re.IGNORECASE):
+        return True
 
     # Additional quantity/offer formats seen in receipts
     return bool(
