@@ -323,3 +323,17 @@ keywords = ["295619 KS BAGS 60", "KS BAGS 60"]
 category = "Expenses:Home:HouseholdSupply"
 priority = -80
 exact_only = false
+
+[[rules]]
+id = "legacy_0053"
+keywords = ["108934 RAINFOREST", "RAINFOREST"]
+category = "Expenses:Food:Grocery:Drink:Coffee"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0054"
+keywords = ["1218587 SWIFFER DUST", "SWIFFER DUST"]
+category = "Expenses:Home:HouseholdSupply"
+priority = -80
+exact_only = false

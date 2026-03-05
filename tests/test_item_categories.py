@@ -176,3 +176,23 @@ def test_ks_bags_60_maps_to_household_supply_with_low_priority_public_rule() -> 
         )
         == "Expenses:Home:HouseholdSupply"
     )
+
+
+def test_rainforest_maps_to_coffee_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "108934 RAINFOREST",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Drink:Coffee"
+    )
+
+
+def test_swiffer_dust_maps_to_household_supply_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "1218587 SWIFFER DUST",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Home:HouseholdSupply"
+    )
