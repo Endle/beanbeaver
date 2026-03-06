@@ -1,3 +1,4 @@
+from collections import Counter
 from decimal import Decimal
 
 from beanbeaver.receipt.ocr_parser.common import _is_section_header_text
@@ -224,8 +225,6 @@ def test_extract_items_skips_quantity_stub_price_lines() -> None:
     assert all(desc != "2 @" for desc in descriptions)
     assert Decimal("12.99") in prices
     assert Decimal("19.38") in prices
-
-
 def test_extract_items_skips_unit_price_fragment_ghost_lines() -> None:
     lines = [
         "HLY - Fish Cracker Tomato 2.59H",
@@ -385,3 +384,99 @@ def test_extract_items_keeps_cash_prefix_product_names() -> None:
     assert len(items) == 1
     assert items[0].description == "CASHMERE BATHROOM TISSUE"
     assert items[0].price == Decimal("9.99")
+
+
+def test_extract_items_handles_weight_quantity_previous_description() -> None:
+    lines = [
+        "Al-Premium Food Mart",
+        "Batry Strawbarries",
+        "3 @ $1.99 5.97",
+        "Cherries",
+        "(H7)",
+        "1.22 1k @ $2.99/1b 3.65",
+        "Sub Total 55.29",
+    ]
+
+    items = _extract_items(
+        lines,
+        summary_amounts={Decimal("55.29")},
+        item_category_rule_layers=load_item_category_rule_layers(),
+    )
+
+    observed = {(item.description, item.price) for item in items}
+    assert ("Batry Strawbarries", Decimal("5.97")) in observed
+    assert ("Cherries", Decimal("3.65")) in observed
+
+
+def test_extract_items_handles_loblaw_multi_buy_and_priced_section_headers() -> None:
+    first_lines = [
+        "LOBLAW",
+        "DICED TOMATO",
+        "2 @ 2/$5.00 5.00",
+        "TOTAL 5.00",
+    ]
+
+    first_items = _extract_items(
+        first_lines,
+        summary_amounts={Decimal("5.00")},
+        item_category_rule_layers=load_item_category_rule_layers(),
+    )
+
+    assert len(first_items) == 1
+    assert first_items[0].description == "DICED TOMATO"
+    assert first_items[0].price == Decimal("5.00")
+
+    second_lines = [
+        "LOBLAW",
+        "22-DAIRY 5.49",
+        "06038304842 PC ORNG JUICE NP MRJ 5.49",
+        "TOTAL 5.49",
+    ]
+
+    second_items = _extract_items(
+        second_lines,
+        summary_amounts={Decimal("5.49")},
+        item_category_rule_layers=load_item_category_rule_layers(),
+    )
+
+    assert len(second_items) == 1
+    assert second_items[0].description == "PC ORNG JUICE NP MRJ"
+    assert second_items[0].price == Decimal("5.49")
+
+
+def test_extract_items_keeps_costco_prescanned_duplicates() -> None:
+    lines = [
+        "COSTCO",
+        "EWHOLESALE",
+        "Markham #151",
+        "1 Yorktech Dr",
+        "Markham, ON L6G 1A6",
+        "OL Member 111942685019",
+        "***START OF PRE-SCANNED ITEMS*********",
+        "232952 COKE ZERO 16.99",
+        "1075424 50/70 SHRIMP 16.99",
+        "430 XL EGGS 9.69",
+        "430 XL EGGS 9.69",
+        "435259 2% FINE-FILT 5.95",
+        "435259 2% FINE-FILT 5.95",
+        "*X*END OF PRE-SCANNED ITEMSX*X****XX**",
+        "TOTAL NUMBER OF PRE-SCANNED ITEMS= 6",
+        "SUBTOTAL 65.26",
+        "TAX 2.21",
+        "TOTAL 67.47",
+    ]
+
+    items = _extract_items(
+        lines,
+        summary_amounts={Decimal("67.47"), Decimal("65.26"), Decimal("2.21")},
+        item_category_rule_layers=load_item_category_rule_layers(),
+    )
+
+    assert len(items) == 6
+    assert sum(item.price for item in items) == Decimal("65.26")
+
+    observed = Counter((item.description, item.price) for item in items)
+    assert observed[("232952 COKE ZERO", Decimal("16.99"))] == 1
+    assert observed[("1075424 50/70 SHRIMP", Decimal("16.99"))] == 1
+    assert observed[("430 XL EGGS", Decimal("9.69"))] == 2
+    assert observed[("435259 2% FINE-FILT", Decimal("5.95"))] == 2
