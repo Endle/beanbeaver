@@ -83,3 +83,16 @@ def test_extract_date_keeps_four_digit_year_dates() -> None:
     ]
 
     assert _extract_date(lines, "\n".join(lines)) == date(2026, 2, 20)
+
+
+def test_extract_date_reference_date_makes_short_year_resolution_deterministic() -> None:
+    lines = [
+        "DateTime: 30/01/02 08:00:00",
+        "TOTAL 10.00",
+    ]
+    full_text = "\n".join(lines)
+
+    # 2030 anchor allows YY/MM/DD interpretation for 30/01/02.
+    assert _extract_date(lines, full_text, reference_date=date(2032, 1, 1)) == date(2030, 1, 2)
+    # 2026 anchor rejects YY/MM/DD for year token 30 and falls back to DD/MM/YY.
+    assert _extract_date(lines, full_text, reference_date=date(2026, 1, 1)) == date(2002, 1, 30)

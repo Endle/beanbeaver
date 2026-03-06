@@ -169,7 +169,7 @@ def _numeric_date_candidates(part1: str, part2: str, part3: str) -> list[tuple[d
 
 
 # TODO remove it
-def _extract_date(lines: list[str], full_text: str) -> date | None:
+def _extract_date(lines: list[str], full_text: str, *, reference_date: date | None = None) -> date | None:
     """Extract date from receipt (returns None if unknown)."""
     if not full_text and not lines:
         return None
@@ -188,7 +188,7 @@ def _extract_date(lines: list[str], full_text: str) -> date | None:
         "nov": 11,
         "dec": 12,
     }
-    current_year = date.today().year
+    current_year = (reference_date or date.today()).year
     current_yy = current_year % 100
 
     ranked_candidates: list[tuple[int, int, int, date]] = []
