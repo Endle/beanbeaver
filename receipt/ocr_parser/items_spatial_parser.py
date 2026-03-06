@@ -213,22 +213,36 @@ def _extract_items_with_bbox(
                             break
             # ONSALE-only rows can be promo metadata. Keep them only when the
             # nearest valid item below looks like a promoted item marker row.
-            if not is_summary and price_line_has_onsale:
-                anchor_y = source_line_y if source_line_y is not None else line_y
-                nearest_below = None
-                for candidate_y, candidate_full_text, candidate_left_text, candidate_left_x in all_lines:
-                    if candidate_y <= anchor_y:
-                        continue
-                    if candidate_y - anchor_y > MAX_ITEM_DISTANCE:
-                        continue
-                    if not is_valid_onsale_target(candidate_full_text, candidate_left_text):
-                        continue
-                    if nearest_below is None or candidate_y < nearest_below[0]:
-                        nearest_below = (candidate_y, candidate_full_text, candidate_left_text, candidate_left_x)
-                if nearest_below:
-                    onsale_target_line = nearest_below
-                else:
-                    is_summary = True
+        if not is_summary and price_line_has_onsale:
+            anchor_y = source_line_y if source_line_y is not None else line_y
+            nearest_above = None
+            for candidate_y, candidate_full_text, candidate_left_text, candidate_left_x in all_lines:
+                if candidate_y >= anchor_y:
+                    continue
+                if anchor_y - candidate_y > MAX_ITEM_DISTANCE:
+                    continue
+                if not is_valid_onsale_target(candidate_full_text, candidate_left_text):
+                    continue
+                if nearest_above is None or candidate_y > nearest_above[0]:
+                    nearest_above = (candidate_y, candidate_full_text, candidate_left_text, candidate_left_x)
+            nearest_below = None
+            for candidate_y, candidate_full_text, candidate_left_text, candidate_left_x in all_lines:
+                if candidate_y <= anchor_y:
+                    continue
+                if candidate_y - anchor_y > MAX_ITEM_DISTANCE:
+                    continue
+                if not is_valid_onsale_target(candidate_full_text, candidate_left_text):
+                    continue
+                if nearest_below is None or candidate_y < nearest_below[0]:
+                    nearest_below = (candidate_y, candidate_full_text, candidate_left_text, candidate_left_x)
+            if nearest_above:
+                # Prefer direct descriptive context above ONSALE markers when available;
+                # these rows often carry the sale price for the preceding item.
+                onsale_target_line = nearest_above
+            elif nearest_below:
+                onsale_target_line = nearest_below
+            else:
+                is_summary = True
 
         if is_summary:
             continue
