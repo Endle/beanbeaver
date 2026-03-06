@@ -396,7 +396,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0063"
-keywords = ["3966510 FO TANK S", "FO TANK S", "TPD TANK TOP", "TANK TOP"]
+keywords = ["3966510 FO TANK S", "FO TANK S", "TANK TOP"]
 category = "Expenses:Shopping:Clothing"
 priority = -80
 exact_only = false
