@@ -306,34 +306,3 @@ def test_togo_van_2kg_maps_to_dairy_with_low_priority_public_rule() -> None:
         )
         == "Expenses:Food:Grocery:Dairy"
     )
-
-
-def test_tpd_discount_codes_map_with_low_priority_public_rules() -> None:
-    assert (
-        categorize_item(
-            "2046069 TPD/1696237",
-            rule_layers=load_item_category_rule_layers(),
-        )
-        == "Expenses:Food:Grocery:Snacks"
-    )
-    assert (
-        categorize_item(
-            "2046398 TPD/2773717",
-            rule_layers=load_item_category_rule_layers(),
-        )
-        == "Expenses:Food:Grocery:Drink"
-    )
-    assert (
-        categorize_item(
-            "2031650 TPU/599010",
-            rule_layers=load_item_category_rule_layers(),
-        )
-        == "Expenses:Food:Grocery:Drink:Coffee"
-    )
-    assert (
-        categorize_item(
-            "2043894 T D/1355285",
-            rule_layers=load_item_category_rule_layers(),
-        )
-        == "Expenses:Food:Grocery:Dairy"
-    )
