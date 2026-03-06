@@ -225,6 +225,8 @@ def test_extract_items_skips_quantity_stub_price_lines() -> None:
     assert all(desc != "2 @" for desc in descriptions)
     assert Decimal("12.99") in prices
     assert Decimal("19.38") in prices
+
+
 def test_extract_items_skips_unit_price_fragment_ghost_lines() -> None:
     lines = [
         "HLY - Fish Cracker Tomato 2.59H",
