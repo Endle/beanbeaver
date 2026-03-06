@@ -73,11 +73,11 @@ jobs:
       - name: Run hidden regression suite
         shell: bash
         env:
-          PYTHONPATH: ${{ github.workspace }}
           PUBLIC_REPO_ROOT: ${{ github.workspace }}
         run: |
           set -euo pipefail
           PRIVATE_ROOT="${RUNNER_TEMP}/beanbeaver-private-tests"
+          export PYTHONPATH="$(dirname "${PUBLIC_REPO_ROOT}")"
           pytest -q --maxfail=1 "${PRIVATE_ROOT}" --e2e-mode cached
 
       - name: Scrub private test checkout
