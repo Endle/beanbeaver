@@ -224,6 +224,8 @@ def _extract_items(
             line_upper = line.upper()
             desc_part = line[: match.start()].strip()
             compact_line = re.sub(r"\s+", "", line_upper)
+            prefer_forward_desc = False
+            skip_if_no_forward_desc = False
             # Handle @REG$/REG$ promo lines.
             # If line is just a reg-price marker (single price), skip it.
             # If line includes both reg and sale prices, treat as price line for the item above.
@@ -243,9 +245,11 @@ def _extract_items(
                     marker = re.sub(r"^\d+", "", marker)
                     if marker in {"REG", "0REG", "OREG", "IREG"}:
                         continue
-                # If previous line already contains a price, this is just promo info; skip it.
+                # If previous line already contains a price, this line is usually
+                # promo metadata for an item shown below. Prefer lookahead.
                 if len(prices) > 1 and i > 0 and re.search(r"\d+\.\d{2}\s*[HhTtJj]?\s*$", lines[i - 1]):
-                    continue
+                    prefer_forward_desc = True
+                    skip_if_no_forward_desc = True
 
             # Compact promo marker tokens (e.g., "EG2.99", "REG$2.99") can be
             # OCR artifacts from regular-price metadata and should not create
@@ -269,6 +273,15 @@ def _extract_items(
             # Promo lines like "REG$8.99 5.99" should use the previous line as description
             weak_inline_desc = _is_weak_inline_description(desc_part)
             force_backward = "REG$" in line_upper or "@REG" in line_upper or weak_inline_desc
+            if (
+                has_reg_marker
+                and force_backward
+                and i > 0
+                and lines[i - 1].strip()
+                and _line_has_trailing_price(lines[i - 1].strip())
+                and desc_part.startswith("(")
+            ):
+                prefer_forward_desc = True
 
             # Clean up description - remove item codes at start
             if desc_part:
@@ -401,6 +414,33 @@ def _extract_items(
                         break
                 if is_priced_section_header and found_desc is None:
                     # No safe lookahead description for this header price row.
+                    continue
+                if found_desc is None and prefer_forward_desc:
+                    for j in range(i + 1, min(i + 5, len(lines))):
+                        next_line = lines[j].strip()
+                        if not next_line:
+                            continue
+                        if skip_regex.search(next_line):
+                            continue
+                        if _looks_like_summary_line(next_line):
+                            continue
+                        if _looks_like_quantity_expression(next_line):
+                            continue
+                        if _line_has_trailing_price(next_line):
+                            continue
+                        cleaned_next = _strip_leading_receipt_codes(next_line)
+                        if not cleaned_next:
+                            continue
+                        if _is_section_header_text(cleaned_next):
+                            continue
+                        alpha_count = sum(1 for c in cleaned_next if c.isalpha())
+                        alpha_ratio = alpha_count / len(cleaned_next) if cleaned_next else 0
+                        if alpha_ratio < 0.5:
+                            continue
+                        found_desc = cleaned_next
+                        found_desc_line_idx = j
+                        break
+                if skip_if_no_forward_desc and found_desc is None:
                     continue
                 if found_desc is None:
                     for j in range(i - 1, max(i - 6, -1), -1):
