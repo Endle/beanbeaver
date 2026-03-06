@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from beanbeaver.receipt.ocr_parser.fields_parser import _extract_date, _extract_tax, _extract_total
+from beanbeaver.receipt.ocr_parser.fields_parser import _extract_date, _extract_subtotal, _extract_tax, _extract_total
 
 
 def test_extract_total_skips_discount_footer_total() -> None:
@@ -84,3 +84,12 @@ def test_extract_date_keeps_four_digit_year_dates() -> None:
     ]
 
     assert _extract_date(lines, "\n".join(lines)) == date(2026, 2, 20)
+
+
+def test_extract_subtotal_keeps_zero_amount() -> None:
+    lines = [
+        "SUBTOTAL 0.00",
+        "TOTAL 0.00",
+    ]
+
+    assert _extract_subtotal(lines) == Decimal("0.00")

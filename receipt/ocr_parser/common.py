@@ -24,8 +24,8 @@ SECTION_AISLE_PREFIX = re.compile(r"^[^A-Z0-9]*\d{1,2}\s*[-:]")
 
 # Summary line patterns to exclude
 SUMMARY_PATTERNS = re.compile(
-    r"^(SUB\s*TOTAL|SUBTOTAL|TOTAL|HST|GST|PST|TAX|MASTER|VISA|DEBIT|"
-    r"CREDIT|POINTS|CASH|CHANGE|BALANCE|APPROVED|CARD|TERMINAL|MEMBER)",
+    r"^(?:SUB\s*TOTAL|SUBTOTAL|TOTAL|HST|GST|PST|TAX|MASTER(?:CARD)?|VISA|DEBIT|"
+    r"CREDIT|POINTS|CASH|CHANGE|BALANCE|APPROVED|CARD|TERMINAL|MEMBER)\b",
     re.IGNORECASE,
 )
 
@@ -112,6 +112,16 @@ def _line_has_trailing_price(text: str) -> bool:
         return False
     normalized = _normalize_decimal_spacing(text.strip())
     return re.search(r"\d+\.\d{2}\s*[HhTtJj]?\s*$", normalized) is not None
+
+
+def _looks_like_onsale_marker(text: str) -> bool:
+    """Return True for standalone sale markers like ONSALE/ONSAL tokens."""
+    if not text:
+        return False
+    normalized = _normalize_decimal_spacing(text.upper().strip())
+    normalized = re.sub(r"\d+\.\d{2}\s*[HhTtJj]?\s*$", "", normalized).strip()
+    compact = re.sub(r"[^A-Z0-9]", "", normalized)
+    return re.fullmatch(r"(?:[A-Z0-9]{0,3})?ONSAL[E]?", compact) is not None
 
 
 GENERIC_PRICED_ITEM_LABELS = {"MEAT", "BAKERY"}

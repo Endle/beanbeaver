@@ -10,6 +10,7 @@ from .common import (
     _is_priced_generic_item_label,
     _is_section_header_text,
     _line_has_trailing_price,
+    _looks_like_onsale_marker,
     _looks_like_quantity_expression,
     _looks_like_summary_line,
     _normalize_decimal_spacing,
@@ -57,16 +58,16 @@ def _extract_items(
         r"AFTER\s+TAX",
         r"\d+%$",  # Lines ending with percentage like "nst5%"
         # Payment patterns
-        r"CASH",
-        r"CREDIT",
-        r"DEBIT",
-        r"CHANGE",
+        r"^CASH\b",
+        r"^CREDIT\b",
+        r"^DEBIT\b",
+        r"^CHANGE\b",
         r"^BALANCE",
-        r"VISA",
-        r"MASTERCARD",
-        r"AMEX",
-        r"APPROVED",
-        r"ACTIVATED",
+        r"^VISA\b",
+        r"^MASTERCARD\b",
+        r"^AMEX\b",
+        r"^APPROVED\b",
+        r"^ACTIVATED\b",
         r"^PC\s+\d",  # Gift card / payment card lines like "PC 339918..."
         r"^ACCT:",
         r"^REFERENCE",
@@ -75,9 +76,9 @@ def _extract_items(
         r"WELCOME",
         r"RECEIPT",
         r"TRANSACTION",
-        r"POINTS",
-        r"REWARDS",
-        r"EARNED",
+        r"^POINTS\b",
+        r"^REWARDS\b",
+        r"^EARNED\b",
         r"^SAVED$",
         r"^YOU SAVED",
         r"^CARD",
@@ -126,6 +127,8 @@ def _extract_items(
             return False
         cleaned = _strip_leading_receipt_codes(text)
         if not cleaned:
+            return False
+        if _looks_like_onsale_marker(cleaned):
             return False
         if _is_section_header_text(cleaned):
             return False
@@ -254,7 +257,9 @@ def _extract_items(
             # Compact promo marker tokens (e.g., "EG2.99", "REG$2.99") can be
             # OCR artifacts from regular-price metadata and should not create
             # a synthetic item by backfilling to a prior priced row.
-            if re.match(r"^[A-Z]{1,5}\$?\d+\.\d{2}[HHTTJJ]?$", compact_line):
+            if re.match(r"^[A-Z]{1,5}\$?\d+\.\d{2}[HHTTJJ]?$", compact_line) and not _looks_like_onsale_marker(
+                desc_part
+            ):
                 if i > 0 and _line_has_trailing_price(lines[i - 1]):
                     continue
 
@@ -286,6 +291,12 @@ def _extract_items(
             # Clean up description - remove item codes at start
             if desc_part:
                 desc_part = re.sub(r"^\d{8,}\s*", "", desc_part)
+            is_onsale_marker_desc = _looks_like_onsale_marker(desc_part)
+            if is_onsale_marker_desc:
+                # ONSALE-like rows usually carry a nearby item's price.
+                prefer_forward_desc = True
+                if i > 0 and _line_has_trailing_price(lines[i - 1].strip()):
+                    skip_if_no_forward_desc = True
 
             # Priced aisle/section headers (e.g., "33-BAKERY INSTORE 12.00") should
             # use a nearby SKU-led item line, not the header text itself.
@@ -334,6 +345,7 @@ def _extract_items(
                     _looks_like_quantity_expression(desc_part)
                     # Promotional pattern like "(#)<ON SALE)"
                     or re.match(r"^\([#\w]*\)\s*<?\s*ON\s*SALE", desc_part, re.IGNORECASE)
+                    or is_onsale_marker_desc
                 )
                 if desc_part
                 else False
@@ -393,6 +405,8 @@ def _extract_items(
                             continue
                         if _looks_like_quantity_expression(next_line):
                             continue
+                        if _looks_like_onsale_marker(next_line):
+                            continue
                         if re.search(r"(\d+\.\d{2})(-?)\s*[HhTtJj]?\s*$", next_line):
                             # This line is a standalone priced item; do not borrow it.
                             continue
@@ -425,6 +439,8 @@ def _extract_items(
                         if _looks_like_summary_line(next_line):
                             continue
                         if _looks_like_quantity_expression(next_line):
+                            continue
+                        if _looks_like_onsale_marker(next_line):
                             continue
                         if _line_has_trailing_price(next_line):
                             continue
@@ -462,6 +478,8 @@ def _extract_items(
                         # Capture other quantity expressions that don't match our structured patterns
                         if _looks_like_quantity_expression(prev_line):
                             qty_info.append(prev_line)
+                            continue
+                        if _looks_like_onsale_marker(prev_line):
                             continue
                         # Skip price-info lines: "$2.99 ea or 2/$5.00 KB", "$8.80/kg"
                         # These start with $ and contain unit prices or multi-buy offers

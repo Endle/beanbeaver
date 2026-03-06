@@ -21,6 +21,7 @@ from .common import (
     _is_priced_generic_item_label,
     _is_section_header_text,
     _line_has_trailing_price,
+    _looks_like_onsale_marker,
     _looks_like_quantity_expression,
     _looks_like_summary_line,
     _strip_leading_receipt_codes,
@@ -134,7 +135,7 @@ def _extract_items_with_bbox(
         if closest_line_to_price:
             line_y, full_text, left_text, _ = closest_line_to_price
             full_upper = source_full_text.upper() if source_full_text else full_text.upper()
-            price_line_has_onsale = ("ONSALE" in full_upper) or ("ON SALE" in full_upper)
+            price_line_has_onsale = _looks_like_onsale_marker(full_upper)
             left_is_header = _is_section_header_text(left_text) and not _is_priced_generic_item_label(
                 left_text, full_text
             )
@@ -302,7 +303,7 @@ def _extract_items_with_bbox(
             if FOOTER_ADDRESS_PATTERNS.search(full_text):
                 return False
             # Skip promotional/sale lines like "(#)<ON SALE)", "(KAE)<ON SALE)"
-            if re.search(r"ON\s*SALE", left_text, re.IGNORECASE):
+            if _looks_like_onsale_marker(left_text):
                 return False
             # Skip quantity expressions like "(1 /for $2.99)", "(2 /for $4.50)"
             if re.match(r"^\(\d+\s*/\s*for\s+\$[\d.]+\)", left_text):

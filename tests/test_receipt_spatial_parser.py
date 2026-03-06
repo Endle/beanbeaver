@@ -165,3 +165,31 @@ def test_extract_items_with_bbox_prefers_item_above_onsale_price() -> None:
         ("S & B Wasabi", Decimal("1.98")),
         ("Hot Kid Honey Flavour Bal", Decimal("4.59")),
     ]
+
+
+def test_extract_items_with_bbox_keeps_cash_prefix_product_name() -> None:
+    lines = [
+        {
+            "text": "CASHMERE BATHROOM TISSUE 9.99",
+            "words": [
+                _word("CASHMERE BATHROOM TISSUE", 0.08, 0.100, 0.380, 0.112),
+                _word("9.99", 0.88, 0.100, 0.93, 0.112),
+            ],
+        },
+        {
+            "text": "TOTAL 9.99",
+            "words": [
+                _word("TOTAL", 0.09, 0.500, 0.180, 0.512),
+                _word("9.99", 0.88, 0.500, 0.93, 0.512),
+            ],
+        },
+    ]
+
+    items = _extract_items_with_bbox(
+        pages=[{"lines": lines}],
+        item_category_rule_layers=load_item_category_rule_layers(),
+    )
+
+    assert len(items) == 1
+    assert items[0].description == "CASHMERE BATHROOM TISSUE"
+    assert items[0].price == Decimal("9.99")
