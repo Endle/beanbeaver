@@ -414,3 +414,59 @@ keywords = ["1355285 IOG0 VAN 2KG", "1355285 TOGO VAN 2KG", "IOG0 VAN 2KG", "TOG
 category = "Expenses:Food:Grocery:Dairy"
 priority = -80
 exact_only = false
+
+[[rules]]
+id = "legacy_0066"
+keywords = ["PINEAPPLE BUN", "PINAPPLE BUN", "BUN", "BUNS"]
+category = "Expenses:Food:Grocery:Bakery"
+priority = 80
+exact_only = true
+
+[[rules]]
+id = "legacy_0067"
+keywords = ["SANDWICH BISCUITS", "BISCUITS(MATCHA)", "BISCUITS MATCHA"]
+category = "Expenses:Food:Grocery:Snacks"
+priority = 80
+exact_only = false
+
+[[rules]]
+id = "legacy_0068"
+keywords = ["D.M.D WHITE PEPPER POWDER", "WHITE PEPPER POWDER"]
+category = "Expenses:Food:Grocery:Seasoning"
+priority = 80
+exact_only = false
+
+[[rules]]
+id = "legacy_0069"
+keywords = ["YUAN QI SEN LIN ICED TEA"]
+category = "Expenses:Food:Grocery:Drink"
+priority = 80
+exact_only = false
+
+[[rules]]
+id = "legacy_0070"
+keywords = ["TROPICANA DAILY C TEA", "DAILY C TEA DR"]
+category = "Expenses:Food:Grocery:Drink"
+priority = 80
+exact_only = false
+
+[[rules]]
+id = "legacy_0071"
+keywords = ["ORION DOUBLE CHOCO PIE", "OR:ION DOUBLE CHOCO PIE", "DOUBLE CHOCO PIE"]
+category = "Expenses:Food:Grocery:Snacks"
+priority = 80
+exact_only = false
+
+[[rules]]
+id = "legacy_0072"
+keywords = ["YYH CHILLIES", "YYH CHILIES"]
+category = "Expenses:Food:Grocery:Seasoning"
+priority = 40
+exact_only = false
+
+[[rules]]
+id = "legacy_0073"
+keywords = ["LA PIAN"]
+category = "Expenses:Food:Grocery:Snacks"
+priority = 40
+exact_only = false
