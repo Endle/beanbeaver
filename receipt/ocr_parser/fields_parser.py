@@ -199,7 +199,7 @@ def _extract_date(lines: list[str], full_text: str) -> date | None:
 
         for match in _SEPARATED_DATE_PATTERN.finditer(normalized_line):
             part1, part2, part3 = match.groups()
-            for parsed, kind in _numeric_date_candidates(part1, part2, part3):
+            for candidate_date, kind in _numeric_date_candidates(part1, part2, part3):
                 if kind == "ymd2":
                     # Treat ambiguous short dates as YY/MM/DD only in date-labeled context.
                     year_token = int(part1)
@@ -218,23 +218,23 @@ def _extract_date(lines: list[str], full_text: str) -> date | None:
                     base += 2
                 if kind == "ymd2" and prefer_year_first:
                     base += 3
-                year_score = max(0, 10 - abs(parsed.year - current_year))
-                ranked_candidates.append((base + hint_bonus + year_score, line_idx, match.start(), parsed))
+                year_score = max(0, 10 - abs(candidate_date.year - current_year))
+                ranked_candidates.append((base + hint_bonus + year_score, line_idx, match.start(), candidate_date))
 
         for match in _COMPACT_DATE_PATTERN.finditer(normalized_line):
-            parsed = _safe_date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
-            if parsed is not None:
-                year_score = max(0, 10 - abs(parsed.year - current_year))
-                ranked_candidates.append((30 + hint_bonus + year_score, line_idx, match.start(), parsed))
+            compact_date = _safe_date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+            if compact_date is not None:
+                year_score = max(0, 10 - abs(compact_date.year - current_year))
+                ranked_candidates.append((30 + hint_bonus + year_score, line_idx, match.start(), compact_date))
 
         for match in _MONTH_NAME_DATE_PATTERN.finditer(normalized_line):
             month = month_map.get(match.group(1)[:3].lower())
             if month is None:
                 continue
-            parsed = _safe_date(int(match.group(3)), month, int(match.group(2)))
-            if parsed is not None:
-                year_score = max(0, 10 - abs(parsed.year - current_year))
-                ranked_candidates.append((26 + hint_bonus + year_score, line_idx, match.start(), parsed))
+            month_name_date = _safe_date(int(match.group(3)), month, int(match.group(2)))
+            if month_name_date is not None:
+                year_score = max(0, 10 - abs(month_name_date.year - current_year))
+                ranked_candidates.append((26 + hint_bonus + year_score, line_idx, match.start(), month_name_date))
 
     if not ranked_candidates:
         return None

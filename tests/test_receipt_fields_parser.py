@@ -47,6 +47,7 @@ def test_extract_date_does_not_slice_into_yyyy_mm_dd() -> None:
 
     assert _extract_date(lines, "\n".join(lines)) == date(2026, 3, 3)
 
+
 def test_extract_date_prefers_datetime_label_for_yy_mm_dd() -> None:
     lines = [
         "NOFRILLS",

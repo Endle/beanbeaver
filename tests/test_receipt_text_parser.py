@@ -278,7 +278,7 @@ def test_extract_items_recovers_item_from_split_multibuy_price_marker() -> None:
         "($2F 3.99",
         "(2 /for $3.99) 2 /for",
         "&& Taxed Grocery",
-        "\"Orion Potato Chips-Orig x1",
+        '"Orion Potato Chips-Orig x1',
         "(2 /for $5.00) 2 /for 5.00H",
         "SUB Total 14.98",
         "Total after Tax 14.98",
@@ -292,7 +292,7 @@ def test_extract_items_recovers_item_from_split_multibuy_price_marker() -> None:
 
     assert any(item.description == "SunriseTofu 700g" and item.price == Decimal("5.99") for item in items)
     assert any(item.description == "*Yo Yan Soya Drink Sweet x2" and item.price == Decimal("3.99") for item in items)
-    assert any(item.description == "\"Orion Potato Chips-Orig x1" and item.price == Decimal("5.00") for item in items)
+    assert any(item.description == '"Orion Potato Chips-Orig x1' and item.price == Decimal("5.00") for item in items)
 
 
 def test_extract_items_skips_compact_promo_marker_ghost_price_line() -> None:
@@ -340,4 +340,6 @@ def test_extract_items_prefers_forward_item_for_reg_marker_price_lines() -> None
     assert any(item.description == "La Pian (Spicy Gluten Sli" and item.price == Decimal("1.99") for item in items)
     assert any(item.description == "*Yuan Qi Sen Lin Iced Tea" and item.price == Decimal("1.99") for item in items)
     assert any(item.description == "*Or:ion Double Choco Pie 12" and item.price == Decimal("3.99") for item in items)
-    assert not any(item.description == "*Yuan Qi Sen Lin Iced Tea 1.99" and item.price == Decimal("3.99") for item in items)
+    assert not any(
+        item.description == "*Yuan Qi Sen Lin Iced Tea 1.99" and item.price == Decimal("3.99") for item in items
+    )
