@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   private-tests:
-    name: Hidden regression suite
+    name: Private regression suite
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -20,8 +20,6 @@ jobs:
       PRIVATE_TESTS_TOKEN: ${{ secrets.BEANBEAVER_PRIVATE_TESTS_READ_TOKEN }}
       # Update this if the private test repository lives elsewhere.
       PRIVATE_TESTS_REPO: Endle/beanbeaver-private-test
-      # Override if the private repo stores tests somewhere else.
-      PRIVATE_TESTS_PATH: tests
     steps:
       - name: Validate secret configuration
         run: |
@@ -64,25 +62,23 @@ jobs:
           cp -R .private-tests-src/. "${RUNNER_TEMP}/beanbeaver-private-tests/"
           rm -rf .private-tests-src
 
+      - name: Inspect private repo layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          PRIVATE_ROOT="${RUNNER_TEMP}/beanbeaver-private-tests"
+          echo "Top-level entries in private repo:"
+          find "${PRIVATE_ROOT}" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort
+
       - name: Run hidden regression suite
         shell: bash
         env:
           PYTHONPATH: ${{ github.workspace }}
+          PUBLIC_REPO_ROOT: ${{ github.workspace }}
         run: |
           set -euo pipefail
           PRIVATE_ROOT="${RUNNER_TEMP}/beanbeaver-private-tests"
-          TEST_PATH="${PRIVATE_ROOT}/${PRIVATE_TESTS_PATH}"
-          if [ ! -d "${TEST_PATH}" ] && [ -d "${PRIVATE_ROOT}/vendor/beanbeaver/tests" ]; then
-            TEST_PATH="${PRIVATE_ROOT}/vendor/beanbeaver/tests"
-          fi
-
-          if [ ! -d "${TEST_PATH}" ]; then
-            echo "Private test repo must contain tests at ${PRIVATE_TESTS_PATH} or vendor/beanbeaver/tests" >&2
-            exit 1
-          fi
-
-          # Keep output compact so fixture names and paths do not spill into logs.
-          pytest -q --maxfail=1 "${TEST_PATH}"
+          pytest -q --maxfail=1 "${PRIVATE_ROOT}" --e2e-mode cached
 
       - name: Scrub private test checkout
         if: always()
