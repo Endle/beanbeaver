@@ -1,0 +1,83 @@
+name: Private Regression
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  private-tests:
+    name: Hidden regression suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Fine-grained PAT or GitHub App token with read-only access to the
+      # private test repository contents.
+      PRIVATE_TESTS_TOKEN: ${{ secrets.BEANBEAVER_PRIVATE_TESTS_READ_TOKEN }}
+      # Update this if the private test repository lives elsewhere.
+      PRIVATE_TESTS_REPO: Endle/beanbeaver-private-test
+    steps:
+      - name: Validate secret configuration
+        run: |
+          if [ -z "${PRIVATE_TESTS_TOKEN}" ]; then
+            echo "Missing secret: BEANBEAVER_PRIVATE_TESTS_READ_TOKEN" >&2
+            exit 1
+          fi
+
+      - name: Check out public repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install public test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+
+      - name: Check out private tests
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PRIVATE_TESTS_REPO }}
+          token: ${{ env.PRIVATE_TESTS_TOKEN }}
+          path: .private-tests-src
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Stage private tests outside the repo workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/beanbeaver-private-tests"
+          cp -R .private-tests-src/. "${RUNNER_TEMP}/beanbeaver-private-tests/"
+          rm -rf .private-tests-src
+
+      - name: Run hidden regression suite
+        shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          PRIVATE_ROOT="${RUNNER_TEMP}/beanbeaver-private-tests"
+          if [ ! -d "${PRIVATE_ROOT}/tests" ]; then
+            echo "Private test repo must contain a tests/ directory" >&2
+            exit 1
+          fi
+
+          # Keep output compact so fixture names and paths do not spill into logs.
+          pytest -q --maxfail=1 "${PRIVATE_ROOT}/tests"
+
+      - name: Scrub private test checkout
+        if: always()
+        shell: bash
+        run: rm -rf "${RUNNER_TEMP}/beanbeaver-private-tests"
