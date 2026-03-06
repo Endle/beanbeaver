@@ -118,3 +118,78 @@ def test_extract_items_with_bbox_accepts_spaced_decimal_price_words() -> None:
     )
 
     assert any(item.description == "LUNCH MEAT" and item.price == Decimal("3.50") for item in items)
+
+
+def test_extract_items_with_bbox_prefers_item_above_onsale_price() -> None:
+    # Reproduces C&C rows where an ON SALE line carries the price for the
+    # preceding item, while the quantity line below belongs to the next item.
+    lines = [
+        {
+            "text": "*S & B Wasabi",
+            "words": [_word("*S & B Wasabi", 0.08, 0.100, 0.260, 0.112)],
+        },
+        {
+            "text": "(E)ON SALE 1.98",
+            "words": [
+                _word("(E)ON SALE", 0.09, 0.120, 0.210, 0.132),
+                _word("1.98", 0.88, 0.120, 0.93, 0.132),
+            ],
+        },
+        {
+            "text": "2 @ $0.99 4.59",
+            "words": [
+                _word("2 @ $0.99", 0.22, 0.140, 0.320, 0.152),
+                _word("4.59", 0.88, 0.140, 0.93, 0.152),
+            ],
+        },
+        {
+            "text": "Hot Kid Honey Flavour Bal",
+            "words": [_word("Hot Kid Honey Flavour Bal", 0.08, 0.160, 0.360, 0.172)],
+        },
+        {
+            "text": "TOTAL 6.57",
+            "words": [
+                _word("TOTAL", 0.09, 0.500, 0.180, 0.512),
+                _word("6.57", 0.88, 0.500, 0.93, 0.512),
+            ],
+        },
+    ]
+
+    items = _extract_items_with_bbox(
+        pages=[{"lines": lines}],
+        item_category_rule_layers=load_item_category_rule_layers(),
+    )
+
+    pairs = [(item.description, item.price) for item in items]
+    assert pairs == [
+        ("S & B Wasabi", Decimal("1.98")),
+        ("Hot Kid Honey Flavour Bal", Decimal("4.59")),
+    ]
+
+
+def test_extract_items_with_bbox_keeps_cash_prefix_product_name() -> None:
+    lines = [
+        {
+            "text": "CASHMERE BATHROOM TISSUE 9.99",
+            "words": [
+                _word("CASHMERE BATHROOM TISSUE", 0.08, 0.100, 0.380, 0.112),
+                _word("9.99", 0.88, 0.100, 0.93, 0.112),
+            ],
+        },
+        {
+            "text": "TOTAL 9.99",
+            "words": [
+                _word("TOTAL", 0.09, 0.500, 0.180, 0.512),
+                _word("9.99", 0.88, 0.500, 0.93, 0.512),
+            ],
+        },
+    ]
+
+    items = _extract_items_with_bbox(
+        pages=[{"lines": lines}],
+        item_category_rule_layers=load_item_category_rule_layers(),
+    )
+
+    assert len(items) == 1
+    assert items[0].description == "CASHMERE BATHROOM TISSUE"
+    assert items[0].price == Decimal("9.99")

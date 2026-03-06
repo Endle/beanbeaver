@@ -360,12 +360,12 @@ def _extract_subtotal(lines: list[str]) -> Decimal | None:
         line_upper = line.upper()
         if "SUBTOTAL" in line_upper or "SUB TOTAL" in line_upper:
             amount = _extract_price_from_line(line)
-            if amount:
+            if amount is not None:
                 return amount
             # Try next line
             if i + 1 < len(lines):
                 amount = _extract_price_from_line(lines[i + 1])
-                if amount:
+                if amount is not None:
                     return amount
     return None
 

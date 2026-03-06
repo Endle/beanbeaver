@@ -343,3 +343,45 @@ def test_extract_items_prefers_forward_item_for_reg_marker_price_lines() -> None
     assert not any(
         item.description == "*Yuan Qi Sen Lin Iced Tea 1.99" and item.price == Decimal("3.99") for item in items
     )
+
+
+def test_extract_items_uses_neighboring_items_for_onsale_markers() -> None:
+    lines = [
+        "*Udon Noodles With Tonkots 3.99",
+        "ONSAL 3.99",
+        "*Lucky Pearl Shanghai Dry",
+        "ONSALE 3.99",
+        "*Lucky Henan Noodles",
+        "(ONSAL",
+        "SUB Total 11.97",
+        "Total after Tax 11.97",
+    ]
+
+    items = _extract_items(
+        lines,
+        summary_amounts={Decimal("11.97")},
+        item_category_rule_layers=load_item_category_rule_layers(),
+    )
+
+    pairs = {(item.description, item.price) for item in items}
+    assert ("*Udon Noodles With Tonkots", Decimal("3.99")) in pairs
+    assert ("*Lucky Pearl Shanghai Dry", Decimal("3.99")) in pairs
+    assert ("*Lucky Henan Noodles", Decimal("3.99")) in pairs
+    assert not any(item.description in {"ONSAL", "ONSALE"} for item in items)
+
+
+def test_extract_items_keeps_cash_prefix_product_names() -> None:
+    lines = [
+        "CASHMERE BATHROOM TISSUE 9.99",
+        "TOTAL 9.99",
+    ]
+
+    items = _extract_items(
+        lines,
+        summary_amounts={Decimal("9.99")},
+        item_category_rule_layers=load_item_category_rule_layers(),
+    )
+
+    assert len(items) == 1
+    assert items[0].description == "CASHMERE BATHROOM TISSUE"
+    assert items[0].price == Decimal("9.99")
