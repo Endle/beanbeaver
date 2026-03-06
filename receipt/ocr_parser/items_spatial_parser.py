@@ -211,8 +211,9 @@ def _extract_items_with_bbox(
                         ):
                             is_summary = True
                             break
-            # ONSALE-only rows can be promo metadata. Keep them only when the
-            # nearest valid item below looks like a promoted item marker row.
+            # ONSALE-only rows can be promo metadata. Prefer a valid descriptive
+            # item immediately above; otherwise fall back to the nearest valid
+            # item below when present.
         if not is_summary and price_line_has_onsale:
             anchor_y = source_line_y if source_line_y is not None else line_y
             nearest_above = None
