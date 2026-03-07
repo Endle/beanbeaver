@@ -21,6 +21,7 @@ from .common import (
     _is_priced_generic_item_label,
     _is_section_header_text,
     _line_has_trailing_price,
+    _looks_like_onsale_marker,
     _looks_like_quantity_expression,
     _looks_like_summary_line,
     _strip_leading_receipt_codes,
@@ -134,7 +135,7 @@ def _extract_items_with_bbox(
         if closest_line_to_price:
             line_y, full_text, left_text, _ = closest_line_to_price
             full_upper = source_full_text.upper() if source_full_text else full_text.upper()
-            price_line_has_onsale = ("ONSALE" in full_upper) or ("ON SALE" in full_upper)
+            price_line_has_onsale = _looks_like_onsale_marker(full_upper)
             left_is_header = _is_section_header_text(left_text) and not _is_priced_generic_item_label(
                 left_text, full_text
             )
@@ -211,24 +212,39 @@ def _extract_items_with_bbox(
                         ):
                             is_summary = True
                             break
-            # ONSALE-only rows can be promo metadata. Keep them only when the
-            # nearest valid item below looks like a promoted item marker row.
-            if not is_summary and price_line_has_onsale:
-                anchor_y = source_line_y if source_line_y is not None else line_y
-                nearest_below = None
-                for candidate_y, candidate_full_text, candidate_left_text, candidate_left_x in all_lines:
-                    if candidate_y <= anchor_y:
-                        continue
-                    if candidate_y - anchor_y > MAX_ITEM_DISTANCE:
-                        continue
-                    if not is_valid_onsale_target(candidate_full_text, candidate_left_text):
-                        continue
-                    if nearest_below is None or candidate_y < nearest_below[0]:
-                        nearest_below = (candidate_y, candidate_full_text, candidate_left_text, candidate_left_x)
-                if nearest_below:
-                    onsale_target_line = nearest_below
-                else:
-                    is_summary = True
+            # ONSALE-only rows can be promo metadata. Prefer a valid descriptive
+            # item immediately above; otherwise fall back to the nearest valid
+            # item below when present.
+        if not is_summary and price_line_has_onsale:
+            anchor_y = source_line_y if source_line_y is not None else line_y
+            nearest_above = None
+            for candidate_y, candidate_full_text, candidate_left_text, candidate_left_x in all_lines:
+                if candidate_y >= anchor_y:
+                    continue
+                if anchor_y - candidate_y > MAX_ITEM_DISTANCE:
+                    continue
+                if not is_valid_onsale_target(candidate_full_text, candidate_left_text):
+                    continue
+                if nearest_above is None or candidate_y > nearest_above[0]:
+                    nearest_above = (candidate_y, candidate_full_text, candidate_left_text, candidate_left_x)
+            nearest_below = None
+            for candidate_y, candidate_full_text, candidate_left_text, candidate_left_x in all_lines:
+                if candidate_y <= anchor_y:
+                    continue
+                if candidate_y - anchor_y > MAX_ITEM_DISTANCE:
+                    continue
+                if not is_valid_onsale_target(candidate_full_text, candidate_left_text):
+                    continue
+                if nearest_below is None or candidate_y < nearest_below[0]:
+                    nearest_below = (candidate_y, candidate_full_text, candidate_left_text, candidate_left_x)
+            if nearest_above:
+                # Prefer direct descriptive context above ONSALE markers when available;
+                # these rows often carry the sale price for the preceding item.
+                onsale_target_line = nearest_above
+            elif nearest_below:
+                onsale_target_line = nearest_below
+            else:
+                is_summary = True
 
         if is_summary:
             continue
@@ -242,9 +258,20 @@ def _extract_items_with_bbox(
 
         def is_valid_item_line(line_y: float, left_text: str, full_text: str) -> bool:
             """Check if a line is a valid item description."""
+            left_text_for_ratio = _strip_leading_receipt_codes(left_text)
+            if not left_text_for_ratio:
+                return False
+            short_alpha_word = re.sub(r"[^A-Za-z]", "", left_text_for_ratio)
+            # Allow short produce-like single words (e.g., "Napa") while still
+            # rejecting symbol-heavy OCR noise.
+            is_short_alpha_item = bool(re.fullmatch(r"[A-Za-z]{3,}", short_alpha_word))
             if not left_text:
                 return False
-            if len(left_text) < 5 and not _is_priced_generic_item_label(left_text, full_text):
+            if (
+                len(left_text) < 5
+                and not _is_priced_generic_item_label(left_text, full_text)
+                and not is_short_alpha_item
+            ):
                 return False
             if total_line_y is not None and line_y > total_line_y + Y_TOLERANCE:
                 return False
@@ -258,9 +285,6 @@ def _extract_items_with_bbox(
             # Skip bare item/SKU code lines, but allow SKU-prefixed item descriptions.
             if re.match(r"^\d{8,}\s*$", full_text):
                 return False
-            left_text_for_ratio = _strip_leading_receipt_codes(left_text)
-            if not left_text_for_ratio:
-                return False
             alpha_count = sum(1 for c in left_text_for_ratio if c.isalpha())
             if alpha_count / len(left_text_for_ratio) < 0.5:
                 return False
@@ -269,12 +293,17 @@ def _extract_items_with_bbox(
                 return False
             # Skip short single-word garbage (likely failed OCR)
             # Valid items usually have multiple words or are longer
-            if len(left_text) < 8 and " " not in left_text and not _is_priced_generic_item_label(left_text, full_text):
+            if (
+                len(left_text) < 8
+                and " " not in left_text
+                and not _is_priced_generic_item_label(left_text, full_text)
+                and not is_short_alpha_item
+            ):
                 return False
             if FOOTER_ADDRESS_PATTERNS.search(full_text):
                 return False
             # Skip promotional/sale lines like "(#)<ON SALE)", "(KAE)<ON SALE)"
-            if re.search(r"ON\s*SALE", left_text, re.IGNORECASE):
+            if _looks_like_onsale_marker(left_text):
                 return False
             # Skip quantity expressions like "(1 /for $2.99)", "(2 /for $4.50)"
             if re.match(r"^\(\d+\s*/\s*for\s+\$[\d.]+\)", left_text):

@@ -1,5 +1,6 @@
 """Parse raw OCR text into structured Receipt data."""
 
+from datetime import date
 from decimal import Decimal
 
 from beanbeaver.domain.receipt import Receipt, ReceiptItem, ReceiptWarning
@@ -24,6 +25,7 @@ def parse_receipt(
     item_category_rule_layers: ItemCategoryRuleLayers,
     image_filename: str = "",
     known_merchants: list[str] | tuple[str, ...] | None = None,
+    reference_date: date | None = None,
 ) -> Receipt:
     """
     Parse OCR result into a Receipt object.
@@ -35,6 +37,7 @@ def parse_receipt(
         item_category_rule_layers: Preloaded item-category rules.
         image_filename: Source image filename for reference
         known_merchants: Optional merchant keywords loaded by runtime components.
+        reference_date: Optional date anchor used to resolve ambiguous short years.
 
     Returns:
         Receipt object with parsed data
@@ -44,7 +47,7 @@ def parse_receipt(
     lines = [line.strip() for line in full_text.split("\n") if line.strip()]
 
     merchant = _extract_merchant(lines, full_text, pages, known_merchants=known_merchants)
-    receipt_date = _extract_date(lines, full_text)
+    receipt_date = _extract_date(lines, full_text, reference_date=reference_date)
     date_is_placeholder = False
     if receipt_date is None:
         receipt_date = placeholder_receipt_date()

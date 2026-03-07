@@ -35,13 +35,13 @@ class CardTransaction:
         """
         assert isinstance(self.transaction_amount, decimal.Decimal)
 
+        if category is None:
+            category = "Expenses:Uncategorized"
+
         # Handle refunds
         if self.transaction_amount < 0.0:
-            # TODO(security): Logging `self` may expose merchant/date/amount/account data.
-            # Keep only for localhost-only operation; redact before non-localhost deployment.
-            logger.warning("Refund not supported yet: %s", self)
             simple = data.Posting(
-                "Expenses:Uncategorized",
+                category,
                 amount.Amount(D(self.transaction_amount), self.currency),
                 None,
                 None,
@@ -49,9 +49,6 @@ class CardTransaction:
                 None,
             )
             return [simple]
-
-        if category is None:
-            category = "Expenses:Uncategorized"
 
         # Handle small uncategorized transactions
         if category == "Expenses:Uncategorized" and self.transaction_amount < 5.0:

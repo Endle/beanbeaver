@@ -38,8 +38,16 @@ class ProjectPaths:
     # --- Source code paths ---
     @property
     def src(self) -> Path:
-        """Bean Beaver code directory (vendor/beanbeaver/)."""
-        return self.root / "vendor" / "beanbeaver"
+        """Bean Beaver code directory.
+
+        Supports both:
+        - host project layout: <root>/vendor/beanbeaver/
+        - standalone beanbeaver layout: <root>/
+        """
+        vendored = self.root / "vendor" / "beanbeaver"
+        if vendored.exists():
+            return vendored
+        return self.root
 
     # --- Configuration paths ---
     @property
@@ -49,8 +57,23 @@ class ProjectPaths:
 
     @property
     def merchant_rules(self) -> Path:
-        """Merchant categorization rules TOML file."""
+        """Project-local merchant categorization rules TOML file."""
         return self.config / "merchant_rules.toml"
+
+    @property
+    def rules(self) -> Path:
+        """Vendor shared default rules directory."""
+        return self.src / "rules"
+
+    @property
+    def default_merchant_rules(self) -> Path:
+        """Vendor default merchant categorization rules TOML file (canonical)."""
+        return self.rules / "default_merchant_rules.toml"
+
+    @property
+    def legacy_default_merchant_rules(self) -> Path:
+        """Legacy vendor default merchant rules path."""
+        return self.src / "runtime" / "rules" / "default_merchant_rules.toml"
 
     @property
     def chequing_rules(self) -> Path:
@@ -69,7 +92,12 @@ class ProjectPaths:
 
     @property
     def default_item_classifier_rules(self) -> Path:
-        """Vendor default receipt item classifier rules TOML file."""
+        """Vendor default receipt item classifier rules TOML file (canonical)."""
+        return self.rules / "default_item_classifier.toml"
+
+    @property
+    def legacy_default_item_classifier_rules(self) -> Path:
+        """Legacy vendor default receipt item classifier rules path."""
         return self.src / "receipt" / "rules" / "default_item_classifier.toml"
 
     # --- Records/ledger paths ---
@@ -105,14 +133,54 @@ class ProjectPaths:
         return self.root / "receipts"
 
     @property
+    def receipts_json(self) -> Path:
+        """Root staged receipt JSON directory."""
+        return self.receipts / "json"
+
+    @property
+    def receipts_json_scanned(self) -> Path:
+        """Parsed receipt JSON awaiting manual review."""
+        return self.receipts_json / "scanned"
+
+    @property
+    def receipts_json_approved(self) -> Path:
+        """Reviewed receipt JSON awaiting CC match."""
+        return self.receipts_json / "approved"
+
+    @property
+    def receipts_json_matched(self) -> Path:
+        """Receipt JSON already matched into the ledger."""
+        return self.receipts_json / "matched"
+
+    @property
+    def receipts_rendered(self) -> Path:
+        """Root rendered receipt output directory."""
+        return self.receipts / "rendered"
+
+    @property
+    def receipts_rendered_scanned(self) -> Path:
+        """Rendered Beancount output for scanned receipts."""
+        return self.receipts_rendered / "scanned"
+
+    @property
+    def receipts_rendered_approved(self) -> Path:
+        """Rendered Beancount output for approved receipts."""
+        return self.receipts_rendered / "approved"
+
+    @property
+    def receipts_rendered_matched(self) -> Path:
+        """Rendered Beancount output for matched receipts."""
+        return self.receipts_rendered / "matched"
+
+    @property
     def receipts_approved(self) -> Path:
-        """Approved receipts awaiting CC match."""
-        return self.receipts / "approved"
+        """Compatibility alias for approved receipt JSON directory."""
+        return self.receipts_json_approved
 
     @property
     def receipts_matched(self) -> Path:
-        """Receipts successfully merged into CC imports."""
-        return self.receipts / "matched"
+        """Compatibility alias for matched receipt JSON directory."""
+        return self.receipts_json_matched
 
     @property
     def receipts_images(self) -> Path:
@@ -121,8 +189,8 @@ class ProjectPaths:
 
     @property
     def receipts_scanned(self) -> Path:
-        """Scanned receipts awaiting manual review."""
-        return self.receipts / "scanned"
+        """Compatibility alias for scanned receipt JSON directory."""
+        return self.receipts_json_scanned
 
     @property
     def receipts_ocr_json(self) -> Path:
@@ -137,10 +205,13 @@ class ProjectPaths:
 
     def ensure_receipt_directories(self) -> None:
         """Create all receipt-related directories if they don't exist."""
-        self.receipts_approved.mkdir(parents=True, exist_ok=True)
-        self.receipts_matched.mkdir(parents=True, exist_ok=True)
+        self.receipts_json_scanned.mkdir(parents=True, exist_ok=True)
+        self.receipts_json_approved.mkdir(parents=True, exist_ok=True)
+        self.receipts_json_matched.mkdir(parents=True, exist_ok=True)
+        self.receipts_rendered_scanned.mkdir(parents=True, exist_ok=True)
+        self.receipts_rendered_approved.mkdir(parents=True, exist_ok=True)
+        self.receipts_rendered_matched.mkdir(parents=True, exist_ok=True)
         self.receipts_images.mkdir(parents=True, exist_ok=True)
-        self.receipts_scanned.mkdir(parents=True, exist_ok=True)
         self.receipts_ocr_json.mkdir(parents=True, exist_ok=True)
 
 

@@ -1,0 +1,23 @@
+# Public default merchant categorization rules.
+# These should contain generally reusable patterns only.
+# Project-local overrides belong in config/merchant_rules.toml.
+
+[[rules]]
+keywords = ["COSTCO", "COSICO"]
+category = "Expenses:Food:Grocery"
+
+[[rules]]
+keywords = ["SHELL", "ESSO CIRCLE K", "PETRO CANADA"]
+category = "Expenses:Driving:Gas"
+
+[[rules]]
+keywords = ["UBER"]
+category = "Expenses:Travel:Taxi"
+
+[[rules]]
+keywords = ["LYFT"]
+category = "Expenses:Travel:Taxi"
+
+[[rules]]
+keywords = ["IKEA", "STRUC-TUBE", "STRUC TUBE"]
+category = "Expenses:Home:Furniture"

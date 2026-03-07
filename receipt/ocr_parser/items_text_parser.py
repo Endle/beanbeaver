@@ -7,9 +7,13 @@ from beanbeaver.domain.receipt import ReceiptItem, ReceiptWarning
 
 from ..item_categories import ItemCategoryRuleLayers, categorize_item
 from .common import (
+    _is_priced_generic_item_label,
     _is_section_header_text,
+    _line_has_trailing_price,
+    _looks_like_onsale_marker,
     _looks_like_quantity_expression,
     _looks_like_summary_line,
+    _normalize_decimal_spacing,
     _parse_quantity_modifier,
     _strip_leading_receipt_codes,
     _validate_quantity_price,
@@ -36,6 +40,8 @@ def _extract_items(
     items: list[ReceiptItem] = []
     if summary_amounts is None:
         summary_amounts = set()
+    # Normalize OCR-split decimals once so all downstream regex checks stay consistent.
+    lines = [_normalize_decimal_spacing(line) for line in lines]
 
     # Skip header/footer sections
     skip_patterns = [
@@ -52,16 +58,16 @@ def _extract_items(
         r"AFTER\s+TAX",
         r"\d+%$",  # Lines ending with percentage like "nst5%"
         # Payment patterns
-        r"CASH",
-        r"CREDIT",
-        r"DEBIT",
-        r"CHANGE",
+        r"^CASH\b",
+        r"^CREDIT\b",
+        r"^DEBIT\b",
+        r"^CHANGE\b",
         r"^BALANCE",
-        r"VISA",
-        r"MASTERCARD",
-        r"AMEX",
-        r"APPROVED",
-        r"ACTIVATED",
+        r"^VISA\b",
+        r"^MASTERCARD\b",
+        r"^AMEX\b",
+        r"^APPROVED\b",
+        r"^ACTIVATED\b",
         r"^PC\s+\d",  # Gift card / payment card lines like "PC 339918..."
         r"^ACCT:",
         r"^REFERENCE",
@@ -70,9 +76,9 @@ def _extract_items(
         r"WELCOME",
         r"RECEIPT",
         r"TRANSACTION",
-        r"POINTS",
-        r"REWARDS",
-        r"EARNED",
+        r"^POINTS\b",
+        r"^REWARDS\b",
+        r"^EARNED\b",
         r"^SAVED$",
         r"^YOU SAVED",
         r"^CARD",
@@ -101,6 +107,60 @@ def _extract_items(
         r"Redeemed",
     ]
     skip_regex = re.compile("|".join(skip_patterns), re.IGNORECASE)
+    trailing_price_regex = re.compile(r"(\d+\.\d{2})(-?)\s*[HhTtJj]?\s*$")
+
+    def _is_descriptive_candidate(text: str) -> bool:
+        """Return True when a line can safely extend/represent an item description."""
+        if not text or len(text) <= 2:
+            return False
+        if skip_regex.search(text):
+            return False
+        if _looks_like_summary_line(text):
+            return False
+        if _looks_like_quantity_expression(text):
+            return False
+        if trailing_price_regex.search(text):
+            return False
+        if re.match(r"^\$?\d+\.\d{2}\s*[HhTtJj]?\s*$", text):
+            return False
+        if re.match(r"^\d{8,}\s*$", text):
+            return False
+        cleaned = _strip_leading_receipt_codes(text)
+        if not cleaned:
+            return False
+        if _looks_like_onsale_marker(cleaned):
+            return False
+        if _is_section_header_text(cleaned):
+            return False
+        alpha_count = sum(1 for c in cleaned if c.isalpha())
+        alpha_ratio = alpha_count / len(cleaned) if cleaned else 0
+        return alpha_ratio >= 0.4
+
+    def _merge_description_context(base: str, source_idx: int) -> str:
+        """Merge adjacent descriptive fragments (e.g., hyphenated continuation lines)."""
+        merged = base.strip()
+        if source_idx > 0:
+            prev_line = lines[source_idx - 1].strip()
+            prev_clean = _strip_leading_receipt_codes(prev_line)
+            if prev_clean and prev_clean.endswith("-") and _is_descriptive_candidate(prev_line):
+                merged = f"{prev_clean} {merged}".strip()
+        if source_idx + 1 < len(lines):
+            next_line = lines[source_idx + 1].strip()
+            next_clean = _strip_leading_receipt_codes(next_line)
+            if next_clean and merged.endswith("-") and _is_descriptive_candidate(next_line):
+                merged = f"{merged} {next_clean}".strip()
+        return re.sub(r"\s+", " ", merged)
+
+    def _is_weak_inline_description(text: str) -> bool:
+        """Detect low-signal inline descriptors like package sizes."""
+        stripped = text.strip()
+        if not stripped:
+            return False
+        if re.fullmatch(r"\([^)]{1,12}\)", stripped):
+            return True
+        if re.fullmatch(r"\d+(?:\.\d+)?\s*(?:KG|G|LB|L|ML|OZ)", stripped, re.IGNORECASE):
+            return True
+        return False
 
     # Find where the items section ends (at TOTAL line) to avoid processing payment section
     total_line_idx = None
@@ -165,13 +225,42 @@ def _extract_items(
                 price = -price
 
             line_upper = line.upper()
+            desc_part = line[: match.start()].strip()
+            compact_line = re.sub(r"\s+", "", line_upper)
+            prefer_forward_desc = False
+            skip_if_no_forward_desc = False
             # Handle @REG$/REG$ promo lines.
             # If line is just a reg-price marker (single price), skip it.
             # If line includes both reg and sale prices, treat as price line for the item above.
-            if "REG$" in line_upper or "@REG" in line_upper:
+            has_reg_marker = (
+                "REG$" in line_upper
+                or "@REG" in line_upper
+                or "0REG" in line_upper
+                or "OREG" in line_upper
+                or re.search(r"(?:^|[^A-Z0-9])[0-9OI]?REG\$?\d+\.\d{2}", line_upper) is not None
+            )
+            if has_reg_marker:
                 prices = re.findall(r"(\d+\.\d{2})", line)
-                # If previous line already contains a price, this is just promo info; skip it.
+                if len(prices) == 1:
+                    # Marker-only rows like "(9)@REG$3.99" are metadata, not payable totals.
+                    # Keep descriptive rows such as "ITEM @REG$8.99" for fallback matching.
+                    marker = re.sub(r"[^A-Z0-9]", "", desc_part.upper())
+                    marker = re.sub(r"^\d+", "", marker)
+                    if marker in {"REG", "0REG", "OREG", "IREG"}:
+                        continue
+                # If previous line already contains a price, this line is usually
+                # promo metadata for an item shown below. Prefer lookahead.
                 if len(prices) > 1 and i > 0 and re.search(r"\d+\.\d{2}\s*[HhTtJj]?\s*$", lines[i - 1]):
+                    prefer_forward_desc = True
+                    skip_if_no_forward_desc = True
+
+            # Compact promo marker tokens (e.g., "EG2.99", "REG$2.99") can be
+            # OCR artifacts from regular-price metadata and should not create
+            # a synthetic item by backfilling to a prior priced row.
+            if re.match(r"^[A-Z]{1,5}\$?\d+\.\d{2}[HHTTJJ]?$", compact_line) and not _looks_like_onsale_marker(
+                desc_part
+            ):
+                if i > 0 and _line_has_trailing_price(lines[i - 1]):
                     continue
 
             # Skip if this is a summary line (contains TOTAL/SUBTOTAL keywords)
@@ -186,17 +275,36 @@ def _extract_items(
                     continue
 
             # Get description from same line (before the price)
-            desc_part = line[: match.start()].strip()
             # Promo lines like "REG$8.99 5.99" should use the previous line as description
-            force_backward = "REG$" in line_upper or "@REG" in line_upper
+            weak_inline_desc = _is_weak_inline_description(desc_part)
+            force_backward = "REG$" in line_upper or "@REG" in line_upper or weak_inline_desc
+            if (
+                has_reg_marker
+                and force_backward
+                and i > 0
+                and lines[i - 1].strip()
+                and _line_has_trailing_price(lines[i - 1].strip())
+                and desc_part.startswith("(")
+            ):
+                prefer_forward_desc = True
 
             # Clean up description - remove item codes at start
             if desc_part:
                 desc_part = re.sub(r"^\d{8,}\s*", "", desc_part)
+            is_onsale_marker_desc = _looks_like_onsale_marker(desc_part)
+            if is_onsale_marker_desc:
+                # ONSALE-like rows usually carry a nearby item's price.
+                prefer_forward_desc = True
+                if i > 0 and _line_has_trailing_price(lines[i - 1].strip()):
+                    skip_if_no_forward_desc = True
 
             # Priced aisle/section headers (e.g., "33-BAKERY INSTORE 12.00") should
             # use a nearby SKU-led item line, not the header text itself.
-            is_priced_section_header = bool(desc_part) and _is_section_header_text(desc_part)
+            is_priced_section_header = (
+                bool(desc_part)
+                and _is_section_header_text(desc_part)
+                and not _is_priced_generic_item_label(desc_part, line)
+            )
             skip_section_header_price = False
             if is_priced_section_header:
                 desc_part = ""
@@ -222,15 +330,52 @@ def _extract_items(
             # Check if desc_part is valid: not empty, not too short, not a quantity expression
             # Quantity expressions like "2 @ 2/$5.00" should trigger backward search instead
             # Also handle promotional patterns like "(1 /for $2.99) 1 /for" from C&C receipts
+            is_malformed_price_marker = bool(
+                desc_part
+                and desc_part.startswith("(")
+                and "$" in desc_part
+                and " " not in desc_part
+                and len(desc_part) <= 16
+                and "@" not in desc_part
+                and "REG" not in desc_part.upper()
+            )
+            is_quantity_stub = bool(re.match(r"^\d+\s*@\s*$", desc_part))
             is_qty_expr = (
                 (
                     _looks_like_quantity_expression(desc_part)
                     # Promotional pattern like "(#)<ON SALE)"
                     or re.match(r"^\([#\w]*\)\s*<?\s*ON\s*SALE", desc_part, re.IGNORECASE)
+                    or is_onsale_marker_desc
                 )
                 if desc_part
                 else False
             )
+            if is_malformed_price_marker:
+                # Recover cases where OCR split a multi-buy marker across lines, e.g.:
+                #   "*Item x2"
+                #   "($2F 3.99"
+                #   "(2 /for $3.99) 2 /for"
+                # In this shape, treat current row as a price-only row and search
+                # backwards for the unpriced descriptive line.
+                prev_line = lines[i - 1].strip() if i > 0 else ""
+                next_line = lines[i + 1].strip() if i + 1 < len(lines) else ""
+                prev_looks_like_description = bool(
+                    prev_line
+                    and not skip_regex.search(prev_line)
+                    and not _looks_like_summary_line(prev_line)
+                    and not _looks_like_quantity_expression(prev_line)
+                    and not _line_has_trailing_price(prev_line)
+                )
+                next_supports_multi_buy = bool(next_line and _looks_like_quantity_expression(next_line))
+                if prev_looks_like_description and next_supports_multi_buy:
+                    force_backward = True
+                    desc_part = ""
+                    is_qty_expr = False
+                else:
+                    continue
+            # Lines like "2 @ 9.69" are quantity/unit-price metadata, not item names.
+            if is_quantity_stub:
+                continue
 
             if desc_part and len(desc_part) > 2 and not is_qty_expr and not force_backward:
                 items.append(
@@ -246,6 +391,7 @@ def _extract_items(
                 qty_info = []
                 qty_modifiers = []  # Store parsed quantity modifier data
                 found_desc = None
+                found_desc_line_idx = None
                 # For priced section headers, description usually follows on the next line
                 # as a SKU-led item line (e.g., "62843020000 DOUGHNUTS MRJ").
                 if is_priced_section_header:
@@ -258,6 +404,8 @@ def _extract_items(
                         if _looks_like_summary_line(next_line):
                             continue
                         if _looks_like_quantity_expression(next_line):
+                            continue
+                        if _looks_like_onsale_marker(next_line):
                             continue
                         if re.search(r"(\d+\.\d{2})(-?)\s*[HhTtJj]?\s*$", next_line):
                             # This line is a standalone priced item; do not borrow it.
@@ -276,9 +424,39 @@ def _extract_items(
                         if alpha_ratio < 0.5:
                             continue
                         found_desc = cleaned_next
+                        found_desc_line_idx = j
                         break
                 if is_priced_section_header and found_desc is None:
                     # No safe lookahead description for this header price row.
+                    continue
+                if found_desc is None and prefer_forward_desc:
+                    for j in range(i + 1, min(i + 5, len(lines))):
+                        next_line = lines[j].strip()
+                        if not next_line:
+                            continue
+                        if skip_regex.search(next_line):
+                            continue
+                        if _looks_like_summary_line(next_line):
+                            continue
+                        if _looks_like_quantity_expression(next_line):
+                            continue
+                        if _looks_like_onsale_marker(next_line):
+                            continue
+                        if _line_has_trailing_price(next_line):
+                            continue
+                        cleaned_next = _strip_leading_receipt_codes(next_line)
+                        if not cleaned_next:
+                            continue
+                        if _is_section_header_text(cleaned_next):
+                            continue
+                        alpha_count = sum(1 for c in cleaned_next if c.isalpha())
+                        alpha_ratio = alpha_count / len(cleaned_next) if cleaned_next else 0
+                        if alpha_ratio < 0.5:
+                            continue
+                        found_desc = cleaned_next
+                        found_desc_line_idx = j
+                        break
+                if skip_if_no_forward_desc and found_desc is None:
                     continue
                 if found_desc is None:
                     for j in range(i - 1, max(i - 6, -1), -1):
@@ -301,6 +479,8 @@ def _extract_items(
                         if _looks_like_quantity_expression(prev_line):
                             qty_info.append(prev_line)
                             continue
+                        if _looks_like_onsale_marker(prev_line):
+                            continue
                         # Skip price-info lines: "$2.99 ea or 2/$5.00 KB", "$8.80/kg"
                         # These start with $ and contain unit prices or multi-buy offers
                         if re.match(r"^\$\d+\.\d{2}", prev_line):
@@ -310,7 +490,7 @@ def _extract_items(
                             continue
                         # Skip incomplete parentheticals - start with ( but don't end with )
                         # These are often garbled OCR of Chinese text, e.g., "(Hi N" from "青蔥"
-                        if prev_line.startswith("(") and not prev_line.endswith(")"):
+                        if prev_line.startswith("(") and ")" not in prev_line:
                             continue
                         # Skip promotional/sale lines like "(#)<ON SALE)", "(KAE)<ON SALE)"
                         if re.match(r"^\([^)]*\)\s*<?\s*ON\s*SALE", prev_line, re.IGNORECASE):
@@ -323,7 +503,7 @@ def _extract_items(
                             continue
                         # Strip leading item code (digits) before calculating alpha ratio
                         # This handles Costco format: "1214759 GARLIC 3 LB"
-                        desc_for_ratio = re.sub(r"^\d+\s*", "", prev_line)
+                        desc_for_ratio = _strip_leading_receipt_codes(prev_line)
                         # Calculate alpha ratio to filter garbled OCR lines
                         alpha_count = sum(1 for c in desc_for_ratio if c.isalpha())
                         alpha_ratio = alpha_count / len(desc_for_ratio) if desc_for_ratio else 0
@@ -332,10 +512,17 @@ def _extract_items(
                             continue
                         if len(prev_line) > 2 and not re.match(r"^[\d.]+$", prev_line):
                             # Found a valid description - use it (proximity wins)
-                            found_desc = prev_line
-                            break
+                            cleaned_prev = _strip_leading_receipt_codes(prev_line)
+                            if cleaned_prev:
+                                found_desc = cleaned_prev
+                                found_desc_line_idx = j
+                                break
 
                 if found_desc:
+                    if found_desc_line_idx is not None:
+                        found_desc = _merge_description_context(found_desc, found_desc_line_idx)
+                    if weak_inline_desc:
+                        found_desc = f"{found_desc} {desc_part}".strip()
                     quantity = 1
                     description_suffix = ""
 

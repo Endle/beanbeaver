@@ -7,9 +7,11 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 from beanbeaver.domain.match import (
     itemized_receipt_total,
@@ -21,7 +23,88 @@ from beanbeaver.runtime import get_logger, get_paths
 
 logger = get_logger(__name__)
 
-type ReceiptSummary = tuple[Path, str, date, Decimal]
+type ReceiptSummary = tuple[Path, str | None, date | None, Decimal | None]
+
+
+@dataclass(frozen=True)
+class _AppliedMatchUndo:
+    """State needed to rollback one successfully applied match."""
+
+    approved_receipt_path: Path
+    matched_receipt_path: Path
+    statement_path: Path
+    statement_original: str
+    enriched_path: Path
+    enriched_existed: bool
+    enriched_original: str | None
+
+
+def _restore_receipt_to_approved(
+    matched_receipt_path: Path,
+    approved_receipt_path: Path,
+) -> Path:
+    """Move a matched receipt back to approved, handling name collisions."""
+    approved_receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    target = approved_receipt_path
+    if target.exists():
+        counter = 1
+        base_name = target.stem
+        suffix = target.suffix
+        while target.exists():
+            target = target.with_name(f"{base_name}_{counter}{suffix}")
+            counter += 1
+
+    matched_receipt_path.rename(target)
+    return target
+
+
+def _rollback_applied_matches(applied: Sequence[_AppliedMatchUndo]) -> tuple[int, list[str]]:
+    """Rollback applied matches in reverse order. Returns (reverted_count, warnings)."""
+    reverted_count = 0
+    warnings: list[str] = []
+
+    for undo in reversed(applied):
+        try:
+            undo.statement_path.write_text(undo.statement_original)
+
+            if undo.enriched_existed:
+                if undo.enriched_original is not None:
+                    undo.enriched_path.parent.mkdir(parents=True, exist_ok=True)
+                    undo.enriched_path.write_text(undo.enriched_original)
+            elif undo.enriched_path.exists():
+                undo.enriched_path.unlink()
+
+            if undo.matched_receipt_path.exists():
+                _restore_receipt_to_approved(
+                    matched_receipt_path=undo.matched_receipt_path,
+                    approved_receipt_path=undo.approved_receipt_path,
+                )
+            else:
+                warnings.append(f"Matched receipt not found during rollback: {undo.matched_receipt_path}")
+            reverted_count += 1
+        except Exception as exc:
+            warnings.append(f"Rollback failed for {undo.approved_receipt_path.name}: {exc}")
+
+    return reverted_count, warnings
+
+
+def _format_ledger_errors(errors: Sequence[Any], *, limit: int = 5) -> list[str]:
+    """Render a concise list of Beancount loader errors for CLI output."""
+    formatted: list[str] = []
+    for err in list(errors)[:limit]:
+        source = getattr(err, "source", None)
+        message = getattr(err, "message", None) or str(err)
+        if isinstance(source, dict):
+            filename = source.get("filename")
+            lineno = source.get("lineno")
+            if filename and lineno:
+                formatted.append(f"{filename}:{lineno} - {message}")
+                continue
+            if filename:
+                formatted.append(f"{filename} - {message}")
+                continue
+        formatted.append(str(message))
+    return formatted
 
 
 def _ensure_git_clean_before_match() -> bool:
@@ -113,7 +196,7 @@ def cmd_match(args: argparse.Namespace) -> None:
         list_approved_receipts,
         list_scanned_receipts,
         move_to_matched,
-        parse_receipt_from_beancount,
+        parse_receipt_from_stage_json,
     )
 
     if not sys.stdin.isatty():
@@ -126,7 +209,7 @@ def cmd_match(args: argparse.Namespace) -> None:
     scanned = list_scanned_receipts()
     if scanned:
         print(
-            f"Warning: {len(scanned)} receipt(s) still in receipts/scanned/. "
+            f"Warning: {len(scanned)} receipt(s) still in receipts/json/scanned/. "
             "Review with `bb edit` to move them to approved."
         )
 
@@ -140,7 +223,12 @@ def cmd_match(args: argparse.Namespace) -> None:
     print(f"Loading ledger from {ledger_path}...")
     snapshot = list_transactions(ledger_path=ledger_path)
     if snapshot.errors:
-        logger.warning("Loaded ledger with %d beancount error(s); matching may be unreliable.", len(snapshot.errors))
+        print(f"Error: ledger has {len(snapshot.errors)} Beancount error(s). Fix ledger errors before matching.")
+        for line in _format_ledger_errors(snapshot.errors, limit=5):
+            print(f"  - {line}")
+        if len(snapshot.errors) > 5:
+            print(f"  ... and {len(snapshot.errors) - 5} more")
+        return
     transactions = snapshot.transactions
     print(f"Loaded {len(transactions)} transactions")
 
@@ -160,32 +248,48 @@ def cmd_match(args: argparse.Namespace) -> None:
     skipped_count = 0
     used_matches: set[tuple[str, int]] = set()
     stopped_early = False
+    abort_requested = False
+    applied_undo_log: list[_AppliedMatchUndo] = []
 
     for path, merchant, receipt_date, amount in selected_receipts:
         date_str = receipt_date.isoformat() if receipt_date else "UNKNOWN"
         print(f"\n{path.name}")
-        print(f"  {merchant} | {date_str} | ${amount:.2f}")
+        amount_str = f"${amount:.2f}" if amount is not None else "$UNKNOWN"
+        print(f"  {merchant or 'UNKNOWN'} | {date_str} | {amount_str}")
 
-        receipt = parse_receipt_from_beancount(path)
+        receipt = parse_receipt_from_stage_json(path)
+        if amount is None:
+            print("  No total found in the latest stage - keeping in approved")
+            skipped_count += 1
+            continue
         matches = match_receipt_to_transactions(receipt, transactions)
         available_matches = [m for m in matches if match_key(m) not in used_matches]
 
         if not available_matches and matches:
             print("  All candidates were already used in this run.")
             while True:
-                reuse_choice = input("  [u] Show used candidates | [s] Skip | [q] Quit: ").strip().lower()
+                reuse_choice = (
+                    input("  [u] Show used candidates | [s] Skip | [x] Save-and-exit | [a] Abort session: ")
+                    .strip()
+                    .lower()
+                )
                 if reuse_choice in {"s", "skip"}:
                     print("  Skipped")
                     skipped_count += 1
                     break
-                if reuse_choice in {"q", "quit"}:
+                if reuse_choice in {"x", "q", "quit"}:
                     print("Stopping matching session.")
+                    stopped_early = True
+                    break
+                if reuse_choice in {"a", "abort"}:
+                    print("Aborting matching session and reverting this run...")
+                    abort_requested = True
                     stopped_early = True
                     break
                 if reuse_choice in {"u", "use"}:
                     available_matches = matches
                     break
-                print("  Invalid choice. Enter u, s, or q.")
+                print("  Invalid choice. Enter u, s, x, or a.")
             if stopped_early:
                 break
             if not available_matches:
@@ -203,8 +307,8 @@ def cmd_match(args: argparse.Namespace) -> None:
             formatted = format_match_for_display(match).strip().replace(chr(10), chr(10) + "        ")
             print(f"    [{i}] {formatted}{already_used}")
 
-        valid_choices = [str(i) for i in range(1, len(display_matches) + 1)] + ["s", "d", "q"]
-        print("    [s] Skip | [d] Delete receipt | [q] Quit")
+        valid_choices = [str(i) for i in range(1, len(display_matches) + 1)] + ["s", "d", "x", "a", "q"]
+        print("    [s] Skip | [d] Delete receipt | [x] Save-and-exit | [a] Abort session")
 
         while True:
             choice = input("  Select: ").strip().lower()
@@ -218,8 +322,13 @@ def cmd_match(args: argparse.Namespace) -> None:
         elif choice == "s":
             print("  Skipped")
             skipped_count += 1
-        elif choice == "q":
+        elif choice in {"x", "q"}:
             print("Stopping matching session.")
+            stopped_early = True
+            break
+        elif choice == "a":
+            print("Aborting matching session and reverting this run...")
+            abort_requested = True
             stopped_early = True
             break
         else:
@@ -257,6 +366,9 @@ def cmd_match(args: argparse.Namespace) -> None:
             enriched_dir.mkdir(parents=True, exist_ok=True)
             enriched_path = enriched_dir / f"{path.stem}-enriched.beancount"
             include_rel = enriched_path.relative_to(matched_file.parent).as_posix()
+            statement_original = matched_file.read_text()
+            enriched_existed = enriched_path.exists()
+            enriched_original = enriched_path.read_text() if enriched_existed else None
 
             try:
                 status = apply_receipt_match(
@@ -269,11 +381,22 @@ def cmd_match(args: argparse.Namespace) -> None:
                     enriched_content=enriched,
                 )
 
-                move_to_matched(path)
+                matched_receipt_path = move_to_matched(path)
                 action_msg = "already applied; receipt archived" if status == "already_applied" else "applied"
                 print(f"  Matched! Transaction {action_msg}. Enriched file: {enriched_path}")
                 matched_count += 1
                 used_matches.add(key)
+                applied_undo_log.append(
+                    _AppliedMatchUndo(
+                        approved_receipt_path=path,
+                        matched_receipt_path=matched_receipt_path,
+                        statement_path=matched_file,
+                        statement_original=statement_original,
+                        enriched_path=enriched_path,
+                        enriched_existed=enriched_existed,
+                        enriched_original=enriched_original,
+                    )
+                )
 
                 # Reload transactions so next matches use updated line numbers/content.
                 reloaded = list_transactions(ledger_path=ledger_path)
@@ -285,6 +408,13 @@ def cmd_match(args: argparse.Namespace) -> None:
             except Exception as exc:
                 print(f"  Failed to apply match: {exc}")
                 skipped_count += 1
+
+    if abort_requested:
+        reverted_count, rollback_warnings = _rollback_applied_matches(applied_undo_log)
+        matched_count = max(matched_count - reverted_count, 0)
+        print(f"Aborted. Reverted {reverted_count} applied match(es).")
+        for warning in rollback_warnings:
+            print(f"  Rollback warning: {warning}")
 
     print("\n" + "=" * 60)
     if stopped_early:

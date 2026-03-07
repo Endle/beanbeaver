@@ -34,12 +34,18 @@ def load_item_category_rule_layers(
     p = get_paths()
 
     if classifier_paths is None:
-        module_default_rules = (
+        module_default_rules = Path(__file__).resolve().parents[1] / "rules" / "default_item_classifier.toml"
+        legacy_module_default_rules = (
             Path(__file__).resolve().parents[1] / "receipt" / "rules" / "default_item_classifier.toml"
         )
+        legacy_path = getattr(p, "legacy_default_item_classifier_rules", None)
         seen_paths: set[Path] = set()
         classifier_files: list[Path] = []
-        for candidate in (module_default_rules, p.default_item_classifier_rules, p.item_classifier_rules):
+        candidates: list[Path] = [module_default_rules, p.default_item_classifier_rules]
+        if isinstance(legacy_path, Path):
+            candidates.append(legacy_path)
+        candidates.extend([legacy_module_default_rules, p.item_classifier_rules])
+        for candidate in candidates:
             resolved = candidate.resolve()
             if resolved in seen_paths:
                 continue

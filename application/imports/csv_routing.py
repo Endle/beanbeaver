@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import datetime
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -17,6 +18,8 @@ from beanbeaver.runtime import get_logger, get_paths
 
 logger = get_logger(__name__)
 _paths = get_paths()
+
+_MBNA_MONTHLY_EXPORT_RE = re.compile(r"^[A-Za-z]+20\d{2}_\d{4}\.csv$")
 
 ImportType = Literal["cc", "chequing"]
 
@@ -65,6 +68,8 @@ class Stage1Rule:
             return "scotiabank" in lower and lower.endswith(".csv")
         if self.rule_id == "cc-mbna":
             return "mbna" in lower and lower.endswith(".csv")
+        if self.rule_id == "cc-mbna-monthly":
+            return bool(_MBNA_MONTHLY_EXPORT_RE.match(file_name))
         if self.rule_id == "cc-amex-activity":
             return lower == "activity.csv"
         if self.rule_id == "cc-amex-named":
@@ -104,6 +109,7 @@ STAGE1_RULES: tuple[Stage1Rule, ...] = (
     Stage1Rule("cc-rogers-history", "cc", "rogers", "Transaction History_*.csv", False),
     Stage1Rule("cc-scotia", "cc", "scotia", "*Scotiabank*.csv", False),
     Stage1Rule("cc-mbna", "cc", "mbna", "*MBNA*.csv", True),
+    Stage1Rule("cc-mbna-monthly", "cc", "mbna", "MonthYYYY_1234.csv", True),
     Stage1Rule("cc-amex-activity", "cc", "amex", "activity.csv", False),
     Stage1Rule("cc-amex-named", "cc", "amex", "*AMEX*.csv", True),
     Stage1Rule("cc-amex-plat", "cc", "amex", "plat.csv", False),
@@ -134,6 +140,10 @@ def _validate_rule(rule_id: str, path: Path) -> bool:
         required = {"transaction date", "amount", "description", "type"}
         return required.issubset(set(header))
     if rule_id == "cc-mbna":
+        header = _read_header(path, encoding="iso-8859-1")
+        named_export_required = {"posted date", "payee", "address", "amount"}
+        if named_export_required.issubset(set(header)):
+            return True
         try:
             with open(path, encoding="iso-8859-1") as handle:
                 reader = csv.reader(handle)
@@ -154,6 +164,8 @@ def _validate_rule(rule_id: str, path: Path) -> bool:
         except Exception:
             return False
         return True
+    if rule_id == "cc-mbna-monthly":
+        return _validate_rule("cc-mbna", path)
     if rule_id == "cc-amex-named":
         header = _read_header(path)
         required = {"date", "description", "amount"}

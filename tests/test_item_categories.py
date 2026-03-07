@@ -35,6 +35,38 @@ def test_coors_maps_to_alcoholic_beverage() -> None:
     )
 
 
+def test_sonicare_maps_to_personal_care_tooth() -> None:
+    assert (
+        categorize_item(
+            "SONICARE TOOTHBRUSH HEADS",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:PersonalCare:Tooth"
+    )
+
+
+@pytest.mark.parametrize(
+    ("description", "expected"),
+    [
+        ("HLY - Fish Cracker Seawee", "Expenses:Food:Grocery:Snacks"),
+        ("TY - Lemon Tea", "Expenses:Food:Grocery:Drink"),
+        ("LHL - Malatang Slightly S", "Expenses:Food:Grocery:Staple"),
+        ("Pork Lard", "Expenses:Food:Grocery:Seasoning"),
+        ("BQ - Frozen Raw Peeled Un", "Expenses:Food:Grocery:Seafood:Shrimp"),
+        ("BAKERY", "Expenses:Food:Grocery:Bakery"),
+        ("Hot Food", "Expenses:Food:Grocery:PreparedMeal"),
+    ],
+)
+def test_public_default_foodmart_overrides(description: str, expected: str) -> None:
+    assert (
+        categorize_item(
+            description,
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == expected
+    )
+
+
 def test_chocolate_milk_with_single_char_noise_maps_to_dairy() -> None:
     assert (
         categorize_item(
@@ -93,4 +125,264 @@ grocery_staple = "Expenses:Food:Grocery:Staple"
             ),
         )
         == "Expenses:Food:Grocery:Staple"
+    )
+
+
+def test_pork_large_intestine_prefers_meat_over_lard_false_positive() -> None:
+    assert (
+        categorize_item(
+            "Pork Large Intestine",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Meat"
+    )
+
+
+def test_fruit_ft_header_maps_to_fruit() -> None:
+    assert (
+        categorize_item(
+            "&& Fruit (FT)",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Fruit"
+    )
+
+
+def test_wing_hing_sweet_soy_bever_prefix_maps_to_drink() -> None:
+    assert (
+        categorize_item(
+            "Wing Hing Sweet Soy Bever",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Drink"
+    )
+
+
+def test_champ_short_maps_to_clothing_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "1944033 CHAMP SHORT",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Shopping:Clothing"
+    )
+
+
+def test_ks_bags_60_maps_to_household_supply_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "295619 KS BAGS 60",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Home:HouseholdSupply"
+    )
+
+
+def test_rainforest_maps_to_coffee_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "108934 RAINFOREST",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Drink:Coffee"
+    )
+
+
+def test_swiffer_dust_maps_to_household_supply_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "1218587 SWIFFER DUST",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Home:HouseholdSupply"
+    )
+
+
+def test_tide_maps_to_household_supply_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "3458556 TIDE CQLDWTR",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Home:HouseholdSupply"
+    )
+
+
+def test_skechers_maps_to_clothing_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "2946010 SKECHERSGLID",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Shopping:Clothing"
+    )
+
+
+def test_cascade_plus_maps_to_household_supply_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "1727590 CASCADE PLUS",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Home:HouseholdSupply"
+    )
+
+
+def test_baking_soda_prefers_household_supply_over_cocacola_soda_keyword() -> None:
+    assert (
+        categorize_item(
+            "1185 BAKING SODA",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Home:HouseholdSupply"
+    )
+
+
+def test_glide_adv_maps_to_tooth_care_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "1457015 GLIDE ADV",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:PersonalCare:Tooth"
+    )
+
+
+def test_white_rabbit_maps_to_snacks_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "1968518 WHITE RABBIT",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Snacks"
+    )
+
+
+def test_marc_anthony_maps_to_personal_care_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "443404 MARC ANTHONY",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:PersonalCare"
+    )
+
+
+def test_toliet_2pk_maps_to_household_supply_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "1796144 TOLIET 2PK",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Home:HouseholdSupply"
+    )
+
+
+def test_fo_tank_s_maps_to_clothing_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "3966510 FO TANK S",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Shopping:Clothing"
+    )
+
+
+def test_lavazza_1kg_maps_to_coffee_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "599010 LAVAZZA 1KG",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Drink:Coffee"
+    )
+
+
+def test_togo_van_2kg_maps_to_dairy_with_low_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "1355285 TOGO VAN 2KG",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Dairy"
+    )
+
+
+def test_pineapple_bun_prefers_bakery_with_high_priority_bun_rule() -> None:
+    assert (
+        categorize_item(
+            "Red Bean Pinapple Bun",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Bakery"
+    )
+
+
+def test_sandwich_biscuits_matcha_maps_to_snacks_with_high_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "*Sandwich Biscuits(Matcha)",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Snacks"
+    )
+
+
+def test_white_pepper_powder_maps_to_seasoning_with_high_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "D.M.D White Pepper Powder",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Seasoning"
+    )
+
+
+def test_yuan_qi_sen_lin_iced_tea_maps_to_drink_with_high_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "*Yuan Qi Sen Lin Iced Tea",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Drink"
+    )
+
+
+def test_tropicana_daily_c_tea_maps_to_drink_with_high_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "'Tropicana Daily C Tea Dr ×1",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Drink"
+    )
+
+
+def test_orion_double_choco_pie_maps_to_snacks_with_high_priority_public_rule() -> None:
+    assert (
+        categorize_item(
+            "*Or:ion Double Choco Pie 12",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Snacks"
+    )
+
+
+def test_yyh_chillies_maps_to_seasoning_with_low_risk_public_rule() -> None:
+    assert (
+        categorize_item(
+            "YYH Chillies 80g",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Seasoning"
+    )
+
+
+def test_la_pian_maps_to_snacks_with_low_risk_public_rule() -> None:
+    assert (
+        categorize_item(
+            "La Pian (Spicy Gluten Sli",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Snacks"
     )

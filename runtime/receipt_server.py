@@ -14,7 +14,6 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from beanbeaver.receipt.formatter import format_parsed_receipt
 from beanbeaver.receipt.ocr_helpers import resize_image_bytes, transform_paddleocr_result
 from beanbeaver.receipt.ocr_result_parser import parse_receipt
 from beanbeaver.runtime import get_logger, get_paths, load_item_category_rule_layers, load_known_merchant_keywords
@@ -180,8 +179,12 @@ async def upload_receipt(request: Request) -> JSONResponse:
                     print(
                         f"Parsed: {receipt.merchant}, {receipt.date}, ${receipt.total:.2f}, {len(receipt.items)} items"
                     )
-                    beancount_content = format_parsed_receipt(receipt, image_sha256=image_sha256)
-                    output_path = save_scanned_receipt(receipt, beancount_content)
+                    output_path = save_scanned_receipt(
+                        receipt,
+                        raw_ocr_payload=raw_ocr_result,
+                        image_sha256=image_sha256,
+                        ocr_json_path=ocr_json_path,
+                    )
                     draft_filename = output_path.name
                     print(f"Saved for review: {output_path}")
                     print(f"{'=' * 60}\n")

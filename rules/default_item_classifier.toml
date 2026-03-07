@@ -192,7 +192,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0031"
-keywords = ["TOOTHPASTE", "TOOTHBRUSH", "MOUTHWASH", "DENTAL FLOSS", "FLOSS"]
+keywords = ["TOOTHPASTE", "TOOTHBRUSH", "MOUTHWASH", "DENTAL FLOSS", "FLOSS", "SONICARE"]
 category = "Expenses:PersonalCare:Tooth"
 priority = 0
 exact_only = false
@@ -237,4 +237,236 @@ id = "legacy_0040"
 keywords = ["KS HOME BAG", "HOME BAG"]
 category = "Expenses:Home:HouseholdSupply"
 priority = 0
+exact_only = false
+
+
+[[rules]]
+id = "legacy_0041"
+keywords = ["KS IBU", "KIRKLAND IBU", "IBUPROFEN", "IBU 400M"]
+category = "Expenses:Health:Pharmacy"
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0042"
+keywords = ["FISH CRACKER SEAWEE"]
+category = "Expenses:Food:Grocery:Snacks"
+priority = 80
+exact_only = false
+
+[[rules]]
+id = "legacy_0043"
+keywords = ["LEMON TEA"]
+category = "Expenses:Food:Grocery:Drink"
+priority = 70
+exact_only = false
+
+[[rules]]
+id = "legacy_0044"
+keywords = ["MALATANG"]
+category = "Expenses:Food:Grocery:Staple"
+priority = 70
+exact_only = false
+
+[[rules]]
+id = "legacy_0045"
+keywords = ["LARD", "PORK LARD"]
+category = "Expenses:Food:Grocery:Seasoning"
+priority = 60
+exact_only = true
+
+[[rules]]
+id = "legacy_0046"
+keywords = ["PEELED"]
+category = "Expenses:Food:Grocery:Seafood:Shrimp"
+priority = -150
+exact_only = true
+
+[[rules]]
+id = "legacy_0047"
+keywords = ["BAKERY"]
+category = "Expenses:Food:Grocery:Bakery"
+priority = 20
+exact_only = true
+
+[[rules]]
+id = "legacy_0048"
+keywords = ["HOT FOOD"]
+category = "Expenses:Food:Grocery:PreparedMeal"
+priority = 40
+exact_only = false
+
+[[rules]]
+id = "legacy_0049"
+keywords = ["FRUIT (FT)"]
+category = "Expenses:Food:Grocery:Fruit"
+priority = 20
+exact_only = true
+
+[[rules]]
+id = "legacy_0050"
+keywords = ["WING HING SWEET SOY BEVER"]
+category = "Expenses:Food:Grocery:Drink"
+priority = -5
+exact_only = false
+
+[[rules]]
+id = "legacy_0051"
+keywords = ["1944033 CHAMP SHORT", "CHAMP SHORT"]
+category = "Expenses:Shopping:Clothing"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0052"
+keywords = ["295619 KS BAGS 60", "KS BAGS 60"]
+category = "Expenses:Home:HouseholdSupply"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0053"
+keywords = ["108934 RAINFOREST", "RAINFOREST"]
+category = "Expenses:Food:Grocery:Drink:Coffee"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0054"
+keywords = ["1218587 SWIFFER DUST", "SWIFFER DUST"]
+category = "Expenses:Home:HouseholdSupply"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0055"
+keywords = ["3458556 TIDE CQLDWTR", "TIDE CQLDWTR", "TIDE"]
+category = "Expenses:Home:HouseholdSupply"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0056"
+keywords = ["2946010 SKECHERSGLID", "SKECHERSGLID", "SKECHERS"]
+category = "Expenses:Shopping:Clothing"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0057"
+keywords = ["1727590 CASCADE PLUS", "CASCADE PLUS", "CASCADE"]
+category = "Expenses:Home:HouseholdSupply"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0058"
+keywords = ["BAKING SODA"]
+category = "Expenses:Home:HouseholdSupply"
+priority = 80
+exact_only = false
+
+[[rules]]
+id = "legacy_0059"
+keywords = ["1457015 GLIDE ADV", "GLIDE ADV"]
+category = "Expenses:PersonalCare:Tooth"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0060"
+keywords = ["1968518 WHITE RABBIT", "WHITE RABBIT"]
+category = "Expenses:Food:Grocery:Snacks"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0061"
+keywords = ["443404 MARC ANTHONY", "MARC ANTHONY"]
+category = "Expenses:PersonalCare"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0062"
+keywords = ["1796144 TOLIET 2PK", "TOLIET 2PK"]
+category = "Expenses:Home:HouseholdSupply"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0063"
+keywords = ["3966510 FO TANK S", "FO TANK S", "TANK TOP"]
+category = "Expenses:Shopping:Clothing"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0064"
+keywords = ["599010 LAVAZZA 1KG", "LAVAZZA 1KG", "LAVAZZA"]
+category = "Expenses:Food:Grocery:Drink:Coffee"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0065"
+keywords = ["1355285 IOG0 VAN 2KG", "1355285 TOGO VAN 2KG", "IOG0 VAN 2KG", "TOGO VAN 2KG"]
+category = "Expenses:Food:Grocery:Dairy"
+priority = -80
+exact_only = false
+
+[[rules]]
+id = "legacy_0066"
+keywords = ["PINEAPPLE BUN", "PINAPPLE BUN", "BUN", "BUNS"]
+category = "Expenses:Food:Grocery:Bakery"
+priority = 80
+exact_only = true
+
+[[rules]]
+id = "legacy_0067"
+keywords = ["SANDWICH BISCUITS", "BISCUITS(MATCHA)", "BISCUITS MATCHA"]
+category = "Expenses:Food:Grocery:Snacks"
+priority = 80
+exact_only = false
+
+[[rules]]
+id = "legacy_0068"
+keywords = ["D.M.D WHITE PEPPER POWDER", "WHITE PEPPER POWDER"]
+category = "Expenses:Food:Grocery:Seasoning"
+priority = 80
+exact_only = false
+
+[[rules]]
+id = "legacy_0069"
+keywords = ["YUAN QI SEN LIN ICED TEA"]
+category = "Expenses:Food:Grocery:Drink"
+priority = 80
+exact_only = false
+
+[[rules]]
+id = "legacy_0070"
+keywords = ["TROPICANA DAILY C TEA", "DAILY C TEA DR"]
+category = "Expenses:Food:Grocery:Drink"
+priority = 80
+exact_only = false
+
+[[rules]]
+id = "legacy_0071"
+keywords = ["ORION DOUBLE CHOCO PIE", "OR:ION DOUBLE CHOCO PIE", "DOUBLE CHOCO PIE"]
+category = "Expenses:Food:Grocery:Snacks"
+priority = 80
+exact_only = false
+
+[[rules]]
+id = "legacy_0072"
+keywords = ["YYH CHILLIES", "YYH CHILIES"]
+category = "Expenses:Food:Grocery:Seasoning"
+priority = 40
+exact_only = false
+
+[[rules]]
+id = "legacy_0073"
+keywords = ["LA PIAN"]
+category = "Expenses:Food:Grocery:Snacks"
+priority = 40
 exact_only = false

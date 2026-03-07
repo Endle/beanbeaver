@@ -24,7 +24,7 @@ Current Directory Mapping
 - `Pure`
   - `domain/`
   - `receipt/`
-  - `receipt/rules/` (data/config only)
+  - `rules/` (data/config only)
   - `util/`
 - Tooling, tests, and metadata are not part of runtime trust zoning:
 

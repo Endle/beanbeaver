@@ -30,7 +30,7 @@ PRIORITY_SCORE_MULTIPLIER = 10000
 
 # Keywords that should only match exactly (avoid fuzzy false positives)
 # Built-in lists are intentionally kept empty; defaults now live in
-# vendor/beanbeaver/receipt/rules/default_item_classifier.toml.
+# vendor/beanbeaver/rules/default_item_classifier.toml.
 EXACT_ONLY_KEYWORDS: set[str] = set()
 
 # Built-in rules are intentionally empty; see default_item_classifier.toml.

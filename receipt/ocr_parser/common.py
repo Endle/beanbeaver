@@ -15,15 +15,17 @@ ITEM_X_THRESHOLD = 0.6  # Item names typically appear on left side (X < this)
 Y_TOLERANCE = 0.02  # How close Y coordinates must be to be "same row"
 MAX_ITEM_DISTANCE = 0.08  # Max vertical distance to associate price with item
 
+# OCR sometimes inserts spaces inside decimal amounts, e.g. "3. 50".
+SPACED_DECIMAL_PATTERN = re.compile(r"(?<=\d)\.\s+(?=\d{2}\b)")
 # Section headers to skip (not actual items)
 SECTION_HEADERS = {"MEAT", "SEAFOOD", "PRODUCE", "DELI", "GROCERY", "BAKERY", "FROZEN"}
-SECTION_HEADER_WITH_AISLE = re.compile(r"^\d{1,2}\s*[-:]\s*[A-Z]{3,}$")
-SECTION_AISLE_PREFIX = re.compile(r"^\d{1,2}\s*[-:]")
+SECTION_HEADER_WITH_AISLE = re.compile(r"^[^A-Z0-9]*\d{1,2}\s*[-:]\s*[A-Z]{3,}$")
+SECTION_AISLE_PREFIX = re.compile(r"^[^A-Z0-9]*\d{1,2}\s*[-:]")
 
 # Summary line patterns to exclude
 SUMMARY_PATTERNS = re.compile(
-    r"^(SUB\s*TOTAL|SUBTOTAL|TOTAL|HST|GST|PST|TAX|MASTER|VISA|DEBIT|"
-    r"CREDIT|POINTS|CASH|CHANGE|BALANCE|APPROVED|CARD|TERMINAL|MEMBER)",
+    r"^(?:SUB\s*TOTAL|SUBTOTAL|TOTAL|HST|GST|PST|TAX|MASTER(?:CARD)?|VISA|DEBIT|"
+    r"CREDIT|POINTS|CASH|CHANGE|BALANCE|APPROVED|CARD|TERMINAL|MEMBER)\b",
     re.IGNORECASE,
 )
 
@@ -40,12 +42,19 @@ FOOTER_ADDRESS_PATTERNS = re.compile(
 # These patterns detect lines like "3 @ $1.99", "1.22 lb @ $2.99/lb", "2 /for $3.00"
 QUANTITY_MODIFIER_PATTERNS = [
     # "3 @ $1.99" - count at unit price
-    (re.compile(r"^(\d+)\s*@\s*\$?(\d+\.\d{2})"), "count_at_price"),
+    (re.compile(r"^(\d+)\s*@\s*\$?(-?\d+\.\d{2})"), "count_at_price"),
     # "1.22 lb @ $2.99/lb" or "1.22 lk @ $2.99/1b" (OCR errors: lk=lb, k9/kg=kg, 1b=lb)
     (re.compile(r"^(\d+\.?\d*)\s*(?:lb|lk|kg|k[g9]|1b|1k)\s*@", re.IGNORECASE), "weight_at_price"),
     # "2 /for $3.00" or "(2 /for $3.00)"
     (re.compile(r"^\(?(\d+)\s*/\s*for\s+\$?(\d+\.\d{2})\)?"), "multi_for_price"),
 ]
+
+
+def _normalize_decimal_spacing(text: str) -> str:
+    """Normalize OCR-split decimal tokens like ``3. 50`` to ``3.50``."""
+    if not text:
+        return text
+    return SPACED_DECIMAL_PATTERN.sub(".", text)
 
 
 def _is_section_header_text(text: str) -> bool:
@@ -101,10 +110,21 @@ def _line_has_trailing_price(text: str) -> bool:
     """Return True if the line itself ends with a price."""
     if not text:
         return False
-    return re.search(r"\d+\.\d{2}\s*[HhTtJj]?\s*$", text.strip()) is not None
+    normalized = _normalize_decimal_spacing(text.strip())
+    return re.search(r"\d+\.\d{2}\s*[HhTtJj]?\s*$", normalized) is not None
 
 
-GENERIC_PRICED_ITEM_LABELS = {"MEAT"}
+def _looks_like_onsale_marker(text: str) -> bool:
+    """Return True for standalone sale markers like ONSALE/ONSAL tokens."""
+    if not text:
+        return False
+    normalized = _normalize_decimal_spacing(text.upper().strip())
+    normalized = re.sub(r"\d+\.\d{2}\s*[HhTtJj]?\s*$", "", normalized).strip()
+    compact = re.sub(r"[^A-Z0-9]", "", normalized)
+    return re.fullmatch(r"(?:[A-Z0-9]{0,3})?ONSAL[E]?", compact) is not None
+
+
+GENERIC_PRICED_ITEM_LABELS = {"MEAT", "BAKERY"}
 
 
 def _is_priced_generic_item_label(left_text: str, full_text: str) -> bool:
@@ -130,7 +150,7 @@ def _parse_quantity_modifier(line: str) -> dict | None:
         dict with keys: quantity, unit_price (optional), weight (optional),
         pattern_type, raw_line; or None if not a modifier line
     """
-    line = line.strip()
+    line = _normalize_decimal_spacing(line.strip())
 
     for pattern, pattern_type in QUANTITY_MODIFIER_PATTERNS:
         match = pattern.match(line)
@@ -203,12 +223,35 @@ def _looks_like_quantity_expression(text: str) -> bool:
     This intentionally avoids broad slash-based matching so product names like
     "50/70 SHRIMP" are not misclassified as quantity lines.
     """
-    text = text.strip()
+    text = _normalize_decimal_spacing(text.strip())
     if not text:
         return False
 
     # Structured patterns handled by _parse_quantity_modifier()
     if _parse_quantity_modifier(text):
+        return True
+
+    # Malformed OCR promo fragments often look like:
+    # "(@6.99(1/$1.98", "(J@6.99(1/$1.98)"
+    # They are quantity/offer metadata, not item descriptions.
+    upper = text.upper()
+    if upper.startswith("(") and "@" in upper and "/$" in upper:
+        alpha_count = sum(1 for c in upper if c.isalpha())
+        if alpha_count <= 2:
+            return True
+
+    # Additional OCR variants for unit-price metadata, e.g.:
+    # "33g@2.592/$3.50", "@2.592/$3.50", "62g)@0.794/$1.99"
+    if "@" in upper and "/$" in upper:
+        compact = re.sub(r"\s+", "", upper)
+        alpha_count = sum(1 for c in compact if c.isalpha())
+        digit_count = sum(1 for c in compact if c.isdigit())
+        if digit_count >= 3 and alpha_count <= 4:
+            return True
+
+    # Quantity lines can occasionally carry a negative unit price for returns,
+    # e.g. "1 @ $-0.38".
+    if re.match(r"^\d+\s*@\s*\$?-?\d+\.\d{2}\s*$", text, re.IGNORECASE):
         return True
 
     # Additional quantity/offer formats seen in receipts
@@ -240,7 +283,7 @@ def _is_price_word(word: dict[str, Any]) -> Decimal | None:
     """Check if a word is a price pattern. Returns the price or None."""
     text = word.get("text", "")
     # Normalize common prefixes like "W $18.99" used by some receipts (e.g., T&T)
-    text = text.strip()
+    text = _normalize_decimal_spacing(text.strip())
     text = re.sub(r"^[Ww]\s*", "", text)
     # Match $X.XX or X.XX patterns
     match = re.match(r"^\$?(\d+\.\d{2})$", text)
@@ -312,6 +355,8 @@ def _is_spatial_layout_receipt(_pages: list[dict[str, Any]], full_text: str) -> 
         "SUPERSTORE",
         "C&C",
         "C & C",
+        "NOFRILLS",
+        "NO FRILLS",
     ]
     for merchant in spatial_merchants:
         if merchant in full_text_upper:
