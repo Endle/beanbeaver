@@ -194,6 +194,35 @@ data, rather than performing direct filesystem or ledger operations.
 
 This matches the existing trust-zone policy and lowers migration risk.
 
+## Rust Scope Rule
+
+Rust code exposed through PyO3 will only be used for parser rules.
+
+The default contract for Rust parser code is:
+
+- pure-function style inputs and outputs
+- deterministic behavior
+- no direct ledger access
+- no orchestration responsibilities
+- no network, subprocess, or arbitrary OS interaction
+
+Tolerated exceptions:
+
+- structured logging/syslog
+- file I/O only for explicitly designated paths at narrow boundaries
+
+Design implication:
+
+- the core Rust parser logic should remain side-effect-light and testable
+- if logging or designated-path file I/O is needed, keep it in thin boundary
+  adapters instead of mixing it into the parsing core
+- Rust code and its dependencies should not become a hidden syscall-heavy
+  runtime layer
+
+This rule is intended to keep Rust focused on computational logic and prevent a
+future drift into rewriting orchestration or platform-facing runtime code in
+PyO3 modules.
+
 ## Migration Plan
 
 ### Phase 1: Make Python packaging truthful
