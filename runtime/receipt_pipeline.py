@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from beanbeaver.receipt.ocr_helpers import OCR_IMAGE_PADDING, resize_image_bytes, transform_paddleocr_result
+from beanbeaver.receipt.ocr_extraction import OCR_IMAGE_PADDING, resize_image_bytes, transform_paddleocr_result
 from beanbeaver.runtime import get_logger, get_paths
 
 logger = get_logger(__name__)

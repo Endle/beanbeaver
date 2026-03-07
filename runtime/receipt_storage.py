@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from beanbeaver.domain.receipt import Receipt
-from beanbeaver.receipt.staged_json import (
+from beanbeaver.receipt.beancount_rendering import render_stage_document_as_beancount
+from beanbeaver.receipt.receipt_structuring import (
     build_parsed_receipt_stage,
     clone_stage_document,
     get_receipt_id,
@@ -16,7 +17,6 @@ from beanbeaver.receipt.staged_json import (
     get_stage_summary,
     load_stage_document,
     receipt_from_stage_document,
-    render_stage_document_as_beancount,
     save_stage_document,
 )
 from beanbeaver.runtime import get_logger, get_paths, load_item_category_rule_layers

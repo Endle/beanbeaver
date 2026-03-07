@@ -14,8 +14,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from beanbeaver.receipt.ocr_helpers import resize_image_bytes, transform_paddleocr_result
-from beanbeaver.receipt.ocr_result_parser import parse_receipt
+from beanbeaver.receipt.ocr_extraction import resize_image_bytes, transform_paddleocr_result
+from beanbeaver.receipt.receipt_structuring import parse_receipt
 from beanbeaver.runtime import get_logger, get_paths, load_item_category_rule_layers, load_known_merchant_keywords
 from beanbeaver.runtime.receipt_pipeline import create_debug_overlay, save_ocr_json
 from beanbeaver.runtime.receipt_storage import save_scanned_receipt

@@ -1,6 +1,6 @@
 """Tests for OCR transformation helpers."""
 
-from beanbeaver.receipt.ocr_helpers import transform_paddleocr_result
+from beanbeaver.receipt.ocr_extraction import transform_paddleocr_result
 
 
 def _bbox(x0: int, y0: int, x1: int, y1: int) -> list[list[int]]:

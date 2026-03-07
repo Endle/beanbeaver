@@ -20,9 +20,9 @@ from typing import Any, cast
 import httpx
 import pytest
 from beanbeaver.domain.receipt import Receipt
-from beanbeaver.receipt.formatter import format_parsed_receipt
-from beanbeaver.receipt.ocr_helpers import resize_image_bytes, transform_paddleocr_result
-from beanbeaver.receipt.ocr_result_parser import parse_receipt
+from beanbeaver.receipt.beancount_rendering import format_parsed_receipt
+from beanbeaver.receipt.ocr_extraction import resize_image_bytes, transform_paddleocr_result
+from beanbeaver.receipt.receipt_structuring import parse_receipt
 from beanbeaver.runtime.item_category_rules import load_item_category_rule_layers
 
 RECEIPTS_DIR = Path(__file__).parent / "receipts_e2e"
