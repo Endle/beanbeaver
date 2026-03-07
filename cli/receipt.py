@@ -27,7 +27,7 @@ def cmd_serve(args: argparse.Namespace) -> None:
 
 
 def cmd_scan(args: argparse.Namespace) -> None:
-    """Scan a receipt image, allow manual edit, then stage to approved/."""
+    """Scan a receipt image, allow manual edit, then stage JSON to approved/."""
     # TODO: add CLI tests that cover cmd_scan status handling and exit codes.
     from beanbeaver.application.receipts.scan import ReceiptScanRequest, run_receipt_scan
 
@@ -77,23 +77,23 @@ def cmd_scan(args: argparse.Namespace) -> None:
     print(f"\nSaved draft to: {result.scanned_path}")
 
     if result.status == "scanned_saved":
-        print("Draft left in scanned/ (edit manually, then move to approved/).")
+        print("Draft left in receipts/json/scanned/ (edit manually, then move to approved/).")
         return
 
     if result.status == "editor_not_found":
         editor_cmd = result.editor_cmd or []
         print(f"Editor not found: {' '.join(editor_cmd)}")
-        print("Draft left in scanned/ (edit manually, then move to approved/).")
+        print("Draft left in receipts/json/scanned/ (edit manually, then move to approved/).")
         return
 
     if result.status == "editor_failed":
-        print(f"Editor exited with code {result.editor_returncode}. Draft left in scanned/.")
+        print(f"Editor exited with code {result.editor_returncode}. Draft left in receipts/json/scanned/.")
         return
 
     if result.status == "approved_staged" and result.approved_path is not None:
-        print(f"\nStaged to approved/: {result.approved_path}")
+        print(f"\nStaged to receipts/json/approved/: {result.approved_path}")
     else:
-        print("Draft left in scanned/ (edit manually, then move to approved/).")
+        print("Draft left in receipts/json/scanned/ (edit manually, then move to approved/).")
         return
     print("This receipt is ready for matching (bb match or CC import).")
 
@@ -127,7 +127,7 @@ def _resolve_editor() -> list[str]:
 
 
 def cmd_edit(args: argparse.Namespace) -> None:
-    """Interactively edit a scanned receipt and stage to approved/."""
+    """Interactively edit a scanned receipt and stage JSON to approved/."""
     from beanbeaver.application.receipts.review import EditScannedReceiptRequest, run_edit_scanned_receipt
     from beanbeaver.runtime.receipt_storage import list_scanned_receipts
 
@@ -137,12 +137,12 @@ def cmd_edit(args: argparse.Namespace) -> None:
 
     receipts = list_scanned_receipts()
     if not receipts:
-        print("No scanned receipts found in receipts/scanned/")
+        print("No scanned receipts found in receipts/json/scanned/")
         return
 
     print("\nScanned receipts:")
     for i, path in enumerate(receipts, 1):
-        print(f"{i}. {path.name}")
+        print(f"{i}. {path.parent.name}/{path.name}")
     print("q. Quit")
 
     choice = input("Select a receipt to edit: ").strip().lower()
@@ -170,7 +170,7 @@ def cmd_edit(args: argparse.Namespace) -> None:
         print(f"Editor not found: {' '.join(editor_cmd)}")
         return
     if result.status == "editor_failed":
-        print(f"Editor exited with code {result.editor_returncode}. Draft left in scanned/.")
+        print(f"Editor exited with code {result.editor_returncode}. Draft left in receipts/json/scanned/.")
         return
     if result.status == "edited_file_missing":
         print("Edited file no longer exists. Leaving as-is.")
@@ -181,7 +181,7 @@ def cmd_edit(args: argparse.Namespace) -> None:
         return
 
     approved_path = result.approved_path
-    print(f"Staged to approved/: {approved_path}")
+    print(f"Staged to receipts/json/approved/: {approved_path}")
 
 
 def cmd_re_edit(args: argparse.Namespace) -> None:
@@ -198,13 +198,15 @@ def cmd_re_edit(args: argparse.Namespace) -> None:
 
     receipts = list_approved_receipts()
     if not receipts:
-        print("No approved receipts found in receipts/approved/")
+        print("No approved receipts found in receipts/json/approved/")
         return
 
     print("\nApproved receipts:")
     for i, (path, merchant, receipt_date, amount) in enumerate(receipts, 1):
         date_str = receipt_date.isoformat() if receipt_date else "UNKNOWN"
-        print(f"{i}. {date_str}  ${amount:>7.2f}  {merchant:<30}  {path.name}")
+        amount_str = f"${amount:>7.2f}" if amount is not None else "$UNKNOWN"
+        merchant_str = merchant or "UNKNOWN"
+        print(f"{i}. {date_str}  {amount_str}  {merchant_str:<30}  {path.parent.name}/{path.name}")
     print("q. Quit")
 
     choice = input("Select a receipt to re-edit: ").strip().lower()
@@ -249,38 +251,40 @@ def cmd_re_edit(args: argparse.Namespace) -> None:
 
 
 def cmd_list_approved(args: argparse.Namespace) -> None:
-    """List approved receipts in approved/ directory."""
+    """List approved receipts in approved JSON directory."""
     from beanbeaver.application.receipts.listing import run_list_approved_receipts
 
     receipts = run_list_approved_receipts().receipts
 
     if not receipts:
-        print("No approved receipts found in receipts/approved/")
+        print("No approved receipts found in receipts/json/approved/")
         return
 
     print(f"\nApproved receipts ({len(receipts)}):")
     print("-" * 60)
     for path, merchant, receipt_date, amount in receipts:
         date_str = receipt_date.isoformat() if receipt_date else "UNKNOWN"
-        print(f"  {date_str}  ${amount:>7.2f}  {merchant:<30}  {path.name}")
+        amount_str = f"${amount:>7.2f}" if amount is not None else "$UNKNOWN"
+        merchant_str = merchant or "UNKNOWN"
+        print(f"  {date_str}  {amount_str}  {merchant_str:<30}  {path.parent.name}/{path.name}")
     print("-" * 60)
     print(f"Total: {len(receipts)} receipt(s) awaiting CC match")
 
 
 def cmd_list_scanned(args: argparse.Namespace) -> None:
-    """List scanned receipts in scanned/ directory."""
+    """List scanned receipts in scanned JSON directory."""
     from beanbeaver.application.receipts.listing import run_list_scanned_receipts
 
     receipts = run_list_scanned_receipts().receipts
 
     if not receipts:
-        print("No scanned receipts found in receipts/scanned/")
+        print("No scanned receipts found in receipts/json/scanned/")
         return
 
     print(f"\nScanned receipts ({len(receipts)}):")
     print("-" * 60)
     for path in receipts:
-        print(f"  {path.name}")
+        print(f"  {path.parent.name}/{path.name}")
     print("-" * 60)
     print(f"Total: {len(receipts)} receipt(s) awaiting manual review")
 

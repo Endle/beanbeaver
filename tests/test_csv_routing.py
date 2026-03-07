@@ -8,8 +8,7 @@ from beanbeaver.application.imports.csv_routing import detect_credit_card_import
 def test_route_csv_detects_mbna_monthly_named_export(tmp_path: Path) -> None:
     csv_path = tmp_path / "February2026_0464.csv"
     csv_path.write_text(
-        "Posted Date,Payee,Address,Amount\n"
-        '01/19/2026,"UBER CANADA/UBEREATS TORONTO ON","TORONTO ",-48.66\n',
+        'Posted Date,Payee,Address,Amount\n01/19/2026,"UBER CANADA/UBEREATS TORONTO ON","TORONTO ",-48.66\n',
         encoding="utf-8",
     )
 
@@ -25,8 +24,7 @@ def test_route_csv_detects_mbna_monthly_named_export(tmp_path: Path) -> None:
 def test_detect_credit_card_importer_id_accepts_mbna_monthly_named_export(tmp_path: Path) -> None:
     csv_path = tmp_path / "February2026_0464.csv"
     csv_path.write_text(
-        "Posted Date,Payee,Address,Amount\n"
-        '01/19/2026,"UBER CANADA/UBEREATS TORONTO ON","TORONTO ",-48.66\n',
+        'Posted Date,Payee,Address,Amount\n01/19/2026,"UBER CANADA/UBEREATS TORONTO ON","TORONTO ",-48.66\n',
         encoding="utf-8",
     )
 

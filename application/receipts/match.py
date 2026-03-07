@@ -23,7 +23,7 @@ from beanbeaver.runtime import get_logger, get_paths
 
 logger = get_logger(__name__)
 
-type ReceiptSummary = tuple[Path, str, date, Decimal]
+type ReceiptSummary = tuple[Path, str | None, date | None, Decimal | None]
 
 
 @dataclass(frozen=True)
@@ -197,7 +197,7 @@ def cmd_match(args: argparse.Namespace) -> None:
         list_approved_receipts,
         list_scanned_receipts,
         move_to_matched,
-        parse_receipt_from_beancount,
+        parse_receipt_from_stage_json,
     )
     from beancount.core import data as beancount_data
 
@@ -211,7 +211,7 @@ def cmd_match(args: argparse.Namespace) -> None:
     scanned = list_scanned_receipts()
     if scanned:
         print(
-            f"Warning: {len(scanned)} receipt(s) still in receipts/scanned/. "
+            f"Warning: {len(scanned)} receipt(s) still in receipts/json/scanned/. "
             "Review with `bb edit` to move them to approved."
         )
 
@@ -258,9 +258,14 @@ def cmd_match(args: argparse.Namespace) -> None:
     for path, merchant, receipt_date, amount in selected_receipts:
         date_str = receipt_date.isoformat() if receipt_date else "UNKNOWN"
         print(f"\n{path.name}")
-        print(f"  {merchant} | {date_str} | ${amount:.2f}")
+        amount_str = f"${amount:.2f}" if amount is not None else "$UNKNOWN"
+        print(f"  {merchant or 'UNKNOWN'} | {date_str} | {amount_str}")
 
-        receipt = parse_receipt_from_beancount(path)
+        receipt = parse_receipt_from_stage_json(path)
+        if amount is None:
+            print("  No total found in the latest stage - keeping in approved")
+            skipped_count += 1
+            continue
         matches = match_receipt_to_transactions(receipt, transactions)
         available_matches = [m for m in matches if match_key(m) not in used_matches]
 
