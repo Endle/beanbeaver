@@ -2,16 +2,19 @@
 
 ## Purpose
 
-Replace the current parse-to-Beancount flow with a two-step pipeline:
+Replace the current parse-to-Beancount flow with a three-stage pipeline:
 
-1. Parse OCR into a staged JSON artifact.
-2. Render Beancount from that JSON artifact.
+1. OCR Extraction Stage
+2. Receipt Structuring Stage
+3. Beancount Rendering Stage
 
-The JSON file is the source of truth while it exists. Beancount is a render target, not the persistence format for parsed receipt state.
+The receipt JSON file is the source of truth while it exists. Beancount is a render target, not the persistence format for parsed receipt state.
+The OCR artifact is an upstream intermediate input, not the review/persistence format.
 
 ## Goals
 
 - Keep receipt parsing and review data machine-readable.
+- Decouple OCR engine output from receipt structuring decisions.
 - Preserve parser ambiguity and evidence instead of forcing early accounting decisions.
 - Decouple parser classification from Beancount account mapping.
 - Keep Beancount rendering simple and mostly stateless.
@@ -20,6 +23,7 @@ The JSON file is the source of truth while it exists. Beancount is a render targ
 ## Non-Goals
 
 - Backward compatibility with old Beancount-as-source receipt files.
+- A finalized v1 schema for the OCR artifact.
 - Stable item IDs across full re-parse from OCR.
 - Embedded history snapshots inside each stage file.
 - Merge/split item review operations as first-class schema operations.
@@ -36,9 +40,29 @@ This design follows the repo receipt parsing policy in `CLAUDE.md`:
 
 ## Pipeline
 
-### Step 1: OCR -> Receipt JSON
+### Step 1: OCR Extraction Stage
 
-The parser writes a JSON stage file containing:
+Input: Receipt image (`jpg`, `png`, ...)
+
+Output: A list of bbox (bounding boxes)
+
+Note: How to store these bbox is not decided yet.
+
+This stage is responsible only for OCR extraction. It does not decide receipt semantics such as merchant, totals, or item structure.
+
+### Step 2: Receipt Structuring Stage
+
+Input: A list of bbox
+
+Output: A structured receipt JSON document
+
+Rules:
+
+- The JSON should include receipt-level fields such as merchant, date, subtotal, tax, total, and currency when available.
+- The JSON should include itemized records with rich metadata, warnings, and optional debug information.
+- Human review data may be added.
+
+The receipt structuring stage writes a JSON stage file containing:
 
 - receipt-level detected fields
 - optional human review overrides
@@ -49,7 +73,18 @@ The parser writes a JSON stage file containing:
 - optional debug payload
 - lineage/stage metadata
 
-### Step 2: Receipt JSON -> Beancount
+This JSON document is the source of truth for parsed receipt state while it exists.
+
+### Step 3: Beancount Rendering Stage
+
+Input: Structured receipt JSON
+
+Output: Beancount file
+
+Rules:
+
+- This stage should be lightweight and straightforward.
+- User's custom item classification rules are introduced in this stage.
 
 The renderer reads one JSON stage file and generates one Beancount file using simple rules:
 
@@ -60,6 +95,18 @@ The renderer reads one JSON stage file and generates one Beancount file using si
 - fail if total is missing
 
 ## Storage Layout
+
+### OCR artifact storage
+
+Store OCR artifacts separately from receipt JSON and rendered Beancount output.
+
+The exact on-disk format is intentionally unspecified for now. Current implementation details may remain as-is until bbox storage is settled.
+
+Rules:
+
+- Step 1 output should preserve the bbox data needed by Step 2.
+- Raw OCR-engine payloads may continue to be stored for debugging/regressions.
+- Receipt JSON may carry forward references to the OCR artifact or raw OCR payload.
 
 ### JSON stage storage
 
@@ -444,7 +491,7 @@ Examples of allowed top-level debug content:
 
 ## Renderer Rules
 
-Step 2 should be a simple renderer over one JSON file.
+Step 3 should be a simple renderer over one JSON file.
 
 ### Input selection
 
@@ -549,9 +596,9 @@ Example:
 
 Expected refactor direction:
 
-1. Introduce JSON schema types and serialization helpers.
-2. Change receipt scan flow to save staged JSON instead of Beancount as the parsed artifact.
-3. Add a renderer that reads JSON and writes Beancount.
-4. Move storage/listing/review logic to load JSON stages, not Beancount.
-5. Remove Beancount parsing as receipt-state reconstruction.
-
+1. Make the OCR extraction boundary explicit, while allowing the current artifact shape to remain implementation-defined for now.
+2. Introduce receipt JSON schema types and serialization helpers.
+3. Change receipt scan flow to save staged JSON instead of Beancount as the parsed artifact.
+4. Add a renderer that reads JSON and writes Beancount.
+5. Move storage/listing/review logic to load JSON stages, not Beancount.
+6. Remove Beancount parsing as receipt-state reconstruction.
