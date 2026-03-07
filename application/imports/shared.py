@@ -15,6 +15,12 @@ logger = get_logger(__name__)
 _paths = get_paths()
 
 
+def downloads_display_path(downloads_dir: Path | None = None) -> str:
+    """Render the effective Downloads directory for user-facing messages."""
+    downloads = downloads_dir or _paths.downloads
+    return str(downloads)
+
+
 def check_uncommitted_changes() -> bool:
     """Check if there are uncommitted changes in the repository."""
     result = subprocess.run(
@@ -32,7 +38,7 @@ def confirm_uncommitted_changes() -> bool:
         return True
 
     logger.warning("There are uncommitted changes in the repository.")
-    print("Uncommitted changes detected. If import fails, you can revert with 'git checkout .'")
+    print("Uncommitted changes detected. Commit or stash first if you want a clean rollback point.")
     print("Continue? [y/N] ", end="")
     response = input().strip().lower()
     if response != "y":
@@ -73,13 +79,14 @@ def detect_csv_files(
         logger.info("Auto-detected CSV file: %s", found_files[0])
         return found_files[0]
 
+    downloads_label = downloads_display_path(downloads)
     if not sys.stdin.isatty():
         raise RuntimeError(
-            f"Multiple {file_type_name} files found in ~/Downloads. "
+            f"Multiple {file_type_name} files found in {downloads_label}. "
             f"Run interactively or pass an explicit file: {', '.join(found_files)}"
         )
 
-    print(f"Multiple {file_type_name} files found in ~/Downloads:")
+    print(f"Multiple {file_type_name} files found in {downloads_label}:")
     for i, fname in enumerate(found_files):
         print(f"  {i}: {fname}")
     print("Which file to import? ", end="")

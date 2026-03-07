@@ -241,7 +241,7 @@ Success criterion:
 1. Add `pixi.toml`.
 2. Mirror the common dev commands as Pixi tasks.
 3. Keep `flake.nix` temporarily during transition.
-4. Validate Linux/macOS workflows.
+4. Validate Linux/macOS/Windows workflows.
 
 Success criterion:
 

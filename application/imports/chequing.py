@@ -22,6 +22,7 @@ from beanbeaver.application.imports.shared import (
     confirm_uncommitted_changes,
     copy_statement_csv,
     detect_statement_date_range,
+    downloads_display_path,
     select_interactive_option,
     write_import_output,
 )
@@ -81,7 +82,7 @@ class ChequingImportResult:
 
 
 def detect_chequing_csv() -> str | None:
-    """Auto-detect a chequing CSV file (EQ Bank or Scotia) in ~/Downloads."""
+    """Auto-detect a chequing CSV file in the configured Downloads directory."""
     return detect_chequing_csv_by_rules(DOWNLOADED_CSV_BASE_PATH)
 
 
@@ -152,7 +153,10 @@ def run_chequing_import(request: ChequingImportRequest) -> ChequingImportResult:
         if csv_file is None:
             return ChequingImportResult(
                 status="error",
-                error="No chequing CSV file found in ~/Downloads\nSupported files: *Details.csv, Preferred_Package_*.csv",
+                error=(
+                    f"No chequing CSV file found in {downloads_display_path(DOWNLOADED_CSV_BASE_PATH)}\n"
+                    "Supported files: *Details.csv, Preferred_Package_*.csv"
+                ),
             )
 
     logger.info("Importing chequing transactions from: %s", csv_file)

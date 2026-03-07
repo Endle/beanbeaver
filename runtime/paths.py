@@ -36,6 +36,39 @@ def _search_upwards(start: Path) -> Path | None:
     return None
 
 
+def _expand_downloads_env(raw: str) -> Path:
+    """Expand common shell placeholders in download-directory env vars."""
+    expanded = raw.replace("$HOME", str(Path.home())).replace("${HOME}", str(Path.home()))
+    return Path(os.path.expandvars(expanded)).expanduser()
+
+
+def _default_downloads_path() -> Path:
+    """Return a best-effort Downloads directory across supported platforms."""
+    override = os.environ.get("BEANBEAVER_DOWNLOADS", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+
+    xdg_downloads = os.environ.get("XDG_DOWNLOAD_DIR", "").strip()
+    if xdg_downloads:
+        return _expand_downloads_env(xdg_downloads).resolve()
+
+    home = Path.home()
+    candidates = [home / "Downloads"]
+
+    onedrive = os.environ.get("OneDrive", "").strip()
+    if onedrive:
+        candidates.append(Path(onedrive) / "Downloads")
+
+    userprofile = os.environ.get("USERPROFILE", "").strip()
+    if userprofile:
+        candidates.append(Path(userprofile) / "Downloads")
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+    return candidates[0].expanduser().resolve()
+
+
 def _get_project_root() -> Path:
     """Determine the active beancount project root directory."""
     env_root = os.environ.get("BEANBEAVER_ROOT", "").strip()
@@ -237,7 +270,7 @@ class ProjectPaths:
     @property
     def downloads(self) -> Path:
         """User's Downloads directory for CSV imports."""
-        return Path("~/Downloads").expanduser()
+        return _default_downloads_path()
 
     def ensure_receipt_directories(self) -> None:
         """Create all receipt-related directories if they don't exist."""

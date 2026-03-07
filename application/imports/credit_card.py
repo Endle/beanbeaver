@@ -20,6 +20,7 @@ from beanbeaver.application.imports.shared import (
     confirm_uncommitted_changes,
     copy_statement_csv,
     detect_statement_date_range,
+    downloads_display_path,
     select_interactive_option,
     write_import_output,
 )
@@ -80,7 +81,7 @@ class CreditCardImportResult:
 
 
 def detect_credit_card_csv() -> str | None:
-    """Auto-detect a credit card CSV file in ~/Downloads."""
+    """Auto-detect a credit card CSV file in the configured Downloads directory."""
     return detect_credit_card_csv_by_rules(DOWNLOADED_CSV_BASE_PATH)
 
 
@@ -341,7 +342,7 @@ def run_credit_card_import(request: CreditCardImportRequest) -> CreditCardImport
             return CreditCardImportResult(
                 status="error",
                 error=(
-                    "No credit card CSV file found in ~/Downloads\n"
+                    f"No credit card CSV file found in {downloads_display_path(DOWNLOADED_CSV_BASE_PATH)}\n"
                     "Supported files: CIBC.csv, statement.csv, report.csv, Transactions.csv, "
                     "activity.csv, plat.csv, *AMEX*.csv, SIMPLII*.csv, *Scotiabank*.csv, "
                     "Transaction History_*.csv, *MBNA*.csv"

@@ -98,8 +98,19 @@ def cmd_scan(args: argparse.Namespace) -> None:
     print("This receipt is ready for matching (bb match or CC import).")
 
 
+def _default_editor_command() -> list[str]:
+    """Return a portable fallback editor command when no editor is configured."""
+    if os.name == "nt" and shutil.which("notepad"):
+        return ["notepad"]
+
+    for candidate in ("nano", "vim", "vi"):
+        if shutil.which(candidate):
+            return [candidate]
+    return ["vi"]
+
+
 def _resolve_editor() -> list[str]:
-    """Resolve editor command: git core.editor -> $EDITOR -> vi."""
+    """Resolve editor command: git core.editor -> $VISUAL/$EDITOR -> platform default."""
     git_path = shutil.which("git")
     if git_path:
         try:
@@ -119,11 +130,15 @@ def _resolve_editor() -> list[str]:
         except Exception:
             pass
 
+    env_visual = os.environ.get("VISUAL", "").strip()
+    if env_visual:
+        return shlex.split(env_visual)
+
     env_editor = os.environ.get("EDITOR", "").strip()
     if env_editor:
         return shlex.split(env_editor)
 
-    return ["vi"]
+    return _default_editor_command()
 
 
 def cmd_edit(args: argparse.Namespace) -> None:

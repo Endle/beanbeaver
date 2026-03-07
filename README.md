@@ -48,7 +48,7 @@ python -m pip install -e ".[dev,test]"
 ```bash
 bb import  # auto-detects type (prompts if ambiguous)
 ```
-It would scan `~/Downloads` and match the bank
+It scans your default Downloads folder and matches the bank.
 
 ### Parse receipt
 
@@ -58,7 +58,7 @@ It would scan `~/Downloads` and match the bank
 We need to run [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) in container: <https://github.com/Endle/beanbeaver-ocr>
 ```
 docker run --name beanbeaver-ocr -p 8001:8000 ghcr.io/endle/beanbeaver-ocr:latest
-# Or podman
+# Or podman on Linux
 podman run --replace --name beanbeaver-ocr --network=slirp4netns -p 8001:8000 ghcr.io/endle/beanbeaver-ocr:latest
 ```
 
@@ -120,3 +120,5 @@ pixi run test
 pixi run test-e2e-cached
 ```
 
+Core CI now targets Linux, macOS, and Windows for lint and non-E2E tests.
+Container-backed OCR flows remain Linux-first in practice.
