@@ -1,198 +1,252 @@
-"""Storage and retrieval of scanned/approved receipts.
+"""Storage and retrieval of staged receipt JSON artifacts."""
 
-This module handles saving/loading/managing receipts that move through:
-    scanned/  ->  approved/  ->  matched/
+from __future__ import annotations
 
-Directory structure:
-    receipts/
-    ├── approved/   - Human-reviewed receipts awaiting CC match
-    ├── matched/    - Receipts successfully merged into CC imports
-    ├── images/     - Receipt photos
-    ├── scanned/    - OCR+parser succeeded, not yet reviewed
-    └── ocr_json/   - Raw OCR results
-"""
-
-import re
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
-from beanbeaver.domain.receipt import Receipt, ReceiptItem
-from beanbeaver.receipt.date_utils import placeholder_receipt_date
-from beanbeaver.runtime import get_logger, get_paths
+from beanbeaver.domain.receipt import Receipt
+from beanbeaver.receipt.staged_json import (
+    build_parsed_receipt_stage,
+    clone_stage_document,
+    get_receipt_id,
+    get_stage_index,
+    get_stage_summary,
+    load_stage_document,
+    receipt_from_stage_document,
+    render_stage_document_as_beancount,
+    save_stage_document,
+)
+from beanbeaver.runtime import get_logger, get_paths, load_item_category_rule_layers
 
 logger = get_logger(__name__)
 
-# Get paths from centralized module
 _paths = get_paths()
-RECEIPTS_DIR = _paths.receipts
-APPROVED_DIR = _paths.receipts_approved
-MATCHED_DIR = _paths.receipts_matched
-IMAGES_DIR = _paths.receipts_images
-SCANNED_DIR = _paths.receipts_scanned
+SCANNED_DIR = _paths.receipts_json_scanned
+APPROVED_DIR = _paths.receipts_json_approved
+MATCHED_DIR = _paths.receipts_json_matched
+RENDERED_SCANNED_DIR = _paths.receipts_rendered_scanned
+RENDERED_APPROVED_DIR = _paths.receipts_rendered_approved
+RENDERED_MATCHED_DIR = _paths.receipts_rendered_matched
 
 
 def ensure_directories() -> None:
-    """Create required directories if they don't exist."""
+    """Create required receipt directories if they do not exist."""
     _paths.ensure_receipt_directories()
 
 
-def generate_receipt_filename(receipt: Receipt) -> str:
-    """
-    Generate filename for receipt files.
-
-    Format: YYYY-MM-DD_merchant_amount.beancount
-
-    This format enables quick pre-filtering by parsing filename
-    before loading file content.
-    """
-    if receipt.date_is_placeholder:
-        date_str = "unknown-date"
-    else:
-        date_str = receipt.date.strftime("%Y-%m-%d")
-
-    # Clean merchant name for filename
-    merchant_clean = receipt.merchant.lower()
-    merchant_clean = "".join(c if c.isalnum() else "_" for c in merchant_clean)
-    merchant_clean = "_".join(filter(None, merchant_clean.split("_")))
-    if not merchant_clean:
-        merchant_clean = "unknown"
-    # Limit merchant name length
-    if len(merchant_clean) > 30:
-        merchant_clean = merchant_clean[:30]
-
-    # Format amount (replace . with _ for filename safety)
-    amount_str = f"{receipt.total:.2f}".replace(".", "_")
-
-    return f"{date_str}_{merchant_clean}_{amount_str}.beancount"
+def _slug(text: str | None) -> str:
+    """Return a filesystem-safe slug."""
+    if not text:
+        return "unknown"
+    cleaned = "".join(ch if ch.isalnum() else "_" for ch in text.lower())
+    cleaned = "_".join(part for part in cleaned.split("_") if part)
+    return cleaned[:30] or "unknown"
 
 
-def _save_receipt_to_directory(
+def _date_component(value: date | None) -> str:
+    """Format receipt date for filesystem use."""
+    return value.isoformat() if value is not None else "unknown-date"
+
+
+def _amount_component(value: Decimal | None) -> str:
+    """Format receipt total for filesystem use."""
+    if value is None:
+        return "unknown_total"
+    return f"{value:.2f}".replace(".", "_")
+
+
+def _receipt_dir_name(document: dict[str, Any]) -> str:
+    """Build a human-readable receipt-chain directory name."""
+    merchant, receipt_date, total = get_stage_summary(document)
+    receipt_id = get_receipt_id(document)
+    suffix = receipt_id[:4] if receipt_id else "unkn"
+    return f"{_date_component(receipt_date)}_{_slug(merchant)}_{_amount_component(total)}_{suffix}"
+
+
+def _rendered_filename(document: dict[str, Any]) -> str:
+    """Return the rendered Beancount filename for a stage document."""
+    return f"{_receipt_dir_name(document)}.beancount"
+
+
+def _stage_files(receipt_dir: Path) -> list[Path]:
+    """List all stage JSON files for a receipt chain."""
+    return sorted(receipt_dir.glob("*.receipt.json"))
+
+
+def _latest_stage_path(receipt_dir: Path) -> Path:
+    """Return the latest stage file in a receipt chain directory."""
+    stage_files = _stage_files(receipt_dir)
+    if not stage_files:
+        raise FileNotFoundError(f"No stage JSON files found in {receipt_dir}")
+    return max(stage_files, key=lambda path: get_stage_index(load_stage_document(path)))
+
+
+def _normalize_receipt_dir(stage_path: Path) -> Path:
+    """Rename the receipt chain directory to match current effective values."""
+    document = load_stage_document(stage_path)
+    current_dir = stage_path.parent
+    desired_dir = current_dir.parent / _receipt_dir_name(document)
+    if desired_dir == current_dir:
+        return stage_path
+
+    target_dir = desired_dir
+    counter = 1
+    while target_dir.exists():
+        target_dir = desired_dir.parent / f"{desired_dir.name}_{counter}"
+        counter += 1
+
+    current_dir.rename(target_dir)
+    return target_dir / stage_path.name
+
+
+def _write_rendered_output(stage_path: Path, *, rendered_root: Path) -> tuple[Path, Path]:
+    """Render Beancount output for a stage and normalize its artifact names."""
+    ensure_directories()
+    old_dir_name = stage_path.parent.name
+    normalized_stage_path = _normalize_receipt_dir(stage_path)
+    document = load_stage_document(normalized_stage_path)
+    rendered_path = rendered_root / _rendered_filename(document)
+    rendered_path.write_text(
+        render_stage_document_as_beancount(
+            document,
+            rule_layers=load_item_category_rule_layers(),
+        )
+    )
+
+    stale_rendered = rendered_root / f"{old_dir_name}.beancount"
+    if stale_rendered != rendered_path and stale_rendered.exists():
+        stale_rendered.unlink()
+
+    return normalized_stage_path, rendered_path
+
+
+def _status_roots_for_path(stage_path: Path) -> tuple[Path, Path]:
+    """Return (json_root, rendered_root) for a stage path."""
+    path = stage_path.resolve()
+    candidates = (
+        (SCANNED_DIR.resolve(), RENDERED_SCANNED_DIR),
+        (APPROVED_DIR.resolve(), RENDERED_APPROVED_DIR),
+        (MATCHED_DIR.resolve(), RENDERED_MATCHED_DIR),
+    )
+    for json_root, rendered_root in candidates:
+        try:
+            path.relative_to(json_root)
+            return json_root, rendered_root
+        except ValueError:
+            continue
+    raise ValueError(f"Receipt stage path is outside known storage roots: {stage_path}")
+
+
+def save_scanned_receipt(
     receipt: Receipt,
-    beancount_content: str,
     *,
-    target_dir: Path,
-    label: str,
+    raw_ocr_payload: dict[str, Any] | None = None,
+    image_sha256: str | None = None,
+    ocr_json_path: Path | None = None,
 ) -> Path:
-    """Persist receipt content to the target directory with collision handling."""
+    """Persist the initial parsed receipt stage and rendered Beancount draft."""
     ensure_directories()
+    document = build_parsed_receipt_stage(
+        receipt,
+        rule_layers=load_item_category_rule_layers(),
+        raw_ocr_payload=raw_ocr_payload,
+        ocr_json_path=str(ocr_json_path.relative_to(_paths.receipts)) if ocr_json_path else None,
+        image_sha256=image_sha256,
+    )
+    receipt_dir = SCANNED_DIR / _receipt_dir_name(document)
+    receipt_dir.mkdir(parents=True, exist_ok=False)
+    stage_path = receipt_dir / "parsed.receipt.json"
+    save_stage_document(stage_path, document)
+    normalized_stage_path, _ = _write_rendered_output(stage_path, rendered_root=RENDERED_SCANNED_DIR)
+    logger.info("Saved scanned receipt JSON to %s", normalized_stage_path)
+    return normalized_stage_path
 
-    filename = generate_receipt_filename(receipt)
-    filepath = target_dir / filename
 
+def create_next_review_stage(
+    stage_path: Path,
+    *,
+    created_by: str = "human_review",
+    pass_name: str = "manual_review",
+) -> Path:
+    """Create the next review stage file from the current latest stage."""
+    document = load_stage_document(stage_path)
+    current_index = get_stage_index(document)
+    next_index = current_index + 1
+    next_stage_name = f"review_stage_{next_index}"
+    next_filename = f"{next_stage_name}.receipt.json"
+    next_document = clone_stage_document(
+        document,
+        stage=next_stage_name,
+        created_by=created_by,
+        pass_name=pass_name,
+        parent_file=stage_path.name,
+    )
+    next_path = stage_path.parent / next_filename
+    save_stage_document(next_path, next_document)
+    return next_path
+
+
+def refresh_stage_artifacts(stage_path: Path) -> tuple[Path, Path]:
+    """Normalize one stage path and refresh its rendered Beancount output."""
+    _, rendered_root = _status_roots_for_path(stage_path)
+    return _write_rendered_output(stage_path, rendered_root=rendered_root)
+
+
+def move_scanned_to_approved(stage_path: Path) -> Path:
+    """Move one scanned receipt chain to the approved JSON root."""
+    ensure_directories()
+    stage_path = stage_path.resolve()
+    stage_path.relative_to(SCANNED_DIR.resolve())
+
+    receipt_dir = stage_path.parent
+    target_dir = APPROVED_DIR / receipt_dir.name
     counter = 1
-    base_name = filename.rsplit(".", 1)[0]
-    while filepath.exists():
-        filepath = target_dir / f"{base_name}_{counter}.beancount"
+    while target_dir.exists():
+        target_dir = APPROVED_DIR / f"{receipt_dir.name}_{counter}"
         counter += 1
 
-    filepath.write_text(beancount_content)
-    logger.info("Saved %s receipt to %s", label, filepath)
-    return filepath
+    old_rendered = RENDERED_SCANNED_DIR / f"{receipt_dir.name}.beancount"
+    receipt_dir.rename(target_dir)
+    if old_rendered.exists():
+        old_rendered.unlink()
+
+    new_stage_path = target_dir / stage_path.name
+    normalized_stage_path, _ = _write_rendered_output(new_stage_path, rendered_root=RENDERED_APPROVED_DIR)
+    logger.info("Moved %s to %s", stage_path, normalized_stage_path)
+    return normalized_stage_path
 
 
-def save_approved_receipt(receipt: Receipt, beancount_content: str) -> Path:
-    """
-    Save an approved receipt to the approved/ directory.
-
-    Args:
-        receipt: The Receipt object
-        beancount_content: Formatted beancount content with metadata header
-
-    Returns:
-        Path to the saved file
-    """
-    return _save_receipt_to_directory(
-        receipt,
-        beancount_content,
-        target_dir=APPROVED_DIR,
-        label="approved",
-    )
-
-
-def save_scanned_receipt(receipt: Receipt, beancount_content: str) -> Path:
-    """
-    Save a scanned receipt to the scanned/ directory for manual editing.
-
-    Args:
-        receipt: The Receipt object
-        beancount_content: Formatted beancount content with metadata header
-
-    Returns:
-        Path to the saved file
-    """
-    return _save_receipt_to_directory(
-        receipt,
-        beancount_content,
-        target_dir=SCANNED_DIR,
-        label="scanned",
-    )
-
-
-def move_scanned_to_approved(receipt_path: Path) -> Path:
-    """
-    Move a receipt file from scanned/ to approved/ after manual review.
-
-    Args:
-        receipt_path: Path to the receipt in scanned/
-
-    Returns:
-        New path in approved/
-    """
+def move_to_matched(stage_path: Path) -> Path:
+    """Move one approved receipt chain to the matched JSON root."""
     ensure_directories()
+    stage_path = stage_path.resolve()
+    stage_path.relative_to(APPROVED_DIR.resolve())
 
-    if not receipt_path.exists():
-        raise FileNotFoundError(f"Receipt not found: {receipt_path}")
-
-    # Prefer a clean filename based on edited content
-    try:
-        receipt = parse_receipt_from_beancount(receipt_path)
-        new_filename = generate_receipt_filename(receipt)
-        new_path = APPROVED_DIR / new_filename
-    except Exception:
-        new_path = APPROVED_DIR / receipt_path.name
-
-    # Handle filename collisions
+    receipt_dir = stage_path.parent
+    target_dir = MATCHED_DIR / receipt_dir.name
     counter = 1
-    base_name = new_path.stem
-    while new_path.exists():
-        new_path = APPROVED_DIR / f"{base_name}_{counter}.beancount"
+    while target_dir.exists():
+        target_dir = MATCHED_DIR / f"{receipt_dir.name}_{counter}"
         counter += 1
 
-    receipt_path.rename(new_path)
-    logger.info("Moved %s to %s", receipt_path, new_path)
+    old_rendered = RENDERED_APPROVED_DIR / f"{receipt_dir.name}.beancount"
+    receipt_dir.rename(target_dir)
+    if old_rendered.exists():
+        old_rendered.unlink()
 
-    return new_path
+    new_stage_path = target_dir / stage_path.name
+    normalized_stage_path, _ = _write_rendered_output(new_stage_path, rendered_root=RENDERED_MATCHED_DIR)
+    logger.info("Moved %s to %s", stage_path, normalized_stage_path)
+    return normalized_stage_path
 
 
-def parse_filename_info(filepath: Path) -> tuple[date | None, str | None, Decimal | None]:
-    """
-    Extract date, merchant, and amount from filename.
-
-    Args:
-        filepath: Path to the receipt file
-
-    Returns:
-        Tuple of (date, merchant, amount) - any may be None if parsing fails
-    """
-    filename = filepath.stem  # Remove .beancount extension
-
-    # Expected format: YYYY-MM-DD_merchant_amount
-    # amount is like 51_61 for $51.61
-    pattern = r"^(\d{4}-\d{2}-\d{2})_(.+)_(\d+_\d{2})(?:_\d+)?$"
-    match = re.match(pattern, filename)
-
-    if not match:
-        return None, None, None
-
-    try:
-        parsed_date = date.fromisoformat(match.group(1))
-        merchant = match.group(2).replace("_", " ").title()
-        amount_str = match.group(3).replace("_", ".")
-        amount = Decimal(amount_str)
-        return parsed_date, merchant, amount
-    except (ValueError, InvalidOperation):
-        return None, None, None
+def parse_receipt_from_stage_json(filepath: Path) -> Receipt:
+    """Resolve a stage JSON file into an effective Receipt."""
+    document = load_stage_document(filepath)
+    return receipt_from_stage_document(document, rule_layers=load_item_category_rule_layers())
 
 
 def load_approved_receipts(
@@ -201,253 +255,74 @@ def load_approved_receipts(
     tolerance_days: int = 3,
     amount_tolerance: Decimal = Decimal("0.10"),
 ) -> list[tuple[Path, Receipt]]:
-    """
-    Load receipts from approved/ directory, optionally pre-filtered.
-
-    Pre-filtering by filename allows efficient scanning without
-    parsing every file's content.
-
-    Args:
-        date_filter: If provided, only load receipts within tolerance_days
-        amount_filter: If provided, only load receipts within amount_tolerance
-        tolerance_days: Days tolerance for date filtering
-        amount_tolerance: Amount tolerance for amount filtering
-
-    Returns:
-        List of (filepath, Receipt) tuples
-    """
+    """Load approved receipts, optionally filtered by effective date/amount."""
     ensure_directories()
+    results: list[tuple[Path, Receipt]] = []
 
-    results = []
-
-    for filepath in APPROVED_DIR.glob("*.beancount"):
-        # Quick pre-filter by filename
-        file_date, _, file_amount = parse_filename_info(filepath)
-
-        if date_filter and file_date:
-            if abs((file_date - date_filter).days) > tolerance_days:
+    for stage_path in list_approved_stage_receipts():
+        receipt = parse_receipt_from_stage_json(stage_path)
+        if date_filter and not receipt.date_is_placeholder:
+            if abs((receipt.date - date_filter).days) > tolerance_days:
                 continue
-
-        if amount_filter and file_amount:
-            if abs(file_amount - amount_filter) > amount_tolerance:
-                continue
-
-        # Parse the full file
-        try:
-            receipt = parse_receipt_from_beancount(filepath)
-            results.append((filepath, receipt))
-        except Exception as e:
-            logger.warning("Failed to parse %s: %s", filepath, e)
+        if amount_filter is not None and abs(receipt.total - amount_filter) > amount_tolerance:
+            continue
+        results.append((stage_path, receipt))
 
     return results
 
 
-def parse_receipt_from_beancount(filepath: Path) -> Receipt:
-    """
-    Reconstruct a Receipt from a saved beancount file.
-
-    Parses the metadata header and transaction content to rebuild
-    the Receipt object.
-    """
-    content = filepath.read_text()
-    lines = content.split("\n")
-
-    # Initialize defaults
-    merchant = "Unknown"
-    receipt_date: date | None = None
-    date_is_unknown = False
-    total = Decimal("0")
-    items: list[ReceiptItem] = []
-    tax: Decimal | None = None
-    image_filename = ""
-
-    # Parse metadata header (lines starting with ; @)
-    for line in lines:
-        line = line.strip()
-        if line.startswith("; @merchant:"):
-            merchant = line.split(":", 1)[1].strip()
-        elif line.startswith("; @date:"):
-            date_value = line.split(":", 1)[1].strip()
-            if date_value.upper() == "UNKNOWN":
-                date_is_unknown = True
-                receipt_date = None
-            else:
-                try:
-                    receipt_date = date.fromisoformat(date_value)
-                except ValueError:
-                    receipt_date = None
-        elif line.startswith("; @total:"):
-            try:
-                total = Decimal(line.split(":", 1)[1].strip())
-            except InvalidOperation:
-                pass
-        elif line.startswith("; @tax:"):
-            try:
-                tax = Decimal(line.split(":", 1)[1].strip())
-            except InvalidOperation:
-                pass
-        elif line.startswith("; @image_filename:"):
-            image_filename = line.split(":", 1)[1].strip()
-        elif line.startswith("; @image:"):
-            image_filename = line.split(":", 1)[1].strip()
-
-    # Parse transaction line for date if not found in metadata
-    for line in lines:
-        line = line.strip()
-        if re.match(r"^\d{4}-\d{2}-\d{2}\s+\*", line):
-            # Transaction line: YYYY-MM-DD * "Payee" "Narration"
-            try:
-                if receipt_date is None or date_is_unknown:
-                    receipt_date = date.fromisoformat(line[:10])
-                    date_is_unknown = False
-            except ValueError:
-                pass
-            # Extract payee
-            payee_match = re.search(r'\*\s+"([^"]*)"', line)
-            if payee_match and merchant == "Unknown":
-                merchant = payee_match.group(1)
-            break
-
-    # Parse posting lines for items
-    expense_pattern = re.compile(r"^\s+(Expenses:\S+)\s+(\d+\.?\d*)\s+\w+\s*;?\s*(.*)$")
-
-    for line in lines:
-        match = expense_pattern.match(line)
-        if match:
-            category = match.group(1)
-            try:
-                price = Decimal(match.group(2))
-            except InvalidOperation:
-                continue
-
-            description = match.group(3).strip()
-
-            # Skip tax line (handled separately)
-            if "Tax:HST" in category or "Tax:GST" in category:
-                tax = price
-                continue
-
-            # Skip FIXME placeholders for unaccounted amounts
-            if "FIXME: unaccounted" in description:
-                continue
-
-            # Parse quantity from description if present
-            quantity = 1
-            qty_match = re.search(r"\(qty\s+(\d+)\)", description)
-            if qty_match:
-                quantity = int(qty_match.group(1))
-                description = re.sub(r"\s*\(qty\s+\d+\)", "", description)
-
-            items.append(
-                ReceiptItem(
-                    description=description,
-                    price=price,
-                    quantity=quantity,
-                    category=category,
-                )
-            )
-
-    # Calculate total from items if not found in metadata
-    if total == Decimal("0") and items:
-        total = sum((item.total for item in items), Decimal("0"))
-        if tax:
-            total += tax
-
-    date_is_placeholder = date_is_unknown
-    if receipt_date is None:
-        receipt_date = placeholder_receipt_date()
-        date_is_placeholder = True
-    return Receipt(
-        merchant=merchant,
-        date=receipt_date,
-        date_is_placeholder=date_is_placeholder,
-        total=total,
-        items=items,
-        tax=tax,
-        image_filename=image_filename,
+def list_approved_stage_receipts() -> list[Path]:
+    """Return latest approved stage files."""
+    ensure_directories()
+    return sorted(
+        (_latest_stage_path(receipt_dir) for receipt_dir in APPROVED_DIR.iterdir() if receipt_dir.is_dir()),
+        key=lambda path: path.parent.name,
     )
 
 
-def move_to_matched(receipt_path: Path) -> Path:
-    """
-    Move a receipt file from approved/ to matched/ after successful matching.
-
-    Args:
-        receipt_path: Path to the receipt in approved/
-
-    Returns:
-        New path in matched/
-    """
+def list_scanned_receipts() -> list[Path]:
+    """Return latest scanned stage files."""
     ensure_directories()
-
-    if not receipt_path.exists():
-        raise FileNotFoundError(f"Receipt not found: {receipt_path}")
-
-    new_path = MATCHED_DIR / receipt_path.name
-
-    # Handle filename collisions
-    counter = 1
-    base_name = new_path.stem
-    while new_path.exists():
-        new_path = MATCHED_DIR / f"{base_name}_{counter}.beancount"
-        counter += 1
-
-    receipt_path.rename(new_path)
-    logger.info("Moved %s to %s", receipt_path, new_path)
-
-    return new_path
+    return sorted(
+        (_latest_stage_path(receipt_dir) for receipt_dir in SCANNED_DIR.iterdir() if receipt_dir.is_dir()),
+        key=lambda path: path.parent.name,
+    )
 
 
-def list_approved_receipts() -> list[tuple[Path, str, date, Decimal]]:
-    """
-    List all receipts in approved/ with summary info.
-
-    Returns:
-        List of (path, merchant, date, amount) tuples (date is placeholder if unknown)
-    """
+def list_approved_receipts() -> list[tuple[Path, str | None, date | None, Decimal | None]]:
+    """List approved receipt summaries from latest approved stages."""
     ensure_directories()
-
-    results = []
-
-    for filepath in sorted(APPROVED_DIR.glob("*.beancount")):
-        file_date, merchant, amount = parse_filename_info(filepath)
-
-        if file_date and merchant and amount:
-            results.append((filepath, merchant, file_date, amount))
-        else:
-            # Fallback: parse the file
-            try:
-                receipt = parse_receipt_from_beancount(filepath)
-                results.append((filepath, receipt.merchant, receipt.date, receipt.total))
-            except Exception as e:
-                logger.warning("Failed to parse %s: %s", filepath, e)
-
+    results: list[tuple[Path, str | None, date | None, Decimal | None]] = []
+    for stage_path in list_approved_stage_receipts():
+        merchant, receipt_date, total = get_stage_summary(load_stage_document(stage_path))
+        results.append((stage_path, merchant, receipt_date, total))
     return results
 
 
-def list_scanned_receipts() -> list[Path]:
-    """
-    List all receipts in scanned/ directory.
-
-    Returns:
-        List of file paths
-    """
-    ensure_directories()
-    return sorted(SCANNED_DIR.glob("*.beancount"))
-
-
 def delete_receipt(receipt_path: Path) -> bool:
-    """
-    Delete a receipt file.
+    """Delete one receipt chain and its rendered Beancount output."""
+    if not receipt_path.exists():
+        return False
 
-    Args:
-        receipt_path: Path to the receipt file
+    receipt_dir = receipt_path if receipt_path.is_dir() else receipt_path.parent
+    try:
+        _, rendered_root = _status_roots_for_path(receipt_path if receipt_path.is_file() else _latest_stage_path(receipt_dir))
+    except Exception:
+        rendered_root = None
 
-    Returns:
-        True if deleted, False if not found
-    """
-    if receipt_path.exists():
-        receipt_path.unlink()
-        logger.info("Deleted %s", receipt_path)
-        return True
-    return False
+    rendered_path = None
+    if rendered_root is not None and receipt_dir.exists():
+        stage_path = _latest_stage_path(receipt_dir)
+        document = load_stage_document(stage_path)
+        rendered_path = rendered_root / _rendered_filename(document)
+
+    for child in sorted(receipt_dir.glob("*"), reverse=True):
+        if child.is_file():
+            child.unlink()
+    receipt_dir.rmdir()
+
+    if rendered_path is not None and rendered_path.exists():
+        rendered_path.unlink()
+
+    logger.info("Deleted %s", receipt_dir)
+    return True

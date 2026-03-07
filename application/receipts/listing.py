@@ -14,7 +14,7 @@ from beanbeaver.runtime.receipt_storage import list_approved_receipts, list_scan
 class ApprovedReceiptListing:
     """Approved receipt summaries for CLI display."""
 
-    receipts: list[tuple[Path, str, date, Decimal]]
+    receipts: list[tuple[Path, str | None, date | None, Decimal | None]]
 
 
 @dataclass(frozen=True)

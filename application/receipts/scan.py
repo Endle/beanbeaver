@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from beanbeaver.receipt.formatter import format_parsed_receipt
 from beanbeaver.receipt.ocr_result_parser import parse_receipt
 from beanbeaver.runtime import load_item_category_rule_layers, load_known_merchant_keywords
 from beanbeaver.runtime.receipt_pipeline import OCRServiceUnavailable, call_ocr_service, save_ocr_json
@@ -67,7 +66,7 @@ def run_receipt_scan(request: ReceiptScanRequest) -> ReceiptScanResult:
             error=str(exc),
         )
 
-    save_ocr_json(raw_ocr_result, request.image_path)
+    ocr_json_path = save_ocr_json(raw_ocr_result, request.image_path)
 
     receipt = parse_receipt(
         ocr_result,
@@ -76,8 +75,12 @@ def run_receipt_scan(request: ReceiptScanRequest) -> ReceiptScanResult:
         item_category_rule_layers=load_item_category_rule_layers(),
     )
     image_sha256 = hashlib.sha256(request.image_path.read_bytes()).hexdigest()
-    beancount_content = format_parsed_receipt(receipt, image_sha256=image_sha256)
-    scanned_path = save_scanned_receipt(receipt, beancount_content)
+    scanned_path = save_scanned_receipt(
+        receipt,
+        raw_ocr_payload=raw_ocr_result,
+        image_sha256=image_sha256,
+        ocr_json_path=ocr_json_path,
+    )
 
     if request.no_edit:
         return ReceiptScanResult(

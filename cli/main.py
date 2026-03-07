@@ -50,8 +50,8 @@ Commands:
   match [ledger]             Match approved receipts against ledger
 
 Notes:
-  receipts/scanned/  = OCR+parser succeeded, not reviewed
-  receipts/approved/ = human reviewed and edited
+  receipts/json/scanned/  = OCR+parser succeeded, not reviewed
+  receipts/json/approved/ = human reviewed and edited
 """,
     )
 
@@ -77,7 +77,11 @@ Notes:
     scan_parser.add_argument(
         "--ocr-url", default="http://localhost:8001", help="OCR service URL (default: http://localhost:8001)"
     )
-    scan_parser.add_argument("--no-edit", action="store_true", help="Skip editor and leave draft in receipts/scanned/")
+    scan_parser.add_argument(
+        "--no-edit",
+        action="store_true",
+        help="Skip editor and leave draft in receipts/json/scanned/",
+    )
     # serve command
     serve_parser = subparsers.add_parser("serve", help="Start receipt upload server")
     serve_parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
