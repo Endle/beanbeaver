@@ -101,9 +101,8 @@ class FixiOSMultipartMiddleware(BaseHTTPMiddleware):
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Create receipts directories on startup."""
-    RECEIPTS_DIR.mkdir(exist_ok=True)
-    SCANNED_DIR.mkdir(exist_ok=True)
-    OCR_JSON_DIR.mkdir(exist_ok=True)
+    _paths.ensure_receipt_directories()
+    RECEIPTS_DIR.mkdir(parents=True, exist_ok=True)
     yield
 
 
