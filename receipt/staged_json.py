@@ -180,9 +180,9 @@ def build_parsed_receipt_stage(
 
     for warning in receipt.warnings:
         structured = _make_warning(warning.message, source="parser", stage=stage)
-        idx = warning.after_item_index
-        if idx is not None and 0 <= idx < len(item_docs):
-            item_docs[idx].setdefault("warnings", []).append(structured)
+        warning_idx: int | None = warning.after_item_index
+        if warning_idx is not None and 0 <= warning_idx < len(item_docs):
+            item_docs[warning_idx].setdefault("warnings", []).append(structured)
         else:
             top_level_warnings.append(structured)
 

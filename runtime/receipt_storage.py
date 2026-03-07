@@ -306,7 +306,9 @@ def delete_receipt(receipt_path: Path) -> bool:
 
     receipt_dir = receipt_path if receipt_path.is_dir() else receipt_path.parent
     try:
-        _, rendered_root = _status_roots_for_path(receipt_path if receipt_path.is_file() else _latest_stage_path(receipt_dir))
+        _, rendered_root = _status_roots_for_path(
+            receipt_path if receipt_path.is_file() else _latest_stage_path(receipt_dir)
+        )
     except Exception:
         rendered_root = None
 
