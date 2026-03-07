@@ -20,15 +20,26 @@ You can use either mode on its own, but using both brings the synergy of semi-au
 
 ### Install
 
-In your root directory of the beancount directory
+Recommended: Pixi
 
-```
-git submodule add https://github.com/Endle/beanbeaver.git vendor/beanbeaver
-cp vendor/beanbeaver/flake.nix .
-nix develop
+```bash
+pixi install
+pixi run bb --help
 ```
 
-For now it requires `nix`. If anyone needs it, I can remove the dependency to nix.
+Standard Python editable install:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -e ".[test]"
+bb --help
+```
+
+For contributors who want the Rust/PyO3 toolchain ready as well:
+
+```bash
+python -m pip install -e ".[dev,test]"
+```
 
 
 ### Import Statement
@@ -99,4 +110,13 @@ It will match beancount records (from credit card statements) with receipts (in 
 - `receipts/approved/` means the draft has been reviewed and edited by a human.
 - `bb edit` requires an interactive TTY.
 
+## Development
+
+Recommended local commands:
+
+```bash
+pixi run lint
+pixi run test
+pixi run test-e2e-cached
+```
 

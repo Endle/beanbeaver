@@ -1,12 +1,22 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "beancount-personal"
+name = "beanbeaver"
 version = "0.1.0"
 description = "Personal beancount importers and receipt scanner"
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.12"
 dependencies = [
-    "pillow>=10.0.0",
+    "beancount>=2.3,<3",
     "httpx>=0.24.0",
-    "beancount>=2.3",
+    "pillow>=10.0.0",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.29.0",
+    "python-multipart>=0.0.9",
+    "pandas>=2.0.0",
 ]
 
 [project.scripts]
@@ -15,12 +25,39 @@ bb = "beanbeaver.cli.main:main"
 [project.optional-dependencies]
 test = [
     "pytest>=8.0",
-    "beancount>=2.3",
+    "pytest-cov>=5.0",
 ]
+dev = [
+    "maturin>=1.7",
+    "mypy>=1.8",
+    "ruff>=0.6",
+]
+
+[tool.setuptools]
+include-package-data = true
+packages = [
+    "beanbeaver",
+    "beanbeaver.application",
+    "beanbeaver.application.imports",
+    "beanbeaver.application.receipts",
+    "beanbeaver.cli",
+    "beanbeaver.domain",
+    "beanbeaver.importers",
+    "beanbeaver.ledger_access",
+    "beanbeaver.receipt",
+    "beanbeaver.receipt.ocr_parser",
+    "beanbeaver.runtime",
+    "beanbeaver.util",
+]
+
+[tool.setuptools.package-dir]
+beanbeaver = "."
+
+[tool.setuptools.package-data]
+beanbeaver = ["rules/*.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = [".."]
 markers = [
     "integration: tests requiring external services (OCR container, CLI server)",
 ]

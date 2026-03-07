@@ -6,16 +6,52 @@ eliminating scattered path definitions across modules.
 
 from __future__ import annotations
 
+import os
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
 
+_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _is_host_project_root(path: Path) -> bool:
+    """Return True when a directory looks like a beancount project root."""
+    markers = (
+        path / "main.beancount",
+        path / "accounts.beancount",
+        path / "records",
+        path / "receipts",
+        path / "config",
+    )
+    return any(marker.exists() for marker in markers)
+
+
+def _search_upwards(start: Path) -> Path | None:
+    """Search start and its parents for a host project root."""
+    current = start.resolve()
+    for candidate in (current, *current.parents):
+        if _is_host_project_root(candidate):
+            return candidate
+    return None
+
+
 def _get_project_root() -> Path:
-    """Determine the project root directory."""
-    # TODO should be able to search main.beancount
-    # vendor/beanbeaver/runtime/paths.py -> vendor/beanbeaver/runtime -> vendor/beanbeaver -> vendor -> project root
-    return Path(__file__).parent.parent.parent.parent
+    """Determine the active beancount project root directory."""
+    env_root = os.environ.get("BEANBEAVER_ROOT", "").strip()
+    if env_root:
+        return Path(env_root).expanduser().resolve()
+
+    # Vendored layout: <project>/vendor/beanbeaver/runtime/paths.py
+    if _PACKAGE_ROOT.parent.name == "vendor":
+        return _PACKAGE_ROOT.parent.parent.resolve()
+
+    cwd_root = _search_upwards(Path.cwd())
+    if cwd_root is not None:
+        return cwd_root
+
+    # Standalone/editable layout: treat the package checkout itself as the root.
+    return _PACKAGE_ROOT.resolve()
 
 
 @dataclass
@@ -47,7 +83,7 @@ class ProjectPaths:
         vendored = self.root / "vendor" / "beanbeaver"
         if vendored.exists():
             return vendored
-        return self.root
+        return _PACKAGE_ROOT
 
     # --- Configuration paths ---
     @property
@@ -62,17 +98,17 @@ class ProjectPaths:
 
     @property
     def rules(self) -> Path:
-        """Vendor shared default rules directory."""
+        """Shared default rules directory."""
         return self.src / "rules"
 
     @property
     def default_merchant_rules(self) -> Path:
-        """Vendor default merchant categorization rules TOML file (canonical)."""
+        """Default merchant categorization rules TOML file (canonical)."""
         return self.rules / "default_merchant_rules.toml"
 
     @property
     def legacy_default_merchant_rules(self) -> Path:
-        """Legacy vendor default merchant rules path."""
+        """Legacy default merchant rules path."""
         return self.src / "runtime" / "rules" / "default_merchant_rules.toml"
 
     @property
@@ -92,12 +128,12 @@ class ProjectPaths:
 
     @property
     def default_item_classifier_rules(self) -> Path:
-        """Vendor default receipt item classifier rules TOML file (canonical)."""
+        """Default receipt item classifier rules TOML file (canonical)."""
         return self.rules / "default_item_classifier.toml"
 
     @property
     def legacy_default_item_classifier_rules(self) -> Path:
-        """Legacy vendor default receipt item classifier rules path."""
+        """Legacy default receipt item classifier rules path."""
         return self.src / "receipt" / "rules" / "default_item_classifier.toml"
 
     # --- Records/ledger paths ---
