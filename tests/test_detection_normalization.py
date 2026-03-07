@@ -1,6 +1,6 @@
 """Tests for detection normalization pipeline scaffolding."""
 
-from beanbeaver.receipt.detection_normalization import normalize_detections
+from beanbeaver.receipt.ocr_extraction import normalize_detections
 
 
 def test_normalize_detections_noop_passthrough() -> None:

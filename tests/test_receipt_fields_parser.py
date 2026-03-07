@@ -1,7 +1,12 @@
 from datetime import date
 from decimal import Decimal
 
-from beanbeaver.receipt.ocr_parser.fields_parser import _extract_date, _extract_subtotal, _extract_tax, _extract_total
+from beanbeaver.receipt.receipt_structuring.parsers.fields_parser import (
+    _extract_date,
+    _extract_subtotal,
+    _extract_tax,
+    _extract_total,
+)
 
 
 def test_extract_total_skips_discount_footer_total() -> None:

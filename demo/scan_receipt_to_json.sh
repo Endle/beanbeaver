@@ -9,9 +9,8 @@ python - <<'PY'
 import json
 from pathlib import Path
 
-from beanbeaver.receipt.ocr_helpers import transform_paddleocr_result
-from beanbeaver.receipt.ocr_result_parser import parse_receipt
-from beanbeaver.receipt.staged_json import build_parsed_receipt_stage, save_stage_document
+from beanbeaver.receipt.ocr_extraction import transform_paddleocr_result
+from beanbeaver.receipt.receipt_structuring import build_parsed_receipt_stage, parse_receipt, save_stage_document
 from beanbeaver.runtime import load_item_category_rule_layers, load_known_merchant_keywords
 
 fixture_dir = Path("tests/receipts_e2e")

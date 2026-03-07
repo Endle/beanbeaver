@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from beanbeaver.receipt.ocr_result_parser import parse_receipt
+from beanbeaver.receipt.receipt_structuring import parse_receipt
 from beanbeaver.runtime import load_item_category_rule_layers, load_known_merchant_keywords
 from beanbeaver.runtime.receipt_pipeline import OCRServiceUnavailable, call_ocr_service, save_ocr_json
 from beanbeaver.runtime.receipt_storage import move_scanned_to_approved, save_scanned_receipt

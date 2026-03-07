@@ -184,7 +184,7 @@ def _select_receipts_for_match(
 
 def cmd_match(args: argparse.Namespace) -> None:
     """Match all approved receipts against ledger."""
-    from beanbeaver.receipt.formatter import format_enriched_transaction
+    from beanbeaver.receipt.beancount_rendering import format_enriched_transaction
     from beanbeaver.receipt.matcher import format_match_for_display, match_receipt_to_transactions
     from beanbeaver.runtime.receipt_storage import (
         delete_receipt,
