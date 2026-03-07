@@ -18,7 +18,13 @@ from beanbeaver.domain.match import (
     match_key,
     transaction_charge_amount,
 )
-from beanbeaver.ledger_access import apply_receipt_match, list_transactions
+from beanbeaver.ledger_access import (
+    ReceiptMatchFileSnapshot,
+    apply_receipt_match,
+    list_transactions,
+    restore_receipt_match_files,
+    snapshot_receipt_match_files,
+)
 from beanbeaver.runtime import get_logger, get_paths
 
 logger = get_logger(__name__)
@@ -32,11 +38,7 @@ class _AppliedMatchUndo:
 
     approved_receipt_path: Path
     matched_receipt_path: Path
-    statement_path: Path
-    statement_original: str
-    enriched_path: Path
-    enriched_existed: bool
-    enriched_original: str | None
+    ledger_snapshot: ReceiptMatchFileSnapshot
 
 
 def _restore_receipt_to_approved(
@@ -65,14 +67,7 @@ def _rollback_applied_matches(applied: Sequence[_AppliedMatchUndo]) -> tuple[int
 
     for undo in reversed(applied):
         try:
-            undo.statement_path.write_text(undo.statement_original)
-
-            if undo.enriched_existed:
-                if undo.enriched_original is not None:
-                    undo.enriched_path.parent.mkdir(parents=True, exist_ok=True)
-                    undo.enriched_path.write_text(undo.enriched_original)
-            elif undo.enriched_path.exists():
-                undo.enriched_path.unlink()
+            restore_receipt_match_files(undo.ledger_snapshot)
 
             if undo.matched_receipt_path.exists():
                 _restore_receipt_to_approved(
@@ -366,9 +361,10 @@ def cmd_match(args: argparse.Namespace) -> None:
             enriched_dir.mkdir(parents=True, exist_ok=True)
             enriched_path = enriched_dir / f"{path.stem}-enriched.beancount"
             include_rel = enriched_path.relative_to(matched_file.parent).as_posix()
-            statement_original = matched_file.read_text()
-            enriched_existed = enriched_path.exists()
-            enriched_original = enriched_path.read_text() if enriched_existed else None
+            ledger_snapshot = snapshot_receipt_match_files(
+                statement_path=matched_file,
+                enriched_path=enriched_path,
+            )
 
             try:
                 status = apply_receipt_match(
@@ -390,11 +386,7 @@ def cmd_match(args: argparse.Namespace) -> None:
                     _AppliedMatchUndo(
                         approved_receipt_path=path,
                         matched_receipt_path=matched_receipt_path,
-                        statement_path=matched_file,
-                        statement_original=statement_original,
-                        enriched_path=enriched_path,
-                        enriched_existed=enriched_existed,
-                        enriched_original=enriched_original,
+                        ledger_snapshot=ledger_snapshot,
                     )
                 )
 

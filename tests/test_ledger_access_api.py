@@ -7,8 +7,11 @@ from pathlib import Path
 
 from beanbeaver.ledger_access import (
     LedgerTransaction,
+    ReceiptMatchFileSnapshot,
     list_transactions,
     open_accounts,
+    restore_receipt_match_files,
+    snapshot_receipt_match_files,
     transaction_dates_for_account,
     validate_ledger,
 )
@@ -77,3 +80,23 @@ def test_validate_ledger_returns_string_errors(tmp_path: Path) -> None:
     errors = validate_ledger(ledger_path=ledger)
     assert errors
     assert all(isinstance(err, str) for err in errors)
+
+
+def test_snapshot_and_restore_receipt_match_files_wrappers(tmp_path: Path) -> None:
+    statement = tmp_path / "records" / "carda.beancount"
+    enriched = tmp_path / "records" / "_enriched" / "r1.beancount"
+    _write(statement, "ORIGINAL-STATEMENT\n")
+
+    snapshot = snapshot_receipt_match_files(
+        statement_path=statement,
+        enriched_path=enriched,
+    )
+    assert isinstance(snapshot, ReceiptMatchFileSnapshot)
+
+    statement.write_text("UPDATED-STATEMENT\n")
+    _write(enriched, "UPDATED-ENRICHED\n")
+
+    restore_receipt_match_files(snapshot)
+
+    assert statement.read_text() == "ORIGINAL-STATEMENT\n"
+    assert not enriched.exists()

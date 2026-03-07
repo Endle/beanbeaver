@@ -11,7 +11,7 @@ from pathlib import Path
 from beancount.core import data
 
 from beanbeaver.ledger_access.reader import get_ledger_reader
-from beanbeaver.ledger_access.writer import get_ledger_writer
+from beanbeaver.ledger_access.writer import ReceiptMatchSnapshot, get_ledger_writer
 
 
 @dataclass(frozen=True)
@@ -50,6 +50,9 @@ class LedgerTransactionList:
     transactions: list[LedgerTransaction]
     errors: list[str]
     options: dict[str, object]
+
+
+ReceiptMatchFileSnapshot = ReceiptMatchSnapshot
 
 
 def _map_posting(posting: data.Posting) -> LedgerPosting:
@@ -144,3 +147,20 @@ def apply_receipt_match(
         enriched_path=enriched_path,
         enriched_content=enriched_content,
     )
+
+
+def snapshot_receipt_match_files(
+    *,
+    statement_path: Path,
+    enriched_path: Path,
+) -> ReceiptMatchFileSnapshot:
+    """Capture ledger-side file state so a later rollback can restore it."""
+    return get_ledger_writer().snapshot_receipt_match_files(
+        statement_path=statement_path,
+        enriched_path=enriched_path,
+    )
+
+
+def restore_receipt_match_files(snapshot: ReceiptMatchFileSnapshot) -> None:
+    """Restore ledger-side file state captured before applying a receipt match."""
+    get_ledger_writer().restore_receipt_match_files(snapshot)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,17 @@ logger = logging.getLogger(f"beancount_local.{__name__}")
 DEFAULT_MAIN_BEANCOUNT_PATH = default_main_beancount_path()
 _TXN_START_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\s+[*!?A-Za-z](?:\s|$)")
 _INCLUDE_RE = re.compile(r'^\s*include\s+"([^"]+)"(?:\s*;.*)?$')
+
+
+@dataclass(frozen=True)
+class ReceiptMatchSnapshot:
+    """Snapshot of ledger-side files needed to rollback a receipt match."""
+
+    statement_path: Path
+    statement_original: str
+    enriched_path: Path
+    enriched_existed: bool
+    enriched_original: str | None
 
 
 class LedgerWriter:
@@ -37,6 +49,32 @@ class LedgerWriter:
         if errors:
             logger.warning("Beancount validation found %d error(s) in %s", len(errors), path)
         return list(errors)
+
+    def snapshot_receipt_match_files(
+        self,
+        *,
+        statement_path: Path,
+        enriched_path: Path,
+    ) -> ReceiptMatchSnapshot:
+        """Capture the ledger-side files that a receipt match may modify."""
+        enriched_existed = enriched_path.exists()
+        return ReceiptMatchSnapshot(
+            statement_path=statement_path,
+            statement_original=statement_path.read_text(),
+            enriched_path=enriched_path,
+            enriched_existed=enriched_existed,
+            enriched_original=enriched_path.read_text() if enriched_existed else None,
+        )
+
+    def restore_receipt_match_files(self, snapshot: ReceiptMatchSnapshot) -> None:
+        """Restore ledger-side files from a previously captured snapshot."""
+        snapshot.statement_path.write_text(snapshot.statement_original)
+        if snapshot.enriched_existed:
+            if snapshot.enriched_original is not None:
+                snapshot.enriched_path.parent.mkdir(parents=True, exist_ok=True)
+                snapshot.enriched_path.write_text(snapshot.enriched_original)
+        elif snapshot.enriched_path.exists():
+            snapshot.enriched_path.unlink()
 
     def _replace_transaction_with_include(
         self,

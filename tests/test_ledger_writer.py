@@ -129,5 +129,26 @@ def test_apply_receipt_match_rolls_back_on_validation_failure(tmp_path: Path) ->
     assert not enriched.exists()
 
 
+def test_snapshot_and_restore_receipt_match_files(tmp_path: Path) -> None:
+    statement = tmp_path / "records" / "carda.beancount"
+    enriched = tmp_path / "records" / "_enriched" / "r1.beancount"
+    _write(statement, "ORIGINAL-STATEMENT\n")
+    _write(enriched, "ORIGINAL-ENRICHED\n")
+
+    writer = LedgerWriter(default_ledger_path=tmp_path / "main.beancount")
+    snapshot = writer.snapshot_receipt_match_files(
+        statement_path=statement,
+        enriched_path=enriched,
+    )
+
+    statement.write_text("UPDATED-STATEMENT\n")
+    enriched.write_text("UPDATED-ENRICHED\n")
+
+    writer.restore_receipt_match_files(snapshot)
+
+    assert statement.read_text() == "ORIGINAL-STATEMENT\n"
+    assert enriched.read_text() == "ORIGINAL-ENRICHED\n"
+
+
 def test_default_main_ledger_path_points_to_main_beancount() -> None:
     assert ledger_writer_module.DEFAULT_MAIN_BEANCOUNT_PATH == default_main_beancount_path()
