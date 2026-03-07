@@ -27,3 +27,11 @@ jobs:
       - name: Execute demo script
         run: ./demo/run_demo.sh
 
+      - name: Scan cached receipt and emit parsed JSON
+        run: nix develop -c bash ./demo/scan_receipt_to_json.sh
+
+      - name: Upload parsed receipt JSON artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: parsed-receipt-json
+          path: demo/out/*.parsed.receipt.json
