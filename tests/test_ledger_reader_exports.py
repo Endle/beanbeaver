@@ -11,9 +11,12 @@ def test_only_dto_api_is_exported() -> None:
         "LedgerPosting",
         "LedgerTransaction",
         "LedgerTransactionList",
+        "ReceiptMatchFileSnapshot",
         "apply_receipt_match",
         "list_transactions",
         "open_accounts",
+        "restore_receipt_match_files",
+        "snapshot_receipt_match_files",
         "transaction_dates_for_account",
         "validate_ledger",
     ]
@@ -21,8 +24,11 @@ def test_only_dto_api_is_exported() -> None:
     assert hasattr(ledger_reader, "LedgerPosting")
     assert hasattr(ledger_reader, "LedgerTransaction")
     assert hasattr(ledger_reader, "LedgerTransactionList")
+    assert hasattr(ledger_reader, "ReceiptMatchFileSnapshot")
     assert hasattr(ledger_reader, "list_transactions")
     assert hasattr(ledger_reader, "open_accounts")
+    assert hasattr(ledger_reader, "restore_receipt_match_files")
+    assert hasattr(ledger_reader, "snapshot_receipt_match_files")
     assert hasattr(ledger_reader, "transaction_dates_for_account")
     assert hasattr(ledger_reader, "validate_ledger")
     assert hasattr(ledger_reader, "apply_receipt_match")
