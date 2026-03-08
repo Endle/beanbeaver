@@ -19,7 +19,7 @@ from beanbeaver.receipt.receipt_structuring import (
     receipt_from_stage_document,
     save_stage_document,
 )
-from beanbeaver.runtime import get_logger, get_paths, load_item_category_rule_layers
+from beanbeaver.runtime import get_logger, get_paths, load_item_category_rule_layers, load_receipt_structuring_rule_layers
 
 logger = get_logger(__name__)
 
@@ -151,7 +151,7 @@ def save_scanned_receipt(
     ensure_directories()
     document = build_parsed_receipt_stage(
         receipt,
-        rule_layers=load_item_category_rule_layers(),
+        rule_layers=load_receipt_structuring_rule_layers(),
         raw_ocr_payload=raw_ocr_payload,
         ocr_json_path=str(ocr_json_path.relative_to(_paths.receipts)) if ocr_json_path else None,
         image_sha256=image_sha256,

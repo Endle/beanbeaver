@@ -3,8 +3,8 @@
 from pathlib import Path
 
 import pytest
-from beanbeaver.receipt.item_categories import categorize_item
-from beanbeaver.runtime.item_category_rules import load_item_category_rule_layers
+from beanbeaver.receipt.item_categories import categorize_item, classify_item_semantic
+from beanbeaver.runtime.item_category_rules import load_item_category_rule_layers, load_receipt_structuring_rule_layers
 
 
 @pytest.mark.parametrize(
@@ -33,6 +33,29 @@ def test_coors_maps_to_alcoholic_beverage() -> None:
         )
         == "Expenses:Food:AlcoholicBeverage"
     )
+
+
+def test_semantic_classification_includes_explicit_tags() -> None:
+    classification = classify_item_semantic(
+        "347937 CHICKEN",
+        load_receipt_structuring_rule_layers(),
+    )
+
+    assert classification == {
+        "category": "grocery_meat",
+        "tags": ["grocery", "meat"],
+        "confidence": 1.0,
+        "source": "rule_engine",
+    }
+
+
+def test_step2_rules_ignore_project_classifier_override() -> None:
+    classification = classify_item_semantic(
+        "MARUTAI",
+        load_receipt_structuring_rule_layers(),
+    )
+
+    assert classification is None
 
 
 def test_sonicare_maps_to_personal_care_tooth() -> None:

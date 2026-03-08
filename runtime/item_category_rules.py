@@ -65,3 +65,13 @@ def load_item_category_rule_layers(
         classifier_configs=classifier_configs,
         account_configs=account_configs,
     )
+
+
+@lru_cache(maxsize=1)
+def load_receipt_structuring_rule_layers() -> ItemCategoryRuleLayers:
+    """Load Step 2 semantic rules only, without project-local classifier overrides."""
+    module_default_rules = Path(__file__).resolve().parents[1] / "rules" / "default_item_classifier.toml"
+    return build_item_category_rule_layers(
+        classifier_configs=(_load_toml(module_default_rules),),
+        account_configs=(),
+    )

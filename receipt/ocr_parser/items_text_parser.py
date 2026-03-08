@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from beanbeaver.domain.receipt import ReceiptItem, ReceiptWarning
 
-from ..item_categories import ItemCategoryRuleLayers, categorize_item
+from ..item_categories import ItemCategoryRuleLayers, classify_item_key
 from .common import (
     _is_priced_generic_item_label,
     _is_section_header_text,
@@ -382,7 +382,7 @@ def _extract_items(
                     ReceiptItem(
                         description=desc_part,
                         price=price,
-                        category=categorize_item(desc_part, rule_layers=item_category_rule_layers),
+                        category=classify_item_key(desc_part, rule_layers=item_category_rule_layers),
                     )
                 )
             else:
@@ -547,7 +547,7 @@ def _extract_items(
                             description=found_desc + description_suffix,
                             price=price,
                             quantity=quantity,
-                            category=categorize_item(
+                            category=classify_item_key(
                                 found_desc,
                                 rule_layers=item_category_rule_layers,
                             ),  # Categorize on item name only

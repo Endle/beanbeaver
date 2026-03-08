@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from beanbeaver.domain.receipt import Receipt, ReceiptWarning
+from beanbeaver.receipt.item_categories import account_for_category_key
 
 if TYPE_CHECKING:
     from .matcher import MatchResult
@@ -64,6 +65,11 @@ def _extract_card_last4(raw_text: str) -> str | None:
         if match:
             return match.group(1)
     return None
+
+
+def _posting_account_for_item(category: str | None, *, default: str) -> str:
+    """Resolve one receipt item category to a Beancount posting account."""
+    return account_for_category_key(category, default=default) or default
 
 
 def _build_posting_warning_map(
@@ -171,7 +177,7 @@ def format_parsed_receipt(
 
     for item in receipt.items:
         posting_idx = len(postings)
-        category = item.category or "Expenses:FIXME"
+        category = _posting_account_for_item(item.category, default="Expenses:FIXME")
         price_str = f"{item.price:.2f}"
         desc_clean = item.description.replace('"', "'")
 
@@ -258,7 +264,7 @@ def format_draft_beancount(receipt: Receipt, credit_card_account: str = "Liabili
 
     for item in receipt.items:
         posting_idx = len(postings)
-        category = item.category or default_expense
+        category = _posting_account_for_item(item.category, default=default_expense)
         price_str = f"{item.price:.2f}"
         desc_clean = item.description.replace('"', "'")
 
@@ -386,7 +392,7 @@ def format_enriched_transaction(
     # Item postings
     items_total = Decimal("0")
     for item in receipt.items:
-        category = item.category or expense_base
+        category = _posting_account_for_item(item.category, default=expense_base)
         price_str = f"{item.price:.2f}"
         desc_clean = item.description.replace('"', "'")
 

@@ -23,7 +23,7 @@ from beanbeaver.domain.receipt import Receipt
 from beanbeaver.receipt.beancount_rendering import format_parsed_receipt
 from beanbeaver.receipt.ocr_extraction import resize_image_bytes, transform_paddleocr_result
 from beanbeaver.receipt.receipt_structuring import parse_receipt
-from beanbeaver.runtime.item_category_rules import load_item_category_rule_layers
+from beanbeaver.runtime.item_category_rules import load_receipt_structuring_rule_layers
 
 RECEIPTS_DIR = Path(__file__).parent / "receipts_e2e"
 
@@ -95,7 +95,7 @@ class TestE2EReceiptProcessing:
             receipt = parse_receipt(
                 ocr_result,
                 image_filename=image_name,
-                item_category_rule_layers=load_item_category_rule_layers(),
+                item_category_rule_layers=load_receipt_structuring_rule_layers(),
             )
             self._verify_expected(receipt, expected)
             ran_cached = True
@@ -123,7 +123,7 @@ class TestE2EReceiptProcessing:
                 receipt = parse_receipt(
                     ocr_result,
                     image_filename=test_case.jpg_path.name,
-                    item_category_rule_layers=load_item_category_rule_layers(),
+                    item_category_rule_layers=load_receipt_structuring_rule_layers(),
                 )
                 self._verify_expected(receipt, expected)
                 ran_live = True

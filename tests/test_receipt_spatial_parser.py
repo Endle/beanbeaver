@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from beanbeaver.receipt.receipt_structuring.parsers.common import _is_spatial_layout_receipt
 from beanbeaver.receipt.receipt_structuring.parsers.items_spatial_parser import _extract_items_with_bbox
-from beanbeaver.runtime.item_category_rules import load_item_category_rule_layers
+from beanbeaver.runtime.item_category_rules import load_receipt_structuring_rule_layers
 
 
 def _word(text: str, x_left: float, y_top: float, x_right: float, y_bottom: float) -> dict:
@@ -73,7 +73,7 @@ def test_extract_items_with_bbox_keeps_short_produce_name_alignment() -> None:
 
     items = _extract_items_with_bbox(
         pages=[{"lines": lines}],
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     pairs = [(item.description, item.price) for item in items]
@@ -114,7 +114,7 @@ def test_extract_items_with_bbox_accepts_spaced_decimal_price_words() -> None:
 
     items = _extract_items_with_bbox(
         pages=[{"lines": lines}],
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     assert any(item.description == "LUNCH MEAT" and item.price == Decimal("3.50") for item in items)
@@ -157,7 +157,7 @@ def test_extract_items_with_bbox_prefers_item_above_onsale_price() -> None:
 
     items = _extract_items_with_bbox(
         pages=[{"lines": lines}],
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     pairs = [(item.description, item.price) for item in items]
@@ -187,7 +187,7 @@ def test_extract_items_with_bbox_keeps_cash_prefix_product_name() -> None:
 
     items = _extract_items_with_bbox(
         pages=[{"lines": lines}],
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     assert len(items) == 1

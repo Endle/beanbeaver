@@ -4,7 +4,7 @@ from decimal import Decimal
 from beanbeaver.receipt.receipt_structuring.parsers.common import _is_section_header_text
 from beanbeaver.receipt.receipt_structuring.parsers.fields_parser import _extract_price_from_line
 from beanbeaver.receipt.receipt_structuring.parsers.items_text_parser import _extract_items
-from beanbeaver.runtime.item_category_rules import load_item_category_rule_layers
+from beanbeaver.runtime.item_category_rules import load_receipt_structuring_rule_layers
 
 
 def test_extract_items_supports_trailing_j_tax_marker() -> None:
@@ -18,7 +18,7 @@ def test_extract_items_supports_trailing_j_tax_marker() -> None:
     items = _extract_items(
         lines,
         summary_amounts={Decimal("12.25")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     assert [item.price for item in items] == [Decimal("8.28"), Decimal("3.97")]
@@ -39,7 +39,7 @@ def test_extract_items_keeps_priced_meat_label_as_item() -> None:
     items = _extract_items(
         lines,
         summary_amounts={Decimal("9.07")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     assert any(item.description == "Meat" and item.price == Decimal("6.48") for item in items)
@@ -65,7 +65,7 @@ def test_extract_items_skips_malformed_offer_fragments_with_price() -> None:
     items = _extract_items(
         lines,
         summary_amounts={Decimal("3.96")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     matching = [item for item in items if item.price == Decimal("1.98")]
@@ -88,7 +88,7 @@ def test_extract_items_skips_reg_marker_only_price_lines() -> None:
     items = _extract_items(
         lines,
         summary_amounts={Decimal("34.96")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     assert [item.price for item in items] == [Decimal("1.99"), Decimal("32.97")]
@@ -108,7 +108,7 @@ def test_extract_items_skips_reg_marker_without_dollar_or_at_symbol() -> None:
     items = _extract_items(
         lines,
         summary_amounts={Decimal("9.98")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     assert [item.price for item in items] == [Decimal("2.99"), Decimal("6.99")]
@@ -128,7 +128,7 @@ def test_extract_items_skips_malformed_parenthesized_price_marker() -> None:
     items = _extract_items(
         lines,
         summary_amounts={Decimal("8.98")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     assert [item.price for item in items] == [Decimal("5.99"), Decimal("2.99")]
@@ -150,7 +150,7 @@ def test_extract_items_handles_spaced_decimal_quantities_and_prefixed_sku_lines(
     items = _extract_items(
         lines,
         summary_amounts={Decimal("14.47")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     pairs = {(item.description, item.price) for item in items}
@@ -178,7 +178,7 @@ def test_extract_items_merges_hyphenated_multiline_description() -> None:
     items = _extract_items(
         lines,
         summary_amounts={Decimal("23.56")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     assert any(item.description == "Foojoy - Donghei Cold No" and item.price == Decimal("3.59") for item in items)
@@ -196,7 +196,7 @@ def test_extract_items_uses_context_for_parenthetical_inline_price() -> None:
     items = _extract_items(
         lines,
         summary_amounts={Decimal("16.99")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     assert len(items) == 1
@@ -216,7 +216,7 @@ def test_extract_items_skips_quantity_stub_price_lines() -> None:
     items = _extract_items(
         lines,
         summary_amounts={Decimal("32.37")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     prices = [item.price for item in items]
@@ -242,7 +242,7 @@ def test_extract_items_skips_unit_price_fragment_ghost_lines() -> None:
     items = _extract_items(
         lines,
         summary_amounts={Decimal("3.38")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     assert any(item.description == "HLY - Fish Cracker Tomato" and item.price == Decimal("2.59") for item in items)
@@ -262,7 +262,7 @@ def test_extract_items_keeps_priced_bakery_generic_label() -> None:
     items = _extract_items(
         lines,
         summary_amounts={Decimal("6.99")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     assert len(items) == 1
@@ -288,7 +288,7 @@ def test_extract_items_recovers_item_from_split_multibuy_price_marker() -> None:
     items = _extract_items(
         lines,
         summary_amounts={Decimal("14.98")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     assert any(item.description == "SunriseTofu 700g" and item.price == Decimal("5.99") for item in items)
@@ -308,7 +308,7 @@ def test_extract_items_skips_compact_promo_marker_ghost_price_line() -> None:
     items = _extract_items(
         lines,
         summary_amounts={Decimal("8.98")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     assert len(items) == 2
@@ -334,7 +334,7 @@ def test_extract_items_prefers_forward_item_for_reg_marker_price_lines() -> None
     items = _extract_items(
         lines,
         summary_amounts={Decimal("22.84")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     assert any(item.description == "*Chuan Qi Hot Pot Sauce 10" and item.price == Decimal("0.99") for item in items)
@@ -361,7 +361,7 @@ def test_extract_items_uses_neighboring_items_for_onsale_markers() -> None:
     items = _extract_items(
         lines,
         summary_amounts={Decimal("11.97")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     pairs = {(item.description, item.price) for item in items}
@@ -380,7 +380,7 @@ def test_extract_items_keeps_cash_prefix_product_names() -> None:
     items = _extract_items(
         lines,
         summary_amounts={Decimal("9.99")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     assert len(items) == 1
@@ -402,7 +402,7 @@ def test_extract_items_handles_weight_quantity_previous_description() -> None:
     items = _extract_items(
         lines,
         summary_amounts={Decimal("55.29")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     observed = {(item.description, item.price) for item in items}
@@ -421,7 +421,7 @@ def test_extract_items_handles_loblaw_multi_buy_and_priced_section_headers() -> 
     first_items = _extract_items(
         first_lines,
         summary_amounts={Decimal("5.00")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     assert len(first_items) == 1
@@ -438,7 +438,7 @@ def test_extract_items_handles_loblaw_multi_buy_and_priced_section_headers() -> 
     second_items = _extract_items(
         second_lines,
         summary_amounts={Decimal("5.49")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     assert len(second_items) == 1
@@ -471,7 +471,7 @@ def test_extract_items_keeps_costco_prescanned_duplicates() -> None:
     items = _extract_items(
         lines,
         summary_amounts={Decimal("67.47"), Decimal("65.26"), Decimal("2.21")},
-        item_category_rule_layers=load_item_category_rule_layers(),
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
     assert len(items) == 6
