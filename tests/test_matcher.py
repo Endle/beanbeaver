@@ -147,6 +147,10 @@ class TestMerchantSimilarity:
         score = _merchant_similarity("COSTCO", "COSTCO BUSINESS CENTER")
         assert score > 0.8
 
+    def test_family_alias_match(self) -> None:
+        score = _merchant_similarity("REAL CANADIAN", "RCSS 1077 TORONTO ON")
+        assert score > 0.8
+
 
 class TestTryMatch:
     """Tests for the internal _try_match function."""
@@ -172,6 +176,24 @@ class TestTryMatch:
         assert "date:" in result.match_details
         assert "amount:" in result.match_details
         assert "merchant:" in result.match_details
+
+    def test_match_details_report_family_match(self) -> None:
+        receipt = make_receipt(
+            merchant="REAL CANADIAN",
+            receipt_date=date(2026, 1, 30),
+            total=Decimal("73.63"),
+        )
+        txn = make_transaction(
+            payee="RCSS 1077 TORONTO ON",
+            txn_date=date(2026, 2, 2),
+            amount=Decimal("-73.63"),
+        )
+
+        config = MatchConfig()
+        result = _try_match(receipt, txn, config)
+
+        assert result is not None
+        assert "family match" in result.match_details
 
 
 def test_rust_backend_loads_when_required() -> None:

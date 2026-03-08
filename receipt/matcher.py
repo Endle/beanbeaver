@@ -19,6 +19,7 @@ from types import ModuleType
 from typing import Any, Protocol, cast
 
 from beanbeaver.domain.receipt import Receipt
+from beanbeaver.runtime import load_merchant_families
 
 _SCALE_FACTOR = Decimal("10000")
 
@@ -107,6 +108,43 @@ def _load_rust_matcher() -> ModuleType | None:
 _rust_matcher = _load_rust_matcher()
 
 
+def _merchant_family_payload() -> list[tuple[str, list[str]]]:
+    return [
+        (family.canonical, list(family.aliases))
+        for family in load_merchant_families()
+    ]
+
+
+def _normalize_merchant_py(value: str) -> str:
+    normalized = value.strip().upper()
+    normalized = re.sub(r"\s+(INC|LLC|LTD|CORP|CO|#\d+|\d+)\.?$", "", normalized)
+    normalized = re.sub(r",?\s*[A-Z]{2}\s*$", "", normalized)
+    normalized = re.sub(r"(?:,\s*|\s+)[A-Z][A-Za-z]+\s*$", "", normalized)
+    normalized = re.sub(r"[^A-Z0-9]", "", normalized)
+    return normalized
+
+
+def _canonicalize_merchant_py(value: str) -> tuple[str, str | None]:
+    normalized_value = _normalize_merchant_py(value)
+    if not normalized_value:
+        return normalized_value, None
+
+    for family in load_merchant_families():
+        aliases = (family.canonical, *family.aliases)
+        for alias in aliases:
+            normalized_alias = _normalize_merchant_py(alias)
+            if not normalized_alias:
+                continue
+            if (
+                normalized_value == normalized_alias
+                or normalized_value in normalized_alias
+                or normalized_alias in normalized_value
+            ):
+                return _normalize_merchant_py(family.canonical), family.canonical
+
+    return normalized_value, None
+
+
 def rust_backend_loaded() -> bool:
     """Return whether the native matcher backend is active."""
     return _rust_matcher is not None
@@ -176,17 +214,18 @@ def _match_receipt_to_transactions_rust(
         for txn in transactions
     ]
     return list(
-        _rust_matcher.match_receipt_to_transactions(
-            receipt.date.toordinal(),
-            _decimal_to_scaled(receipt.total),
-            receipt.merchant,
-            receipt.date_is_placeholder,
+            _rust_matcher.match_receipt_to_transactions(
+                receipt.date.toordinal(),
+                _decimal_to_scaled(receipt.total),
+                receipt.merchant,
+                receipt.date_is_placeholder,
             config.date_tolerance_days,
-            _decimal_to_scaled(config.amount_tolerance),
-            _decimal_to_scaled(config.amount_tolerance_percent),
-            payload,
+                _decimal_to_scaled(config.amount_tolerance),
+                _decimal_to_scaled(config.amount_tolerance_percent),
+                payload,
+                _merchant_family_payload(),
+            )
         )
-    )
 
 
 def _match_transaction_to_receipts_rust(
@@ -209,16 +248,17 @@ def _match_transaction_to_receipts_rust(
         for _, receipt in candidates
     ]
     return list(
-        _rust_matcher.match_transaction_to_receipts(
-            txn_date.toordinal(),
-            _decimal_to_scaled(txn_amount),
-            txn_payee,
-            config.date_tolerance_days,
-            _decimal_to_scaled(config.amount_tolerance),
-            _decimal_to_scaled(config.amount_tolerance_percent),
-            payload,
+            _rust_matcher.match_transaction_to_receipts(
+                txn_date.toordinal(),
+                _decimal_to_scaled(txn_amount),
+                txn_payee,
+                config.date_tolerance_days,
+                _decimal_to_scaled(config.amount_tolerance),
+                _decimal_to_scaled(config.amount_tolerance_percent),
+                payload,
+                _merchant_family_payload(),
+            )
         )
-    )
 
 
 def match_transaction_to_receipts(
@@ -325,12 +365,14 @@ def _try_match_receipt_py(
         confidence += 0.4 * (1 - float(amount_diff / amount_tolerance))
         details.append(f"amount: ${amount_diff:.2f} off")
 
-    merchant_score = _merchant_similarity(receipt.merchant, txn_payee)
+    merchant_score, merchant_family = _merchant_similarity_info_py(receipt.merchant, txn_payee)
     if merchant_score < 0.3:
         return None
 
     confidence += 0.2 * merchant_score
-    if merchant_score > 0.8:
+    if merchant_family is not None:
+        details.append(f"merchant: family match ({merchant_family})")
+    elif merchant_score > 0.8:
         details.append("merchant: good match")
     else:
         details.append(f"merchant: partial match ({merchant_score:.0%})")
@@ -442,12 +484,14 @@ def _try_match_py(
         confidence += 0.4 * (1 - float(amount_diff / amount_tolerance))
         details.append(f"amount: ${amount_diff:.2f} off")
 
-    merchant_score = _merchant_similarity(receipt.merchant, txn.payee or "")
+    merchant_score, merchant_family = _merchant_similarity_info_py(receipt.merchant, txn.payee or "")
     if merchant_score < 0.3:
         return None
 
     confidence += 0.2 * merchant_score
-    if merchant_score > 0.8:
+    if merchant_family is not None:
+        details.append(f"merchant: family match ({merchant_family})")
+    elif merchant_score > 0.8:
         details.append("merchant: good match")
     else:
         details.append(f"merchant: partial match ({merchant_score:.0%})")
@@ -469,26 +513,27 @@ def _merchant_similarity(receipt_merchant: str, txn_payee: str) -> float:
     Returns a score from 0.0 to 1.0.
     """
     if _rust_matcher is not None:
-        return float(_rust_matcher.merchant_similarity(receipt_merchant, txn_payee))
-    return _merchant_similarity_py(receipt_merchant, txn_payee)
+        return float(_rust_matcher.merchant_similarity(receipt_merchant, txn_payee, _merchant_family_payload()))
+    return _merchant_similarity_info_py(receipt_merchant, txn_payee)[0]
 
 
-def _merchant_similarity_py(receipt_merchant: str, txn_payee: str) -> float:
-    def normalize(s: str) -> str:
-        s = s.upper()
-        s = re.sub(r"\s+(INC|LLC|LTD|CORP|CO|#\d+|\d+)\.?$", "", s)
-        s = re.sub(r",?\s*[A-Z]{2}\s*$", "", s)
-        s = re.sub(r"(?:,\s*|\s+)[A-Z][A-Za-z]+\s*$", "", s)
-        s = re.sub(r"[^A-Z0-9]", "", s)
-        return s
-
-    normalized_receipt = normalize(receipt_merchant)
-    normalized_txn = normalize(txn_payee)
+def _merchant_similarity_info_py(receipt_merchant: str, txn_payee: str) -> tuple[float, str | None]:
+    normalized_receipt, receipt_family = _canonicalize_merchant_py(receipt_merchant)
+    normalized_txn, txn_family = _canonicalize_merchant_py(txn_payee)
     if not normalized_receipt or not normalized_txn:
-        return 0.0
+        return 0.0, None
+
+    if (
+        normalized_receipt == normalized_txn
+        and (
+            receipt_family is not None
+            or txn_family is not None
+        )
+    ):
+        return 1.0, receipt_family or txn_family
 
     if normalized_receipt in normalized_txn or normalized_txn in normalized_receipt:
-        return 0.9
+        return 0.9, None
 
     min_len = min(len(normalized_receipt), len(normalized_txn))
     common_prefix = 0
@@ -498,15 +543,15 @@ def _merchant_similarity_py(receipt_merchant: str, txn_payee: str) -> float:
         else:
             break
     if common_prefix >= 4:
-        return 0.5 + 0.4 * (common_prefix / min_len)
+        return 0.5 + 0.4 * (common_prefix / min_len), None
 
     receipt_words = set(re.findall(r"[A-Z]{3,}", receipt_merchant.upper()))
     txn_words = set(re.findall(r"[A-Z]{3,}", txn_payee.upper()))
     if receipt_words and txn_words:
         common_words = receipt_words & txn_words
         if common_words:
-            return 0.3 + 0.4 * (len(common_words) / len(receipt_words | txn_words))
-    return 0.0
+            return 0.3 + 0.4 * (len(common_words) / len(receipt_words | txn_words)), None
+    return 0.0, None
 
 
 def format_match_for_display(match: MatchResult) -> str:

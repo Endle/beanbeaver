@@ -27,6 +27,13 @@ struct TransactionInput {
     posting_amounts_scaled: Vec<Option<i64>>,
 }
 
+#[derive(Clone, Debug)]
+struct MerchantFamily {
+    canonical_label: String,
+    canonical_normalized: String,
+    aliases_normalized: Vec<String>,
+}
+
 fn fixed_mul(a: i64, b: i64) -> i64 {
     (((a as i128) * (b as i128)) / (SCALE as i128)) as i64
 }
@@ -140,16 +147,75 @@ fn alpha_words(value: &str) -> HashSet<String> {
         .collect()
 }
 
-fn merchant_similarity_impl(receipt_merchant: &str, txn_payee: &str) -> f64 {
-    let normalized_receipt = normalize_merchant(receipt_merchant);
-    let normalized_txn = normalize_merchant(txn_payee);
+fn build_merchant_families(raw_families: &[(String, Vec<String>)]) -> Vec<MerchantFamily> {
+    raw_families
+        .iter()
+        .filter_map(|(canonical, aliases)| {
+            let canonical_normalized = normalize_merchant(canonical);
+            if canonical_normalized.is_empty() {
+                return None;
+            }
+            let aliases_normalized = std::iter::once(canonical.clone())
+                .chain(aliases.iter().cloned())
+                .map(|alias| normalize_merchant(&alias))
+                .filter(|alias| !alias.is_empty())
+                .collect();
+            Some(MerchantFamily {
+                canonical_label: canonical.clone(),
+                canonical_normalized,
+                aliases_normalized,
+            })
+        })
+        .collect()
+}
 
-    if normalized_receipt.is_empty() || normalized_txn.is_empty() {
-        return 0.0;
+fn alias_matches(normalized_value: &str, normalized_alias: &str) -> bool {
+    normalized_value == normalized_alias
+        || normalized_value.contains(normalized_alias)
+        || normalized_alias.contains(normalized_value)
+}
+
+fn canonicalize_merchant(value: &str, families: &[MerchantFamily]) -> (String, Option<String>) {
+    let normalized_value = normalize_merchant(value);
+    if normalized_value.is_empty() {
+        return (normalized_value, None);
     }
 
-    if normalized_txn.contains(&normalized_receipt) || normalized_receipt.contains(&normalized_txn) {
-        return 0.9;
+    for family in families {
+        if family
+            .aliases_normalized
+            .iter()
+            .any(|alias| alias_matches(&normalized_value, alias))
+        {
+            return (
+                family.canonical_normalized.clone(),
+                Some(family.canonical_label.clone()),
+            );
+        }
+    }
+
+    (normalized_value, None)
+}
+
+fn merchant_similarity_impl(
+    receipt_merchant: &str,
+    txn_payee: &str,
+    families: &[MerchantFamily],
+) -> (f64, Option<String>) {
+    let (normalized_receipt, receipt_family) = canonicalize_merchant(receipt_merchant, families);
+    let (normalized_txn, txn_family) = canonicalize_merchant(txn_payee, families);
+
+    if normalized_receipt.is_empty() || normalized_txn.is_empty() {
+        return (0.0, None);
+    }
+
+    if normalized_receipt == normalized_txn && (receipt_family.is_some() || txn_family.is_some()) {
+        return (1.0, receipt_family.or(txn_family));
+    }
+
+    if normalized_txn.contains(&normalized_receipt) || normalized_receipt.contains(&normalized_txn)
+    {
+        return (0.9, None);
     }
 
     let common_prefix = normalized_receipt
@@ -159,7 +225,10 @@ fn merchant_similarity_impl(receipt_merchant: &str, txn_payee: &str) -> f64 {
         .count();
     let min_len = normalized_receipt.len().min(normalized_txn.len());
     if common_prefix >= 4 && min_len > 0 {
-        return 0.5 + 0.4 * ((common_prefix as f64) / (min_len as f64));
+        return (
+            0.5 + 0.4 * ((common_prefix as f64) / (min_len as f64)),
+            None,
+        );
     }
 
     let receipt_words = alpha_words(receipt_merchant);
@@ -169,18 +238,22 @@ fn merchant_similarity_impl(receipt_merchant: &str, txn_payee: &str) -> f64 {
         if common_words > 0 {
             let union_count = receipt_words.union(&txn_words).count();
             if union_count > 0 {
-                return 0.3 + 0.4 * ((common_words as f64) / (union_count as f64));
+                return (
+                    0.3 + 0.4 * ((common_words as f64) / (union_count as f64)),
+                    None,
+                );
             }
         }
     }
 
-    0.0
+    (0.0, None)
 }
 
 fn match_receipt_to_transaction_impl(
     receipt: &ReceiptInput,
     txn: &TransactionInput,
     config: &MatchConfig,
+    families: &[MerchantFamily],
 ) -> Option<(f64, String)> {
     let mut confidence = 0.0;
     let mut details: Vec<String> = Vec::new();
@@ -196,7 +269,8 @@ fn match_receipt_to_transaction_impl(
             confidence += 0.4;
             details.push("date: exact match".to_string());
         } else {
-            confidence += 0.4 * (1.0 - (date_diff as f64) / ((config.date_tolerance_days + 1) as f64));
+            confidence +=
+                0.4 * (1.0 - (date_diff as f64) / ((config.date_tolerance_days + 1) as f64));
             details.push(format!("date: {date_diff} day(s) off"));
         }
     }
@@ -223,13 +297,19 @@ fn match_receipt_to_transaction_impl(
         ));
     }
 
-    let merchant_score = merchant_similarity_impl(&receipt.merchant, txn.payee.as_deref().unwrap_or(""));
+    let (merchant_score, matched_family) = merchant_similarity_impl(
+        &receipt.merchant,
+        txn.payee.as_deref().unwrap_or(""),
+        families,
+    );
     if merchant_score < 0.3 {
         return None;
     }
 
     confidence += 0.2 * merchant_score;
-    if merchant_score > 0.8 {
+    if let Some(family) = matched_family {
+        details.push(format!("merchant: family match ({family})"));
+    } else if merchant_score > 0.8 {
         details.push("merchant: good match".to_string());
     } else {
         details.push(format!(
@@ -247,6 +327,7 @@ fn match_transaction_to_receipt_impl(
     txn_payee: &str,
     receipt: &ReceiptInput,
     config: &MatchConfig,
+    families: &[MerchantFamily],
 ) -> Option<(f64, String)> {
     let mut confidence = 0.0;
     let mut details: Vec<String> = Vec::new();
@@ -262,7 +343,8 @@ fn match_transaction_to_receipt_impl(
             confidence += 0.4;
             details.push("date: exact match".to_string());
         } else {
-            confidence += 0.4 * (1.0 - (date_diff as f64) / ((config.date_tolerance_days + 1) as f64));
+            confidence +=
+                0.4 * (1.0 - (date_diff as f64) / ((config.date_tolerance_days + 1) as f64));
             details.push(format!("date: {date_diff} day(s) off"));
         }
     }
@@ -283,13 +365,16 @@ fn match_transaction_to_receipt_impl(
         ));
     }
 
-    let merchant_score = merchant_similarity_impl(&receipt.merchant, txn_payee);
+    let (merchant_score, matched_family) =
+        merchant_similarity_impl(&receipt.merchant, txn_payee, families);
     if merchant_score < 0.3 {
         return None;
     }
 
     confidence += 0.2 * merchant_score;
-    if merchant_score > 0.8 {
+    if let Some(family) = matched_family {
+        details.push(format!("merchant: family match ({family})"));
+    } else if merchant_score > 0.8 {
         details.push("merchant: good match".to_string());
     } else {
         details.push(format!(
@@ -302,8 +387,13 @@ fn match_transaction_to_receipt_impl(
 }
 
 #[pyfunction]
-fn merchant_similarity(receipt_merchant: &str, txn_payee: &str) -> f64 {
-    merchant_similarity_impl(receipt_merchant, txn_payee)
+fn merchant_similarity(
+    receipt_merchant: &str,
+    txn_payee: &str,
+    merchant_families: Vec<(String, Vec<String>)>,
+) -> f64 {
+    let families = build_merchant_families(&merchant_families);
+    merchant_similarity_impl(receipt_merchant, txn_payee, &families).0
 }
 
 #[pyfunction]
@@ -316,6 +406,7 @@ fn match_receipt_to_transactions(
     amount_tolerance_scaled: i64,
     amount_tolerance_percent_scaled: i64,
     transactions: Vec<(i32, Option<String>, Vec<Option<i64>>)>,
+    merchant_families: Vec<(String, Vec<String>)>,
 ) -> Vec<(usize, f64, String)> {
     let receipt = ReceiptInput {
         date_ordinal: receipt_date_ordinal,
@@ -328,6 +419,7 @@ fn match_receipt_to_transactions(
         amount_tolerance_scaled,
         amount_tolerance_percent_scaled,
     };
+    let families = build_merchant_families(&merchant_families);
 
     let mut matches: Vec<(usize, f64, String)> = transactions
         .into_iter()
@@ -338,7 +430,7 @@ fn match_receipt_to_transactions(
                 payee,
                 posting_amounts_scaled,
             };
-            match_receipt_to_transaction_impl(&receipt, &txn, &config)
+            match_receipt_to_transaction_impl(&receipt, &txn, &config, &families)
                 .map(|(confidence, details)| (index, confidence, details))
         })
         .collect();
@@ -356,32 +448,37 @@ fn match_transaction_to_receipts(
     amount_tolerance_scaled: i64,
     amount_tolerance_percent_scaled: i64,
     candidates: Vec<(i32, i64, String, bool)>,
+    merchant_families: Vec<(String, Vec<String>)>,
 ) -> Vec<(usize, f64, String)> {
     let config = MatchConfig {
         date_tolerance_days,
         amount_tolerance_scaled,
         amount_tolerance_percent_scaled,
     };
+    let families = build_merchant_families(&merchant_families);
 
     let mut matches: Vec<(usize, f64, String)> = candidates
         .into_iter()
         .enumerate()
-        .filter_map(|(index, (date_ordinal, total_scaled, merchant, date_is_placeholder))| {
-            let receipt = ReceiptInput {
-                date_ordinal,
-                total_scaled,
-                merchant,
-                date_is_placeholder,
-            };
-            match_transaction_to_receipt_impl(
-                txn_date_ordinal,
-                txn_amount_scaled,
-                &txn_payee,
-                &receipt,
-                &config,
-            )
-            .map(|(confidence, details)| (index, confidence, details))
-        })
+        .filter_map(
+            |(index, (date_ordinal, total_scaled, merchant, date_is_placeholder))| {
+                let receipt = ReceiptInput {
+                    date_ordinal,
+                    total_scaled,
+                    merchant,
+                    date_is_placeholder,
+                };
+                match_transaction_to_receipt_impl(
+                    txn_date_ordinal,
+                    txn_amount_scaled,
+                    &txn_payee,
+                    &receipt,
+                    &config,
+                    &families,
+                )
+                .map(|(confidence, details)| (index, confidence, details))
+            },
+        )
         .collect();
 
     matches.sort_by(|left, right| compare_matches(left, right));
@@ -416,10 +513,28 @@ mod tests {
         }
     }
 
+    fn merchant_families() -> Vec<MerchantFamily> {
+        build_merchant_families(&[(
+            "REAL CANADIAN SUPERSTORE".to_string(),
+            vec!["REAL CANADIAN".to_string(), "RCSS".to_string()],
+        )])
+    }
+
     #[test]
     fn merchant_similarity_handles_common_substrings() {
-        let score = merchant_similarity_impl("T&T", "T&T SUPERMARKET");
+        let score = merchant_similarity_impl("T&T", "T&T SUPERMARKET", &[]).0;
         assert!(score > 0.8);
+    }
+
+    #[test]
+    fn merchant_similarity_handles_family_aliases() {
+        let (score, family) = merchant_similarity_impl(
+            "REAL CANADIAN",
+            "RCSS 1077 TORONTO ON",
+            &merchant_families(),
+        );
+        assert!(score > 0.8);
+        assert_eq!(family.as_deref(), Some("REAL CANADIAN SUPERSTORE"));
     }
 
     #[test]
@@ -435,6 +550,8 @@ mod tests {
             payee: Some("T&T SUPERMARKET".to_string()),
             posting_amounts_scaled: vec![Some(1_000_000)],
         };
-        assert!(match_receipt_to_transaction_impl(&receipt, &txn, &default_config()).is_none());
+        assert!(
+            match_receipt_to_transaction_impl(&receipt, &txn, &default_config(), &[]).is_none()
+        );
     }
 }
