@@ -20,6 +20,7 @@ from beanbeaver.domain.match import (
     match_key,
     transaction_charge_amount,
 )
+from beanbeaver.domain.receipt import Receipt
 from beanbeaver.ledger_access import (
     ReceiptMatchFileSnapshot,
     apply_receipt_match,
@@ -311,6 +312,91 @@ def _prompt_failed_match_recovery() -> Literal["edit", "skip"]:
         print("  Invalid choice. Enter 1 or 2.")
 
 
+def _format_receipt_inspection(receipt: Receipt, *, path: Path) -> list[str]:
+    """Render one approved receipt in a human-readable inspection view."""
+    lines = [
+        "  Receipt details:",
+        f"    File: {path}",
+        f"    Merchant: {receipt.merchant or 'UNKNOWN'}",
+        f"    Date: {receipt.date.isoformat() if not receipt.date_is_placeholder else 'UNKNOWN'}",
+        f"    Total: ${receipt.total:.2f}",
+    ]
+    if receipt.subtotal is not None:
+        lines.append(f"    Subtotal: ${receipt.subtotal:.2f}")
+    if receipt.tax is not None:
+        lines.append(f"    Tax: ${receipt.tax:.2f}")
+    lines.append(f"    Itemized total: ${itemized_receipt_total(receipt):.2f}")
+
+    if receipt.items:
+        lines.append("    Items:")
+        for index, item in enumerate(receipt.items, 1):
+            quantity_suffix = f" x{item.quantity}" if item.quantity != 1 else ""
+            category_suffix = f" [{item.category}]" if item.category else ""
+            lines.append(f"      {index:>2}. {item.description}{quantity_suffix} - ${item.total:.2f}{category_suffix}")
+    else:
+        lines.append("    Items: none")
+
+    if receipt.warnings:
+        lines.append("    Warnings:")
+        for warning in receipt.warnings:
+            lines.append(f"      - {warning.message}")
+
+    return lines
+
+
+def _format_transaction_inspection(match: Any, *, index: int) -> list[str]:
+    """Render one candidate ledger transaction with postings for inspection."""
+    txn = match.transaction
+    amount = transaction_charge_amount(match)
+    lines = [
+        f"  Candidate [{index}] ({match.confidence:.0%} confidence):",
+        f"    File: {match.file_path}:{match.line_number}",
+        f"    Date: {txn.date.isoformat()}",
+        f"    Payee: {txn.payee or 'UNKNOWN'}",
+        f"    Narration: {txn.narration or ''}",
+        f"    Charge amount: ${amount:.2f}" if amount is not None else "    Charge amount: UNKNOWN",
+        f"    Match details: {match.match_details}",
+        "    Postings:",
+    ]
+    for posting in txn.postings:
+        if posting.units is None:
+            lines.append(f"      - {posting.account}")
+            continue
+        lines.append(f"      - {posting.account}: {posting.units.number} {posting.units.currency}")
+    return lines
+
+
+def _print_match_inspection(receipt: Receipt, *, path: Path, display_matches: Sequence[Any]) -> None:
+    """Print receipt details plus the currently displayed transaction candidates."""
+    print("")
+    for line in _format_receipt_inspection(receipt, path=path):
+        print(line)
+    print("  Candidate transactions:")
+    for index, match in enumerate(display_matches, 1):
+        for line in _format_transaction_inspection(match, index=index):
+            print(line)
+
+
+def _prompt_match_choice(
+    *,
+    receipt: Receipt,
+    path: Path,
+    display_matches: Sequence[Any],
+) -> str:
+    """Prompt for one match action, supporting inline detail inspection."""
+    valid_choices = [str(i) for i in range(1, len(display_matches) + 1)] + ["v", "s", "d", "x", "a", "q"]
+    print("    [v] View details | [s] Skip | [d] Delete receipt | [x] Save-and-exit | [a] Abort session")
+
+    while True:
+        choice = input("  Select: ").strip().lower()
+        if choice == "v":
+            _print_match_inspection(receipt, path=path, display_matches=display_matches)
+            continue
+        if choice in valid_choices:
+            return choice
+        print(f"    Invalid. Enter one of: {', '.join(valid_choices)}")
+
+
 def _re_edit_receipt_after_failed_match(
     path: Path,
     *,
@@ -476,14 +562,11 @@ def cmd_match(args: argparse.Namespace) -> None:
                 formatted = format_match_for_display(match).strip().replace(chr(10), chr(10) + "        ")
                 print(f"    [{i}] {formatted}{already_used}")
 
-            valid_choices = [str(i) for i in range(1, len(display_matches) + 1)] + ["s", "d", "x", "a", "q"]
-            print("    [s] Skip | [d] Delete receipt | [x] Save-and-exit | [a] Abort session")
-
-            while True:
-                choice = input("  Select: ").strip().lower()
-                if choice in valid_choices:
-                    break
-                print(f"    Invalid. Enter one of: {', '.join(valid_choices)}")
+            choice = _prompt_match_choice(
+                receipt=receipt,
+                path=path,
+                display_matches=display_matches,
+            )
 
             if choice == "d":
                 delete_receipt(path)

@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 from _pytest.monkeypatch import MonkeyPatch
 from beanbeaver.application.receipts.match import (
     _format_ledger_errors,
     _format_match_apply_error,
+    _format_receipt_inspection,
+    _format_transaction_inspection,
     _prompt_failed_match_recovery,
+    _prompt_match_choice,
     _re_edit_receipt_after_failed_match,
     _suggest_open_accounts_for_unknown_account,
 )
 from beanbeaver.application.receipts.review import ReEditApprovedReceiptResult
+from beanbeaver.domain.receipt import Receipt, ReceiptItem, ReceiptWarning
+from beanbeaver.ledger_access.api import LedgerAmount, LedgerPosting, LedgerTransaction
+from beanbeaver.receipt.matcher import MatchResult
 
 
 class _Err:
@@ -141,3 +149,110 @@ def test_re_edit_receipt_after_failed_match_returns_updated_path(monkeypatch: Mo
     )
 
     assert _re_edit_receipt_after_failed_match(target, resolve_editor_cmd=lambda: ["nano"]) == updated
+
+
+def test_format_receipt_inspection_includes_items_and_warnings(tmp_path: Path) -> None:
+    path = tmp_path / "receipts" / "json" / "approved" / "r1" / "parsed.receipt.json"
+    receipt = Receipt(
+        merchant="T&T SUPERMARKET",
+        date=date(2026, 1, 23),
+        total=Decimal("106.10"),
+        subtotal=Decimal("100.00"),
+        tax=Decimal("6.10"),
+        items=[
+            ReceiptItem(description="Pork Dumplings", price=Decimal("12.99"), quantity=2),
+            ReceiptItem(
+                description="Milk",
+                price=Decimal("4.59"),
+                category="Expenses:Food:Grocery:Dairy",
+            ),
+        ],
+        warnings=[ReceiptWarning(message="Detected subtotal differs from sum of visible items")],
+    )
+
+    lines = _format_receipt_inspection(receipt, path=path)
+
+    assert f"    File: {path}" in lines
+    assert "    Merchant: T&T SUPERMARKET" in lines
+    assert "    Itemized total: $23.68" in lines
+    assert "       1. Pork Dumplings x2 - $12.99" in lines
+    assert "       2. Milk - $4.59 [Expenses:Food:Grocery:Dairy]" in lines
+    assert "      - Detected subtotal differs from sum of visible items" in lines
+
+
+def test_format_transaction_inspection_includes_postings() -> None:
+    txn = LedgerTransaction(
+        date=date(2026, 1, 26),
+        payee="T&T SUPERMARKET #020 RICHMOND HILLON",
+        narration="",
+        postings=(
+            LedgerPosting(
+                account="Expenses:Food:Grocery",
+                units=LedgerAmount(number=Decimal("106.10"), currency="CAD"),
+            ),
+            LedgerPosting(
+                account="Liabilities:CreditCard:MBNA:Dan:WEMC",
+                units=LedgerAmount(number=Decimal("-106.10"), currency="CAD"),
+            ),
+        ),
+        file_path="/tmp/records/2026/card.beancount",
+        line_number=25,
+    )
+    match = MatchResult(
+        transaction=txn,
+        file_path=txn.file_path,
+        line_number=txn.line_number,
+        confidence=0.68,
+        match_details="date: 3 day(s) off, amount: exact match, merchant: good match",
+    )
+
+    lines = _format_transaction_inspection(match, index=1)
+
+    assert "  Candidate [1] (68% confidence):" in lines
+    assert "    Charge amount: $106.10" in lines
+    assert "      - Expenses:Food:Grocery: 106.10 CAD" in lines
+    assert "      - Liabilities:CreditCard:MBNA:Dan:WEMC: -106.10 CAD" in lines
+
+
+def test_prompt_match_choice_views_details_then_returns_selection(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    responses = iter(["v", "1"])
+    printed: list[str] = []
+    receipt = Receipt(
+        merchant="T&T SUPERMARKET",
+        date=date(2026, 1, 23),
+        total=Decimal("106.10"),
+        items=[ReceiptItem(description="Milk", price=Decimal("4.59"))],
+    )
+    txn = LedgerTransaction(
+        date=date(2026, 1, 26),
+        payee="T&T SUPERMARKET #020 RICHMOND HILLON",
+        narration="",
+        postings=(
+            LedgerPosting(
+                account="Liabilities:CreditCard:MBNA:Dan:WEMC",
+                units=LedgerAmount(number=Decimal("-106.10"), currency="CAD"),
+            ),
+        ),
+        file_path="/tmp/records/2026/card.beancount",
+        line_number=25,
+    )
+    match = MatchResult(
+        transaction=txn,
+        file_path=txn.file_path,
+        line_number=txn.line_number,
+        confidence=0.68,
+        match_details="amount: exact match",
+    )
+
+    monkeypatch.setattr("builtins.input", lambda _: next(responses))
+    monkeypatch.setattr("builtins.print", lambda *args, **kwargs: printed.append(" ".join(str(arg) for arg in args)))
+
+    choice = _prompt_match_choice(
+        receipt=receipt,
+        path=tmp_path / "receipts" / "json" / "approved" / "r1" / "parsed.receipt.json",
+        display_matches=[match],
+    )
+
+    assert choice == "1"
+    assert any("Receipt details:" in line for line in printed)
+    assert any("Candidate transactions:" in line for line in printed)
