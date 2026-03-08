@@ -58,14 +58,17 @@ jobs:
           "$VENV_PYTHON" -m pip install -e ".[test,dev]"
 
       - name: Build native matcher extension
-        run: "$VENV_MATURIN" develop
+        run: |
+          "$VENV_MATURIN" develop
 
       - name: Assert native matcher backend is loaded
         env:
           BEANBEAVER_REQUIRE_RUST_MATCHER: "1"
-        run: "$VENV_PYTHON" -c "from beanbeaver.receipt.matcher import rust_backend_loaded; assert rust_backend_loaded()"
+        run: |
+          "$VENV_PYTHON" -c "from beanbeaver.receipt.matcher import rust_backend_loaded; assert rust_backend_loaded()"
 
       - name: Run matcher tests with native backend
         env:
           BEANBEAVER_REQUIRE_RUST_MATCHER: "1"
-        run: "$VENV_PYTHON" -m pytest tests/test_matcher.py
+        run: |
+          "$VENV_PYTHON" -m pytest tests/test_matcher.py
