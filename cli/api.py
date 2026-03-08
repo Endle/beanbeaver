@@ -120,38 +120,47 @@ def cmd_api_approve_scanned_with_review(args: argparse.Namespace) -> None:
 
 def cmd_api_get_config(args: argparse.Namespace) -> None:
     """Return TUI/backend configuration as JSON."""
-    from beanbeaver.runtime import get_paths
+    from beanbeaver.runtime import bootstrap_tui_config_path, get_paths
     from beanbeaver.runtime.tui_config import load_tui_config
 
     config = load_tui_config()
+    paths = get_paths()
     _print_json(
         {
-            "config_path": str(get_paths().config / "tui.json"),
-            "main_beancount_path": config.get("main_beancount_path", ""),
-            "resolved_main_beancount_path": str(get_paths().main_beancount),
+            "config_path": str(bootstrap_tui_config_path()),
+            "project_root": config.get("project_root", ""),
+            "resolved_project_root": str(paths.root),
+            "resolved_main_beancount_path": str(paths.main_beancount),
+            "scanned_dir": str(paths.receipts_json_scanned),
+            "approved_dir": str(paths.receipts_json_approved),
         }
     )
 
 
 def cmd_api_set_config(args: argparse.Namespace) -> None:
     """Persist TUI/backend configuration from stdin JSON."""
-    from beanbeaver.runtime import get_paths
-    from beanbeaver.runtime.tui_config import set_main_beancount_path
+    from beanbeaver.runtime import bootstrap_tui_config_path, get_paths, reset_paths
+    from beanbeaver.runtime.tui_config import set_project_root
 
     payload = json.load(sys.stdin)
     if not isinstance(payload, dict):
         raise ValueError("Config payload must be a JSON object")
 
-    main_beancount_path = payload.get("main_beancount_path", "")
-    if not isinstance(main_beancount_path, str):
-        raise ValueError("Config field 'main_beancount_path' must be a string")
+    project_root = payload.get("project_root", "")
+    if not isinstance(project_root, str):
+        raise ValueError("Config field 'project_root' must be a string")
 
-    config_path = set_main_beancount_path(main_beancount_path)
+    config_path = set_project_root(project_root)
+    reset_paths()
+    paths = get_paths()
     _print_json(
         {
             "status": "saved",
-            "config_path": str(config_path),
-            "main_beancount_path": main_beancount_path.strip(),
-            "resolved_main_beancount_path": str(get_paths().main_beancount),
+            "config_path": str(config_path if config_path else bootstrap_tui_config_path()),
+            "project_root": project_root.strip(),
+            "resolved_project_root": str(paths.root),
+            "resolved_main_beancount_path": str(paths.main_beancount),
+            "scanned_dir": str(paths.receipts_json_scanned),
+            "approved_dir": str(paths.receipts_json_approved),
         }
     )

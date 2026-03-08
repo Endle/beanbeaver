@@ -27,7 +27,9 @@ from beanbeaver.runtime.merchant_rules import load_known_merchant_keywords
 from beanbeaver.runtime.paths import (
     TMPDIR,
     ProjectPaths,
+    bootstrap_tui_config_path,
     get_paths,
+    reset_paths,
     set_current_year,
 )
 from beanbeaver.runtime.rule_engine import (
@@ -56,7 +58,9 @@ __all__ = [
     "create_rule_engine",
     # Paths
     "get_paths",
+    "reset_paths",
     "set_current_year",
     "ProjectPaths",
     "TMPDIR",
+    "bootstrap_tui_config_path",
 ]

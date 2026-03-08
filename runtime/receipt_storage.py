@@ -23,18 +23,38 @@ from beanbeaver.runtime import get_logger, get_paths, load_item_category_rule_la
 
 logger = get_logger(__name__)
 
-_paths = get_paths()
-SCANNED_DIR = _paths.receipts_json_scanned
-APPROVED_DIR = _paths.receipts_json_approved
-MATCHED_DIR = _paths.receipts_json_matched
-RENDERED_SCANNED_DIR = _paths.receipts_rendered_scanned
-RENDERED_APPROVED_DIR = _paths.receipts_rendered_approved
-RENDERED_MATCHED_DIR = _paths.receipts_rendered_matched
+
+def _project_paths():
+    return get_paths()
+
+
+def _scanned_dir() -> Path:
+    return _project_paths().receipts_json_scanned
+
+
+def _approved_dir() -> Path:
+    return _project_paths().receipts_json_approved
+
+
+def _matched_dir() -> Path:
+    return _project_paths().receipts_json_matched
+
+
+def _rendered_scanned_dir() -> Path:
+    return _project_paths().receipts_rendered_scanned
+
+
+def _rendered_approved_dir() -> Path:
+    return _project_paths().receipts_rendered_approved
+
+
+def _rendered_matched_dir() -> Path:
+    return _project_paths().receipts_rendered_matched
 
 
 def ensure_directories() -> None:
     """Create required receipt directories if they do not exist."""
-    _paths.ensure_receipt_directories()
+    _project_paths().ensure_receipt_directories()
 
 
 def _slug(text: str | None) -> str:
@@ -127,9 +147,9 @@ def _status_roots_for_path(stage_path: Path) -> tuple[Path, Path]:
     """Return (json_root, rendered_root) for a stage path."""
     path = stage_path.resolve()
     candidates = (
-        (SCANNED_DIR.resolve(), RENDERED_SCANNED_DIR),
-        (APPROVED_DIR.resolve(), RENDERED_APPROVED_DIR),
-        (MATCHED_DIR.resolve(), RENDERED_MATCHED_DIR),
+        (_scanned_dir().resolve(), _rendered_scanned_dir()),
+        (_approved_dir().resolve(), _rendered_approved_dir()),
+        (_matched_dir().resolve(), _rendered_matched_dir()),
     )
     for json_root, rendered_root in candidates:
         try:
@@ -153,14 +173,14 @@ def save_scanned_receipt(
         receipt,
         rule_layers=load_receipt_structuring_rule_layers(),
         raw_ocr_payload=raw_ocr_payload,
-        ocr_json_path=str(ocr_json_path.relative_to(_paths.receipts)) if ocr_json_path else None,
+        ocr_json_path=str(ocr_json_path.relative_to(_project_paths().receipts)) if ocr_json_path else None,
         image_sha256=image_sha256,
     )
-    receipt_dir = SCANNED_DIR / _receipt_dir_name(document)
+    receipt_dir = _scanned_dir() / _receipt_dir_name(document)
     receipt_dir.mkdir(parents=True, exist_ok=False)
     stage_path = receipt_dir / "parsed.receipt.json"
     save_stage_document(stage_path, document)
-    normalized_stage_path, _ = _write_rendered_output(stage_path, rendered_root=RENDERED_SCANNED_DIR)
+    normalized_stage_path, _ = _write_rendered_output(stage_path, rendered_root=_rendered_scanned_dir())
     logger.info("Saved scanned receipt JSON to %s", normalized_stage_path)
     return normalized_stage_path
 
@@ -199,22 +219,22 @@ def move_scanned_to_approved(stage_path: Path) -> Path:
     """Move one scanned receipt chain to the approved JSON root."""
     ensure_directories()
     stage_path = stage_path.resolve()
-    stage_path.relative_to(SCANNED_DIR.resolve())
+    stage_path.relative_to(_scanned_dir().resolve())
 
     receipt_dir = stage_path.parent
-    target_dir = APPROVED_DIR / receipt_dir.name
+    target_dir = _approved_dir() / receipt_dir.name
     counter = 1
     while target_dir.exists():
-        target_dir = APPROVED_DIR / f"{receipt_dir.name}_{counter}"
+        target_dir = _approved_dir() / f"{receipt_dir.name}_{counter}"
         counter += 1
 
-    old_rendered = RENDERED_SCANNED_DIR / f"{receipt_dir.name}.beancount"
+    old_rendered = _rendered_scanned_dir() / f"{receipt_dir.name}.beancount"
     receipt_dir.rename(target_dir)
     if old_rendered.exists():
         old_rendered.unlink()
 
     new_stage_path = target_dir / stage_path.name
-    normalized_stage_path, _ = _write_rendered_output(new_stage_path, rendered_root=RENDERED_APPROVED_DIR)
+    normalized_stage_path, _ = _write_rendered_output(new_stage_path, rendered_root=_rendered_approved_dir())
     logger.info("Moved %s to %s", stage_path, normalized_stage_path)
     return normalized_stage_path
 
@@ -223,22 +243,22 @@ def move_to_matched(stage_path: Path) -> Path:
     """Move one approved receipt chain to the matched JSON root."""
     ensure_directories()
     stage_path = stage_path.resolve()
-    stage_path.relative_to(APPROVED_DIR.resolve())
+    stage_path.relative_to(_approved_dir().resolve())
 
     receipt_dir = stage_path.parent
-    target_dir = MATCHED_DIR / receipt_dir.name
+    target_dir = _matched_dir() / receipt_dir.name
     counter = 1
     while target_dir.exists():
-        target_dir = MATCHED_DIR / f"{receipt_dir.name}_{counter}"
+        target_dir = _matched_dir() / f"{receipt_dir.name}_{counter}"
         counter += 1
 
-    old_rendered = RENDERED_APPROVED_DIR / f"{receipt_dir.name}.beancount"
+    old_rendered = _rendered_approved_dir() / f"{receipt_dir.name}.beancount"
     receipt_dir.rename(target_dir)
     if old_rendered.exists():
         old_rendered.unlink()
 
     new_stage_path = target_dir / stage_path.name
-    normalized_stage_path, _ = _write_rendered_output(new_stage_path, rendered_root=RENDERED_MATCHED_DIR)
+    normalized_stage_path, _ = _write_rendered_output(new_stage_path, rendered_root=_rendered_matched_dir())
     logger.info("Moved %s to %s", stage_path, normalized_stage_path)
     return normalized_stage_path
 
@@ -275,7 +295,7 @@ def list_approved_stage_receipts() -> list[Path]:
     """Return latest approved stage files."""
     ensure_directories()
     return sorted(
-        (_latest_stage_path(receipt_dir) for receipt_dir in APPROVED_DIR.iterdir() if receipt_dir.is_dir()),
+        (_latest_stage_path(receipt_dir) for receipt_dir in _approved_dir().iterdir() if receipt_dir.is_dir()),
         key=lambda path: path.parent.name,
     )
 
@@ -284,7 +304,7 @@ def list_scanned_receipts() -> list[Path]:
     """Return latest scanned stage files."""
     ensure_directories()
     return sorted(
-        (_latest_stage_path(receipt_dir) for receipt_dir in SCANNED_DIR.iterdir() if receipt_dir.is_dir()),
+        (_latest_stage_path(receipt_dir) for receipt_dir in _scanned_dir().iterdir() if receipt_dir.is_dir()),
         key=lambda path: path.parent.name,
     )
 

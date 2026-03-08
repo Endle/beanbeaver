@@ -16,10 +16,13 @@ def test_project_root_uses_env_override(tmp_path: Path, monkeypatch: MonkeyPatch
 
 def test_project_root_detects_host_project_from_cwd(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     project_root = tmp_path / "ledger"
+    package_root = tmp_path / "package"
     nested = project_root / "nested" / "dir"
     nested.mkdir(parents=True)
+    package_root.mkdir()
     (project_root / "main.beancount").write_text("", encoding="utf-8")
 
+    monkeypatch.setattr(runtime_paths, "_PACKAGE_ROOT", package_root)
     monkeypatch.delenv("BEANBEAVER_ROOT", raising=False)
     monkeypatch.chdir(nested)
 
@@ -40,6 +43,39 @@ def test_project_paths_src_falls_back_to_package_root(tmp_path: Path) -> None:
     assert paths.src == Path(runtime_paths.__file__).resolve().parents[1]
 
 
+def test_project_root_uses_tui_project_root_override(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    package_root = tmp_path / "package"
+    configured_root = tmp_path / "external-project"
+    (package_root / "config").mkdir(parents=True)
+    configured_root.mkdir()
+    monkeypatch.setattr(runtime_paths, "_PACKAGE_ROOT", package_root)
+    monkeypatch.delenv("BEANBEAVER_ROOT", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (package_root / "config" / "tui.json").write_text(
+        '{"project_root": "../external-project"}',
+        encoding="utf-8",
+    )
+
+    assert runtime_paths._get_project_root() == configured_root.resolve()
+
+
+def test_project_root_uses_legacy_main_beancount_override(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    package_root = tmp_path / "package"
+    legacy_root = tmp_path / "legacy-project"
+    (package_root / "config").mkdir(parents=True)
+    legacy_root.mkdir()
+    (legacy_root / "main.beancount").write_text("", encoding="utf-8")
+    monkeypatch.setattr(runtime_paths, "_PACKAGE_ROOT", package_root)
+    monkeypatch.delenv("BEANBEAVER_ROOT", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (package_root / "config" / "tui.json").write_text(
+        '{"main_beancount_path": "../legacy-project/main.beancount"}',
+        encoding="utf-8",
+    )
+
+    assert runtime_paths._get_project_root() == legacy_root.resolve()
+
+
 def test_main_beancount_uses_env_override(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     root = tmp_path / "host"
     root.mkdir()
@@ -47,22 +83,6 @@ def test_main_beancount_uses_env_override(tmp_path: Path, monkeypatch: MonkeyPat
     ledger.parent.mkdir()
     ledger.write_text("", encoding="utf-8")
     monkeypatch.setenv("BEANBEAVER_MAIN_BEANCOUNT", str(ledger))
-
-    assert runtime_paths.ProjectPaths(root=root).main_beancount == ledger.resolve()
-
-
-def test_main_beancount_uses_tui_config_override(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
-    root = tmp_path / "host"
-    config_dir = root / "config"
-    config_dir.mkdir(parents=True)
-    ledger = tmp_path / "external" / "ledger.beancount"
-    ledger.parent.mkdir()
-    ledger.write_text("", encoding="utf-8")
-    (config_dir / "tui.json").write_text(
-        '{"main_beancount_path": "../external/ledger.beancount"}',
-        encoding="utf-8",
-    )
-    monkeypatch.delenv("BEANBEAVER_MAIN_BEANCOUNT", raising=False)
 
     assert runtime_paths.ProjectPaths(root=root).main_beancount == ledger.resolve()
 

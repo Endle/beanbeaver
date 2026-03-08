@@ -23,7 +23,6 @@ def _is_host_project_root(path: Path) -> bool:
         path / "accounts.beancount",
         path / "records",
         path / "receipts",
-        path / "config",
     )
     return any(marker.exists() for marker in markers)
 
@@ -70,14 +69,14 @@ def _default_downloads_path() -> Path:
     return candidates[0].expanduser().resolve()
 
 
-def _project_tui_config_path(root: Path) -> Path:
-    """Return the per-project TUI config file path."""
-    return root / "config" / "tui.json"
+def bootstrap_tui_config_path() -> Path:
+    """Return the bootstrap config path used to discover the active project root."""
+    return _PACKAGE_ROOT / "config" / "tui.json"
 
 
-def _load_project_tui_config(root: Path) -> dict[str, object]:
-    """Load per-project TUI config if present, otherwise return an empty mapping."""
-    config_path = _project_tui_config_path(root)
+def _load_bootstrap_tui_config() -> dict[str, object]:
+    """Load bootstrap TUI config if present, otherwise return an empty mapping."""
+    config_path = bootstrap_tui_config_path()
     if not config_path.exists():
         return {}
 
@@ -91,20 +90,28 @@ def _load_project_tui_config(root: Path) -> dict[str, object]:
     return data
 
 
-def _resolve_configured_main_beancount(root: Path) -> Path | None:
-    """Resolve configured ledger override from env or per-project TUI config."""
-    env_override = os.environ.get("BEANBEAVER_MAIN_BEANCOUNT", "").strip()
-    if env_override:
-        return Path(env_override).expanduser().resolve()
+def _resolve_from_package_root(raw_path: str) -> Path:
+    """Resolve a config path relative to the package checkout when needed."""
+    candidate = Path(raw_path).expanduser()
+    if not candidate.is_absolute():
+        candidate = _PACKAGE_ROOT / candidate
+    return candidate.resolve()
 
-    config_value = _load_project_tui_config(root).get("main_beancount_path")
-    if not isinstance(config_value, str) or not config_value.strip():
-        return None
 
-    configured = Path(config_value).expanduser()
-    if not configured.is_absolute():
-        configured = root / configured
-    return configured.resolve()
+def _configured_project_root_from_bootstrap() -> Path | None:
+    """Resolve an optional project-root override from bootstrap config."""
+    config = _load_bootstrap_tui_config()
+
+    project_root = config.get("project_root")
+    if isinstance(project_root, str) and project_root.strip():
+        return _resolve_from_package_root(project_root.strip())
+
+    # Backward compatibility: derive the project root from the old ledger-path key.
+    legacy_main = config.get("main_beancount_path")
+    if isinstance(legacy_main, str) and legacy_main.strip():
+        return _resolve_from_package_root(legacy_main.strip()).parent
+
+    return None
 
 
 def _get_project_root() -> Path:
@@ -112,6 +119,10 @@ def _get_project_root() -> Path:
     env_root = os.environ.get("BEANBEAVER_ROOT", "").strip()
     if env_root:
         return Path(env_root).expanduser().resolve()
+
+    configured_root = _configured_project_root_from_bootstrap()
+    if configured_root is not None:
+        return configured_root
 
     # Vendored layout: <project>/vendor/beanbeaver/runtime/paths.py
     if _PACKAGE_ROOT.parent.name == "vendor":
@@ -226,9 +237,9 @@ class ProjectPaths:
     @property
     def main_beancount(self) -> Path:
         """Main beancount entry file."""
-        configured = _resolve_configured_main_beancount(self.root)
-        if configured is not None:
-            return configured
+        env_override = os.environ.get("BEANBEAVER_MAIN_BEANCOUNT", "").strip()
+        if env_override:
+            return Path(env_override).expanduser().resolve()
         return self.root / "main.beancount"
 
     @property
@@ -341,6 +352,12 @@ def get_paths() -> ProjectPaths:
     if _paths is None:
         _paths = ProjectPaths()
     return _paths
+
+
+def reset_paths() -> None:
+    """Clear the cached ProjectPaths singleton so config/env changes take effect."""
+    global _paths
+    _paths = None
 
 
 def set_current_year(year: str) -> None:

@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from beanbeaver.runtime.paths import get_paths
+from beanbeaver.runtime.paths import bootstrap_tui_config_path
 
 
 def _config_path() -> Path:
-    return get_paths().config / "tui.json"
+    return bootstrap_tui_config_path()
 
 
 def load_tui_config() -> dict[str, str]:
@@ -41,12 +41,13 @@ def save_tui_config(config: dict[str, str]) -> Path:
     return config_path
 
 
-def set_main_beancount_path(path: str) -> Path:
-    """Persist the ledger path override used by the TUI and backend commands."""
+def set_project_root(path: str) -> Path:
+    """Persist the project-root override used by the TUI and backend commands."""
     cleaned = path.strip()
     config = load_tui_config()
     if cleaned:
-        config["main_beancount_path"] = cleaned
+        config["project_root"] = cleaned
     else:
-        config.pop("main_beancount_path", None)
+        config.pop("project_root", None)
+    config.pop("main_beancount_path", None)
     return save_tui_config(config)

@@ -45,9 +45,8 @@ def _stage_document(*, merchant: str, receipt_date: str, total: str, stage: str,
 def _configure_temp_root(tmp_path: Path, monkeypatch: MonkeyPatch) -> ProjectPaths:
     paths = ProjectPaths(root=tmp_path)
     monkeypatch.setenv("BEANBEAVER_ROOT", str(tmp_path))
-    runtime_paths._paths = None
+    runtime_paths.reset_paths()
     importlib.reload(receipt_storage)
-    receipt_storage._paths = paths
     return paths
 
 
@@ -81,6 +80,43 @@ def test_api_list_scanned_returns_json(tmp_path: Path, monkeypatch: MonkeyPatch,
             }
         ]
     }
+
+
+def test_api_list_scanned_uses_configured_project_root(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    package_root = tmp_path / "package"
+    project_root = tmp_path / "project"
+    (package_root / "config").mkdir(parents=True)
+    paths = ProjectPaths(root=project_root)
+    monkeypatch.setattr(runtime_paths, "_PACKAGE_ROOT", package_root)
+    monkeypatch.delenv("BEANBEAVER_ROOT", raising=False)
+    (package_root / "config" / "tui.json").write_text(
+        json.dumps({"project_root": "../project"}),
+        encoding="utf-8",
+    )
+    runtime_paths.reset_paths()
+    importlib.reload(receipt_storage)
+
+    stage_path = paths.receipts_json_scanned / "2026-03-01_store_12_34_abcd" / "parsed.receipt.json"
+    save_stage_document(
+        stage_path,
+        _stage_document(
+            merchant="Store",
+            receipt_date="2026-03-01",
+            total="12.34",
+            stage="parsed",
+            stage_index=0,
+        ),
+    )
+
+    exit_code = unified_cli.main(["api", "list-scanned"])
+
+    captured = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert captured["receipts"][0]["path"] == str(stage_path)
 
 
 def test_api_show_receipt_returns_document(tmp_path: Path, monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]) -> None:
@@ -182,52 +218,60 @@ def test_api_approve_scanned_with_review_applies_receipt_overrides(
     }
 
 
-def test_api_get_config_returns_resolved_main_beancount(
+def test_api_get_config_returns_resolved_project_root(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
     capsys: CaptureFixture[str],
 ) -> None:
-    paths = _configure_temp_root(tmp_path, monkeypatch)
-    configured = tmp_path / "ledger" / "primary.beancount"
-    configured.parent.mkdir()
-    configured.write_text("", encoding="utf-8")
-    paths.config.mkdir(parents=True, exist_ok=True)
-    (paths.config / "tui.json").write_text(
-        json.dumps({"main_beancount_path": "ledger/primary.beancount"}),
+    package_root = tmp_path / "package"
+    project_root = tmp_path / "project"
+    (package_root / "config").mkdir(parents=True)
+    project_root.mkdir()
+    (project_root / "main.beancount").write_text("", encoding="utf-8")
+    monkeypatch.setattr(runtime_paths, "_PACKAGE_ROOT", package_root)
+    monkeypatch.delenv("BEANBEAVER_ROOT", raising=False)
+    (package_root / "config" / "tui.json").write_text(
+        json.dumps({"project_root": "../project"}),
         encoding="utf-8",
     )
-    runtime_paths._paths = None
+    runtime_paths.reset_paths()
 
     exit_code = unified_cli.main(["api", "get-config"])
 
     captured = json.loads(capsys.readouterr().out)
     assert exit_code == 0
-    assert captured["main_beancount_path"] == "ledger/primary.beancount"
-    assert captured["resolved_main_beancount_path"] == str(configured.resolve())
+    assert captured["project_root"] == "../project"
+    assert captured["resolved_project_root"] == str(project_root.resolve())
+    assert captured["resolved_main_beancount_path"] == str((project_root / "main.beancount").resolve())
+    assert captured["scanned_dir"] == str((project_root / "receipts" / "json" / "scanned").resolve())
+    assert captured["approved_dir"] == str((project_root / "receipts" / "json" / "approved").resolve())
 
 
-def test_api_set_config_persists_main_beancount_path(
+def test_api_set_config_persists_project_root(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
     capsys: CaptureFixture[str],
 ) -> None:
-    paths = _configure_temp_root(tmp_path, monkeypatch)
-    configured = tmp_path / "ledger" / "override.beancount"
-    configured.parent.mkdir()
-    configured.write_text("", encoding="utf-8")
+    package_root = tmp_path / "package"
+    project_root = tmp_path / "project"
+    (package_root / "config").mkdir(parents=True)
+    project_root.mkdir()
+    monkeypatch.setattr(runtime_paths, "_PACKAGE_ROOT", package_root)
+    monkeypatch.delenv("BEANBEAVER_ROOT", raising=False)
     monkeypatch.setattr(
         "sys.stdin",
-        io.StringIO(json.dumps({"main_beancount_path": "ledger/override.beancount"})),
+        io.StringIO(json.dumps({"project_root": "../project"})),
     )
-    runtime_paths._paths = None
+    runtime_paths.reset_paths()
 
     exit_code = unified_cli.main(["api", "set-config"])
 
     captured = json.loads(capsys.readouterr().out)
     assert exit_code == 0
     assert captured["status"] == "saved"
-    assert captured["main_beancount_path"] == "ledger/override.beancount"
-    assert captured["resolved_main_beancount_path"] == str(configured.resolve())
-    assert json.loads((paths.config / "tui.json").read_text(encoding="utf-8")) == {
-        "main_beancount_path": "ledger/override.beancount"
+    assert captured["project_root"] == "../project"
+    assert captured["resolved_project_root"] == str(project_root.resolve())
+    assert captured["resolved_main_beancount_path"] == str((project_root / "main.beancount").resolve())
+    assert json.loads((package_root / "config" / "tui.json").read_text(encoding="utf-8")) == {
+        "project_root": "../project"
     }

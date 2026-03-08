@@ -89,8 +89,11 @@ struct ApproveReceiptResponse {
 #[derive(Clone, Debug, Deserialize)]
 struct ConfigResponse {
     config_path: String,
-    main_beancount_path: String,
+    project_root: String,
+    resolved_project_root: String,
     resolved_main_beancount_path: String,
+    scanned_dir: String,
+    approved_dir: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -134,13 +137,17 @@ struct EditState {
 }
 
 struct ConfigState {
-    main_beancount_path: String,
+    project_root: String,
 }
 
 impl ConfigState {
     fn from_response(config: &ConfigResponse) -> Self {
         Self {
-            main_beancount_path: config.main_beancount_path.clone(),
+            project_root: if config.project_root.is_empty() {
+                config.resolved_project_root.clone()
+            } else {
+                config.project_root.clone()
+            },
         }
     }
 }
@@ -208,8 +215,11 @@ impl App {
             edit_state: None,
             config: ConfigResponse {
                 config_path: String::new(),
-                main_beancount_path: String::new(),
+                project_root: String::new(),
+                resolved_project_root: String::new(),
                 resolved_main_beancount_path: String::new(),
+                scanned_dir: String::new(),
+                approved_dir: String::new(),
             },
             config_state: None,
             should_quit: false,
@@ -366,13 +376,10 @@ impl App {
             self.status = "Missing config state".to_string();
             return Ok(());
         };
-        let config = backend_set_config(&config_state.main_beancount_path)?;
+        let config = backend_set_config(&config_state.project_root)?;
         self.config = config;
         self.config_state = None;
-        self.status = format!(
-            "Configured main.beancount -> {}",
-            self.config.resolved_main_beancount_path
-        );
+        self.status = format!("Configured project root -> {}", self.config.resolved_project_root);
         Ok(())
     }
 }
@@ -472,9 +479,9 @@ fn backend_get_config() -> AppResult<ConfigResponse> {
     Ok(serde_json::from_str(&stdout)?)
 }
 
-fn backend_set_config(main_beancount_path: &str) -> AppResult<ConfigResponse> {
+fn backend_set_config(project_root: &str) -> AppResult<ConfigResponse> {
     let payload = serde_json::json!({
-        "main_beancount_path": main_beancount_path,
+        "project_root": project_root,
     });
     let stdout = run_backend_with_input(
         &["api", "set-config"],
@@ -641,7 +648,7 @@ fn render_config_modal(
     config: &ConfigResponse,
     config_state: &ConfigState,
 ) {
-    let popup = centered_rect(72, 14, frame.area());
+    let popup = centered_rect(72, 18, frame.area());
     frame.render_widget(Clear, popup);
 
     let rows = Layout::default()
@@ -650,7 +657,7 @@ fn render_config_modal(
             Constraint::Length(2),
             Constraint::Length(3),
             Constraint::Length(3),
-            Constraint::Length(3),
+            Constraint::Length(6),
             Constraint::Length(2),
             Constraint::Min(1),
         ])
@@ -664,18 +671,18 @@ fn render_config_modal(
         popup,
     );
 
-    let intro = Paragraph::new("Set the ledger entry file used by receipt matching.")
+    let intro = Paragraph::new("Set the BeanBeaver project root used for receipts and matching.")
         .style(Style::default().fg(Color::Gray))
         .wrap(Wrap { trim: true });
     frame.render_widget(intro, rows[0]);
 
-    let input_value = if config_state.main_beancount_path.is_empty() {
-        "<project root>/main.beancount".to_string()
+    let input_value = if config_state.project_root.is_empty() {
+        "<auto-detect from cwd>".to_string()
     } else {
-        config_state.main_beancount_path.clone()
+        config_state.project_root.clone()
     };
     let input = Paragraph::new(input_value)
-        .block(Block::default().borders(Borders::ALL).title("main.beancount path"))
+        .block(Block::default().borders(Borders::ALL).title("Project Root"))
         .style(
             Style::default()
                 .fg(Color::Yellow)
@@ -684,13 +691,16 @@ fn render_config_modal(
         .wrap(Wrap { trim: false });
     frame.render_widget(input, rows[1]);
 
-    let resolved = Paragraph::new(config.resolved_main_beancount_path.clone())
-        .block(Block::default().borders(Borders::ALL).title("Current Resolved Path"))
+    let resolved = Paragraph::new(config.resolved_project_root.clone())
+        .block(Block::default().borders(Borders::ALL).title("Resolved Project Root"))
         .wrap(Wrap { trim: true });
     frame.render_widget(resolved, rows[2]);
 
-    let saved_in = Paragraph::new(config.config_path.clone())
-        .block(Block::default().borders(Borders::ALL).title("Saved In"))
+    let saved_in = Paragraph::new(format!(
+        "main.beancount: {}\nscanned: {}\napproved: {}\nconfig: {}",
+        config.resolved_main_beancount_path, config.scanned_dir, config.approved_dir, config.config_path
+    ))
+        .block(Block::default().borders(Borders::ALL).title("Derived Paths"))
         .style(Style::default().fg(Color::Gray))
         .wrap(Wrap { trim: true });
     frame.render_widget(saved_in, rows[3]);
@@ -797,10 +807,10 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
                     }
                 }
                 KeyCode::Backspace => {
-                    config_state.main_beancount_path.pop();
+                    config_state.project_root.pop();
                 }
                 KeyCode::Char(ch) => {
-                    config_state.main_beancount_path.push(ch);
+                    config_state.project_root.push(ch);
                 }
                 _ => {}
             }
