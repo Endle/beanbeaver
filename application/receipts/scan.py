@@ -11,7 +11,12 @@ from typing import TYPE_CHECKING, Literal
 
 from beanbeaver.receipt.receipt_structuring import parse_receipt
 from beanbeaver.runtime import load_known_merchant_keywords, load_receipt_structuring_rule_layers
-from beanbeaver.runtime.receipt_pipeline import OCRServiceUnavailable, call_ocr_service, save_ocr_json
+from beanbeaver.runtime.receipt_pipeline import (
+    OCRServiceUnavailable,
+    call_ocr_service,
+    save_ocr_json,
+    save_stage1_ocr_json,
+)
 from beanbeaver.runtime.receipt_storage import move_scanned_to_approved, save_scanned_receipt
 
 if TYPE_CHECKING:
@@ -67,6 +72,7 @@ def run_receipt_scan(request: ReceiptScanRequest) -> ReceiptScanResult:
         )
 
     ocr_json_path = save_ocr_json(raw_ocr_result, request.image_path)
+    save_stage1_ocr_json(ocr_result, request.image_path)
 
     receipt = parse_receipt(
         ocr_result,

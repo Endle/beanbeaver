@@ -67,6 +67,15 @@ def save_ocr_json(ocr_result: dict[str, Any], receipt_path: Path) -> Path:
     return ocr_json_path
 
 
+def save_stage1_ocr_json(ocr_result: dict[str, Any], receipt_path: Path) -> Path:
+    """Save normalized Step 1 OCR output alongside the raw OCR payload."""
+    OCR_JSON_DIR.mkdir(parents=True, exist_ok=True)
+    ocr_json_path = OCR_JSON_DIR / f"{receipt_path.stem}.stage1.json"
+    ocr_json_path.write_text(json.dumps(ocr_result, indent=2))
+    logger.debug("Stage 1 OCR JSON saved to: %s", ocr_json_path)
+    return ocr_json_path
+
+
 def create_debug_overlay(
     image_path: Path,
     raw_ocr_result: dict[str, Any],
