@@ -6,27 +6,27 @@
     {
       "description": "WHITE POMELO",
       "price": "2.68",
-      "category": "Expenses:Food:Grocery:Fruit"
+      "category": "grocery_fruit"
     },
     {
       "description": "RED POMELO",
       "price": "2.32",
-      "category": "Expenses:Food:Grocery:Fruit"
+      "category": "grocery_fruit"
     },
     {
       "description": "BABY BOK CHOY SPROUT",
       "price": "5.44",
-      "category": "Expenses:Food:Grocery:Vegetable"
+      "category": "grocery_vegetable"
     },
     {
       "description": "ORGANIC GINGER",
       "price": "3.14",
-      "category": "Expenses:Food:Grocery:Seasoning"
+      "category": "grocery_seasoning"
     },
     {
       "description": "BAGGED GARLIC",
       "price": "2.68",
-      "category": "Expenses:Food:Grocery:Seasoning"
+      "category": "grocery_seasoning"
     },
     {
       "description": "E MILK",
@@ -35,7 +35,7 @@
     {
       "description": "WING HING SWT SOY BEVERAGE",
       "price": "4.47",
-      "category": "Expenses:Food:Grocery:Drink"
+      "category": "grocery_drink"
     }
   ]
 }

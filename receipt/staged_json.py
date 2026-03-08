@@ -14,7 +14,11 @@ from beanbeaver.domain.receipt import Receipt, ReceiptItem, ReceiptWarning
 
 from .date_utils import placeholder_receipt_date
 from .formatter import format_parsed_receipt
-from .item_categories import ItemCategoryRuleLayers
+from .item_categories import (
+    ItemCategoryRuleLayers,
+    account_for_category_key,
+    classify_item_semantic,
+)
 
 SCHEMA_VERSION = "1"
 
@@ -74,43 +78,20 @@ def _iso_to_date(value: Any) -> date | None:
     return None
 
 
-def _invert_account_mapping(rule_layers: ItemCategoryRuleLayers) -> dict[str, str]:
-    """Return account -> semantic category key mapping."""
-    inverted: dict[str, str] = {}
-    for key, account in rule_layers.account_mapping.items():
-        inverted.setdefault(account, key)
-    return inverted
-
-
-def _tags_from_category(category: str | None) -> list[str]:
-    """Generate coarse tags from a semantic category key."""
-    if not category:
-        return []
-    return [part for part in category.split("_") if part]
-
-
-def _classification_from_account(
-    account: str | None,
+def _semantic_category_from_legacy_target(
+    target: str | None,
     *,
     rule_layers: ItemCategoryRuleLayers,
-) -> dict[str, Any] | None:
-    """Adapt an account-like category into semantic classification fields."""
-    if not account:
+) -> str | None:
+    """Normalize legacy account-like category targets to semantic keys."""
+    if not target:
         return None
-
-    inverted = _invert_account_mapping(rule_layers)
-    category = inverted.get(account)
-    source = "parser_rule_engine"
-    if category is None:
-        category = account.removeprefix("Expenses:").replace(":", "_").lower()
-        source = "legacy_account_adapter"
-
-    return {
-        "category": category,
-        "tags": _tags_from_category(category),
-        "confidence": 1.0,
-        "source": source,
-    }
+    if target in rule_layers.account_mapping:
+        return target
+    for key, account in rule_layers.account_mapping.items():
+        if account == target:
+            return key
+    return None
 
 
 def _account_from_classification(
@@ -124,8 +105,8 @@ def _account_from_classification(
 
     category = classification.get("category")
     if isinstance(category, str):
-        mapped = rule_layers.account_mapping.get(category)
-        if mapped:
+        mapped = account_for_category_key(category, rule_layers.account_mapping)
+        if mapped is not None:
             return mapped
 
     tags_raw = classification.get("tags")
@@ -164,13 +145,18 @@ def build_parsed_receipt_stage(
     top_level_warnings: list[dict[str, Any]] = []
 
     for idx, item in enumerate(receipt.items, start=1):
+        semantic_category = _semantic_category_from_legacy_target(item.category, rule_layers=rule_layers)
         item_docs.append(
             {
                 "id": f"item-{idx:04d}",
                 "description": item.description,
                 "price": _decimal_to_str(item.price),
                 "quantity": item.quantity,
-                "classification": _classification_from_account(item.category, rule_layers=rule_layers),
+                "classification": classify_item_semantic(
+                    item.description,
+                    rule_layers,
+                    default_category=semantic_category,
+                ),
                 "warnings": [],
                 "meta": {
                     "source": "parser",

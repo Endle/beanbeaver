@@ -11,7 +11,7 @@ from pathlib import Path
 
 from beanbeaver.receipt.ocr_extraction import transform_paddleocr_result
 from beanbeaver.receipt.receipt_structuring import build_parsed_receipt_stage, parse_receipt, save_stage_document
-from beanbeaver.runtime import load_item_category_rule_layers, load_known_merchant_keywords
+from beanbeaver.runtime import load_known_merchant_keywords, load_receipt_structuring_rule_layers
 
 fixture_dir = Path("tests/receipts_e2e")
 ocr_path = fixture_dir / "costco_20260218_redact.ocr.json"
@@ -21,7 +21,7 @@ output_path.parent.mkdir(parents=True, exist_ok=True)
 
 raw_ocr_result = json.loads(ocr_path.read_text())
 ocr_result = transform_paddleocr_result(raw_ocr_result)
-rule_layers = load_item_category_rule_layers()
+rule_layers = load_receipt_structuring_rule_layers()
 
 receipt = parse_receipt(
     ocr_result,

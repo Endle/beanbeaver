@@ -1,8 +1,8 @@
 """Item categorization rules for receipt line items.
 
-This module maps receipt item descriptions to expense categories.
+This module classifies receipt item descriptions into semantic categories/tags,
+then separately maps semantic category keys to Beancount accounts when needed.
 Uses fuzzy matching (n-gram similarity) to handle OCR errors.
-When multiple categories match, uses weighted scoring to pick the best one.
 
 To add new rules:
 1. Find the appropriate section below
@@ -23,10 +23,6 @@ from typing import Any
 FUZZY_THRESHOLD_SHORT = 0.75  # For keywords <= 4 chars (3/4 chars must match)
 FUZZY_THRESHOLD_MEDIUM = 0.80  # For keywords 5-6 chars (4/5 bigrams)
 FUZZY_THRESHOLD_LONG = 0.70  # For keywords >= 7 chars
-
-# Score bonus for exact matches (ensures exact beats fuzzy even at later positions)
-EXACT_MATCH_BONUS = 1000
-PRIORITY_SCORE_MULTIPLIER = 10000
 
 # Keywords that should only match exactly (avoid fuzzy false positives)
 # Built-in lists are intentionally kept empty; defaults now live in
@@ -69,11 +65,35 @@ DEFAULT_CATEGORY_ACCOUNTS: dict[str, str] = {
     "pet": "Expenses:Pet",
     "pet_supply": "Expenses:Pet:Supply",
     "restaurant_gift_card": "Expenses:Food:Restaurant:GiftCard",
+    "health_pharmacy": "Expenses:Health:Pharmacy",
+    "shopping_clothing": "Expenses:Shopping:Clothing",
 }
 
 
-RuleEntry = tuple[tuple[str, ...], str, int]
 OCR_CONFUSABLE_TRANS_TABLE = str.maketrans("0D", "OO")
+
+
+@dataclass(frozen=True)
+class RuleEntry:
+    """One semantic classification rule."""
+
+    keywords: tuple[str, ...]
+    category: str | None
+    tags: tuple[str, ...]
+    priority: int
+
+
+@dataclass(frozen=True)
+class RuleMatch:
+    """One successful keyword match against a rule."""
+
+    category: str | None
+    tags: tuple[str, ...]
+    matched_keyword: str
+    priority: int
+    keyword_length: int
+    is_exact: bool
+    rule_index: int
 
 
 @dataclass(frozen=True)
@@ -96,15 +116,79 @@ def _normalize_keywords(raw: Any) -> tuple[str, ...]:
     return tuple()
 
 
+def _normalize_tags(raw: Any) -> tuple[str, ...]:
+    """Normalize tags value from TOML into a deduplicated tuple."""
+    if isinstance(raw, str):
+        values = [raw]
+    elif isinstance(raw, list):
+        values = [str(v) for v in raw]
+    else:
+        return tuple()
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        tag = str(value).strip().lower()
+        if not tag or tag in seen:
+            continue
+        seen.add(tag)
+        normalized.append(tag)
+    return tuple(normalized)
+
+
+def _invert_account_mapping(account_mapping: Mapping[str, str]) -> dict[str, str]:
+    """Return Beancount account -> semantic category key mapping."""
+    inverted: dict[str, str] = {}
+    for key, account in account_mapping.items():
+        inverted.setdefault(account, key)
+    return inverted
+
+
+def _normalize_rule_target(
+    target: str | None,
+    *,
+    account_mapping: Mapping[str, str],
+) -> str | None:
+    """Normalize a rule target to a semantic category key when possible."""
+    if not target:
+        return None
+
+    cleaned = target.strip()
+    if not cleaned:
+        return None
+
+    if cleaned.startswith("Expenses:"):
+        return _invert_account_mapping(account_mapping).get(cleaned, cleaned)
+    return cleaned
+
+
 def build_item_category_rule_layers(
     classifier_configs: Sequence[Mapping[str, Any]] | None = None,
     account_configs: Sequence[Mapping[str, Any]] | None = None,
 ) -> ItemCategoryRuleLayers:
     """Build merged rules/exact-only set/account mapping from in-memory configs."""
+    account_mapping = dict(DEFAULT_CATEGORY_ACCOUNTS)
+    for config in account_configs or ():
+        accounts = config.get("accounts", {})
+        if not isinstance(accounts, Mapping):
+            continue
+        for key, value in accounts.items():
+            key_str = str(key).strip()
+            value_str = str(value).strip()
+            if key_str and value_str:
+                account_mapping[key_str] = value_str
+
     # Built-in rules remain priority 0 and preserve existing behavior.
     rules: list[RuleEntry] = []
     for keywords, target in ITEM_RULES + COSTCO_RULES:
-        rules.append((tuple(keywords), target, 0))
+        rules.append(
+            RuleEntry(
+                keywords=tuple(keywords),
+                category=_normalize_rule_target(target, account_mapping=account_mapping),
+                tags=tuple(),
+                priority=0,
+            )
+        )
 
     exact_only = set(EXACT_ONLY_KEYWORDS)
     classifier_configs = classifier_configs or ()
@@ -123,26 +207,24 @@ def build_item_category_rule_layers(
             if not keywords:
                 continue
 
-            target = str(rule.get("key") or rule.get("category") or "").strip()
-            if not target:
+            target_raw = str(rule.get("key") or rule.get("category") or "").strip()
+            category = _normalize_rule_target(target_raw, account_mapping=account_mapping)
+            tags = _normalize_tags(rule.get("tags"))
+            if category is None and not tags:
                 continue
 
             priority = int(rule.get("priority", 0)) + layer_priority
-            rules.append((keywords, target, priority))
+            rules.append(
+                RuleEntry(
+                    keywords=keywords,
+                    category=category,
+                    tags=tags,
+                    priority=priority,
+                )
+            )
 
             if bool(rule.get("exact_only", False)):
                 exact_only.update(keywords)
-
-    account_mapping = dict(DEFAULT_CATEGORY_ACCOUNTS)
-    for config in account_configs or ():
-        accounts = config.get("accounts", {})
-        if not isinstance(accounts, Mapping):
-            continue
-        for key, value in accounts.items():
-            key_str = str(key).strip()
-            value_str = str(value).strip()
-            if key_str and value_str:
-                account_mapping[key_str] = value_str
 
     return ItemCategoryRuleLayers(
         rules=tuple(rules),
@@ -309,30 +391,40 @@ def _find_all_matches(
     description: str,
     rules: Sequence[RuleEntry],
     exact_only_keywords: set[str] | frozenset[str],
-) -> list[tuple[int, str, str, int]]:
-    """Find all matching categories for a description.
+) -> list[RuleMatch]:
+    """Find all matching rules for a description."""
+    matches: list[RuleMatch] = []
 
-    Returns list of (score, category, matched_keyword, position) tuples.
-    Score = keyword_length * 10 + position + exact_match_bonus
-    Prefers: exact matches > fuzzy matches, longer keywords > shorter, later position > earlier
-    """
-    matches = []
-
-    for keywords, category, priority in rules:
-        for kw in keywords:
+    for rule_index, rule in enumerate(rules):
+        for kw in rule.keywords:
             threshold = 1.0 if kw in exact_only_keywords else None
-            matched, position, is_exact = _fuzzy_contains(kw, description, threshold=threshold)
+            matched, _, is_exact = _fuzzy_contains(kw, description, threshold=threshold)
             if matched:
-                # Score: longer keyword = more specific, later position = likely the main item
-                # Exact matches get a large bonus to ensure they beat fuzzy matches
                 kw_len = len(kw.replace(" ", ""))
-                score = kw_len * 10 + position + priority * PRIORITY_SCORE_MULTIPLIER
-                if is_exact:
-                    score += EXACT_MATCH_BONUS
-                matches.append((score, category, kw, position))
-                break  # Only need one keyword match per category
+                matches.append(
+                    RuleMatch(
+                        category=rule.category,
+                        tags=rule.tags,
+                        matched_keyword=kw,
+                        priority=rule.priority,
+                        keyword_length=kw_len,
+                        is_exact=is_exact,
+                        rule_index=rule_index,
+                    )
+                )
+                break  # Only need one keyword match per rule
 
     return matches
+
+
+def _match_sort_key(match: RuleMatch) -> tuple[int, int, int, int]:
+    """Return deterministic category ranking key."""
+    return (
+        match.priority,
+        1 if match.is_exact else 0,
+        match.keyword_length,
+        -match.rule_index,
+    )
 
 
 def classify_item_key(
@@ -340,14 +432,50 @@ def classify_item_key(
     rule_layers: ItemCategoryRuleLayers,
     default: str | None = None,
 ) -> str | None:
-    """Classify an item to an internal category key or direct account target."""
+    """Classify an item to a semantic category key."""
     matches = _find_all_matches(description, rule_layers.rules, rule_layers.exact_only_keywords)
+    category_matches = [match for match in matches if match.category]
 
-    if not matches:
+    if not category_matches:
         return default
 
-    matches.sort(key=lambda x: x[0], reverse=True)
-    return matches[0][1]
+    return max(category_matches, key=_match_sort_key).category
+
+
+def classify_item_tags(
+    description: str,
+    rule_layers: ItemCategoryRuleLayers,
+) -> list[str]:
+    """Return additive semantic tags for one item description."""
+    matches = _find_all_matches(description, rule_layers.rules, rule_layers.exact_only_keywords)
+    tags: list[str] = []
+    seen: set[str] = set()
+    for match in matches:
+        for tag in match.tags:
+            if tag in seen:
+                continue
+            seen.add(tag)
+            tags.append(tag)
+    return tags
+
+
+def classify_item_semantic(
+    description: str,
+    rule_layers: ItemCategoryRuleLayers,
+    *,
+    default_category: str | None = None,
+) -> dict[str, Any] | None:
+    """Return semantic classification payload for one item description."""
+    category = classify_item_key(description, rule_layers, default=default_category)
+    tags = classify_item_tags(description, rule_layers)
+    if category is None and not tags:
+        return None
+    return {
+        "category": category,
+        "tags": tags,
+        "confidence": 1.0,
+        "source": "rule_engine",
+    }
 
 
 def _resolve_account_target(
@@ -363,6 +491,16 @@ def _resolve_account_target(
     return account_mapping.get(target, default)
 
 
+def account_for_category_key(
+    category: str | None,
+    account_mapping: Mapping[str, str] | None = None,
+    *,
+    default: str | None = None,
+) -> str | None:
+    """Resolve one semantic category key to a Beancount account."""
+    return _resolve_account_target(category, account_mapping or DEFAULT_CATEGORY_ACCOUNTS, default=default)
+
+
 def categorize_item(
     description: str,
     default: str | None = None,
@@ -370,7 +508,7 @@ def categorize_item(
     rule_layers: ItemCategoryRuleLayers,
 ) -> str | None:
     """
-    Return expense category for an item description.
+    Return Beancount expense account for an item description.
 
     Uses fuzzy matching to handle OCR errors and weighted scoring when
     multiple categories match (prefers longer keywords appearing later
@@ -382,15 +520,11 @@ def categorize_item(
         rule_layers: Preloaded in-memory rules (required).
 
     Returns:
-        Category string (e.g., "Expenses:Food:Grocery:Dairy") or default if no match
+        Account string (e.g., "Expenses:Food:Grocery:Dairy") or default if no match
 
     """
-    matches = _find_all_matches(description, rule_layers.rules, rule_layers.exact_only_keywords)
-    if not matches:
-        return default
-
-    matches.sort(key=lambda x: x[0], reverse=True)
-    return _resolve_account_target(matches[0][1], rule_layers.account_mapping, default=default)
+    category = classify_item_key(description, rule_layers)
+    return _resolve_account_target(category, rule_layers.account_mapping, default=default)
 
 
 def categorize_item_debug(
@@ -405,8 +539,13 @@ def categorize_item_debug(
         List of (category, matched_keyword, score) tuples, sorted by score descending
     """
     matches = _find_all_matches(description, rule_layers.rules, rule_layers.exact_only_keywords)
-    matches.sort(key=lambda x: x[0], reverse=True)
+    matches.sort(key=_match_sort_key, reverse=True)
     return [
-        (_resolve_account_target(cat, rule_layers.account_mapping, default=cat) or cat, kw, score)
-        for score, cat, kw, _ in matches
+        (
+            _resolve_account_target(match.category, rule_layers.account_mapping, default=match.category)
+            or (match.category or ""),
+            match.matched_keyword,
+            float(match.priority * 10000 + (1000 if match.is_exact else 0) + match.keyword_length),
+        )
+        for match in matches
     ]

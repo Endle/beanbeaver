@@ -4,238 +4,286 @@ exact_only_keywords = []
 [[rules]]
 id = "legacy_0000"
 keywords = ["EGG", "EGGS", "STRAWBERRY MILK", "CHOCOLATE MILK", "CHOC MILK", "CHOC MLK", "MILK", "CHEESE", "YOGURT", "YOGOURT", "BUTTER", "CREAM", "SOUR CREAM", "COTTAGE", "MARGARINE", "CHEDDAR", "MOZZARELLA", "PARMESAN", "SWEETENED SOYA"]
-category = "Expenses:Food:Grocery:Dairy"
+category = "grocery_dairy"
+tags = ["grocery", "dairy"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0001"
 keywords = ["CHICKEN", "BEEF", "PORK", "BACON", "SAUSAGE", "HAM", "TURKEY", "LAMB", "STEAK", "GROUND MEAT", "MEATBALL", "SALAMI", "PEPPERONI", "PROSCIUTTO", "ROTISSERIE", "DRUMSTICK", "MEAT", "BEEF BELLY", "BEEF BELLY ROLL"]
-category = "Expenses:Food:Grocery:Meat"
+category = "grocery_meat"
+tags = ["grocery", "meat"]
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "semantic_tag_0100"
+keywords = ["CHICKEN", "ROTISSERIE CHICKEN"]
+tags = ["chicken"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0002"
 keywords = ["SALMON", "TUNA", "COD", "TILAPIA", "HALIBUT", "TROUT", "MACKEREL", "SARDINE", "ANCHOVY", "FILLET", "FISH"]
-category = "Expenses:Food:Grocery:Seafood:Fish"
+category = "grocery_seafood_fish"
+tags = ["grocery", "seafood", "fish"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0003"
 keywords = ["SHRIMP", "PRAWN", "LOBSTER", "CRAB", "SCALLOP", "MUSSEL", "CLAM", "OYSTER", "SQUID", "OCTOPUS", "CALAMARI"]
-category = "Expenses:Food:Grocery:Seafood:Shrimp"
+category = "grocery_seafood_shrimp"
+tags = ["grocery", "seafood", "shrimp"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0005"
 keywords = ["SEAFOOD"]
-category = "Expenses:Food:Grocery:Seafood"
+category = "grocery_seafood"
+tags = ["grocery", "seafood"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0006"
 keywords = ["APPLE", "BANANA", "ORANGE", "BERRY", "BERRIES", "STRAWBERRY", "BLUEBERRY", "RASPBERRY", "BLACKBERRY", "GRAPE", "GRAPES", "MANGO", "PINEAPPLE", "WATERMELON", "MELON", "CANTALOUPE", "PEACH", "PEAR", "PLUM", "CHERRY", "CHERRIES", "KIWI", "LEMON", "LIME", "GRAPEFRUIT", "AVOCADO", "COCONUT", "PAPAYA", "POMEGRANATE", "FIG", "DATE", "APRICOT", "NECTARINE", "TANGERINE", "MANDARIN", "CLEMENTINE", "POMELO", "DRAGONFRUIT", "LYCHEE", "DURIAN", "JACKFRUIT", "PERSIMMON"]
-category = "Expenses:Food:Grocery:Fruit"
+category = "grocery_fruit"
+tags = ["grocery", "fruit"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0007"
 keywords = ["FRESH BABY SHANGHAI"]
-category = "Expenses:Food:Grocery:Vegetable"
+category = "grocery_vegetable"
+tags = ["grocery", "vegetable"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0008"
 keywords = ["LETTUCE", "SPINACH", "KALE", "CABBAGE", "BROCCOLI", "CAULIFLOWER", "CARROT", "CELERY", "CUCUMBER", "TOMATO", "TOMATOES", "PEPPER", "PEPPERS", "ONION", "POTATO", "POTATOES", "SWEET POTATO", "MUSHROOM", "ZUCCHINI", "SQUASH", "EGGPLANT", "ASPARAGUS", "CORN", "GREEN BEAN", "PEA", "PEAS", "EDAMAME", "BOK CHOY", "SHEPHERDS PURSE", "NAPA", "RADISH", "TURNIP", "BEET", "ARTICHOKE", "LEEK", "SCALLION", "SHALLOT", "CHIVE", "CILANTRO", "PARSLEY", "BASIL", "DILL", "TOFU", "BEAN SPROUT", "SPROUTS", "SALAD", "COLESLAW", "GREENS"]
-category = "Expenses:Food:Grocery:Vegetable"
+category = "grocery_vegetable"
+tags = ["grocery", "vegetable"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0009"
 keywords = ["CANNED CORN", "CANNED BEAN", "CANNED TOMATO", "CANNED PEA", "DICED TOMATO", "TOMATO SAUCE", "TOMATO PASTE", "GREEN GIANT", "NIBLETS"]
-category = "Expenses:Food:Grocery:Vegetable:Canned"
+category = "grocery_vegetable_canned"
+tags = ["grocery", "vegetable", "canned"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0010"
 keywords = ["DUMPLING", "GYOZA", "POTSTICKER", "WONTON", "BAO", "XIAOLONGBAO"]
-category = "Expenses:Food:Grocery:Frozen:Dumpling"
+category = "grocery_frozen_dumpling"
+tags = ["grocery", "frozen", "dumpling"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0011"
 keywords = ["ICE CREAM", "ICECREAM", "GELATO", "FROZEN YOGURT", "SORBET", "POPSICLE"]
-category = "Expenses:Food:Grocery:Frozen:IceCream"
+category = "grocery_frozen_icecream"
+tags = ["grocery", "frozen", "icecream"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0012"
 keywords = ["FROZEN PIZZA", "FROZEN MEAL", "TV DINNER", "FROZEN ENTREE", "FROZEN BREAKFAST", "FROZEN BURRITO"]
-category = "Expenses:Food:Grocery:Frozen"
+category = "grocery_frozen"
+tags = ["grocery", "frozen"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0013"
 keywords = ["ROTISSERIE CHICKEN", "PREPARED MEAL", "DELI MEAL", "READY TO EAT", "HEAT AND SERVE", "MEAL KIT"]
-category = "Expenses:Food:Grocery:PreparedMeal"
+category = "grocery_prepared_meal"
+tags = ["grocery", "prepared", "meal"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0015"
 keywords = ["BREAD", "BAGEL", "CROISSANT", "MUFFIN", "DONUT", "DOUGHNUT", "PASTRY", "CAKE", "PIE", "COOKIE", "COOKIES", "BAGUETTE", "BUN", "BUNS", "TOAST", "ENGLISH MUFFIN", "TORTILLA", "PITA", "NAAN", "FLATBREAD", "CRACKER", "CRACKERS", "WAFFLE", "PANCAKE"]
-category = "Expenses:Food:Grocery:Bakery"
+category = "grocery_bakery"
+tags = ["grocery", "bakery"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0016"
 keywords = ["CHEN KE MING"]
-category = "Expenses:Food:Grocery:Staple"
+category = "grocery_staple"
+tags = ["grocery", "staple"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0017"
 keywords = ["RICE", "PASTA", "NOODLE", "NOODLES", "SPAGHETTI", "MACARONI", "PENNE", "FLOUR", "SUGAR", "SALT", "OIL", "OLIVE OIL", "VEGETABLE OIL", "CANOLA OIL", "VINEGAR", "OATMEAL", "OATS", "CEREAL", "QUINOA", "COUSCOUS", "BARLEY", "LENTIL", "LENTILS", "CHICKPEA", "BEAN", "BEANS", "BLACK BEAN", "KIDNEY BEAN", "PINTO BEAN", "NOODLE", "NOODLES", "INSTANT NOODLE", "INSTANT NOODLES"]
-category = "Expenses:Food:Grocery:Staple"
+category = "grocery_staple"
+tags = ["grocery", "staple"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0018"
 keywords = ["WANG SHOU YI"]
-category = "Expenses:Food:Grocery:Seasoning"
+category = "grocery_seasoning"
+tags = ["grocery", "seasoning"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0019"
 keywords = ["CORN OIL", "GARLIC", "GINGER", "GREEN ONION", "GREEN ONIONS", "CHILI PEPPER", "RED CHILI PEPPER", "SPICE", "SEASONING", "PAPRIKA", "CUMIN", "CORIANDER", "TURMERIC", "CINNAMON", "NUTMEG", "OREGANO", "THYME", "ROSEMARY", "BAY LEAF", "CURRY", "CHILI POWDER", "CAYENNE", "SOY SAUCE", "FISH SAUCE", "OYSTER SAUCE", "HOISIN", "WASABI", "SRIRACHA", "HOT SAUCE", "KETCHUP", "MUSTARD", "MAYONNAISE", "MAYO", "RELISH", "BBQ SAUCE", "TERIYAKI", "WORCESTERSHIRE", "PERICARPIUM ZANTHOXYLI", "PERICARPIURN ZANTHOXYLI", "SALSA", "HUMMUS", "GUACAMOLE", "PESTO", "CHINA TIME HONORED BRAND", "YUQUAN FRESH PRESERVED"]
-category = "Expenses:Food:Grocery:Seasoning"
+category = "grocery_seasoning"
+tags = ["grocery", "seasoning"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0021"
 keywords = ["POTATO CHIPS", "CHIP", "CHIPS", "POPCORN", "PRETZEL", "NUTS", "ALMONDS", "CASHEWS", "PEANUTS", "WALNUTS", "PISTACHIOS", "TRAIL MIX", "GRANOLA BAR", "PROTEIN BAR", "ENERGY BAR", "CANDY", "CHOCOLATE", "GUMMY", "GUMMIES", "SKITTLES", "M&M", "SNICKERS", "TWIX", "KITKAT", "REESE", "OREO", "GOLDFISH", "CHEETOS", "DORITOS", "PRINGLES", "LAYS", "RUFFLES", "TOSTITOS", "CHEEZ-IT", "RITZ", "FISH SHAPE CRACKER"]
-category = "Expenses:Food:Grocery:Snacks"
+category = "grocery_snacks"
+tags = ["grocery", "snacks"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0022"
 keywords = ["MINT", "MINTS", "GUM", "CHEWING GUM", "BREATH", "TIC TAC", "ALTOIDS", "MENTOS"]
-category = "Expenses:Food:Grocery:Snacks:Mint"
+category = "grocery_snacks_mint"
+tags = ["grocery", "snacks", "mint"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0024"
 keywords = ["COCA COLA", "COCA-COLA", "COKE", "PEPSI", "SPRITE", "7UP", "DR PEPPER", "MOUNTAIN DEW", "GINGER ALE", "ROOT BEER", "SODA", "POP"]
-category = "Expenses:Food:Grocery:Drink:CocaCola"
+category = "grocery_drink_cocacola"
+tags = ["grocery", "drink", "cocacola"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0025"
 keywords = ["ORANGE JUICE", "APPLE JUICE", "GRAPE JUICE", "FRUIT PUNCH", "CRANBERRY", "LEMONADE", "SMOOTHIE", "JUICE", "V8"]
-category = "Expenses:Food:Grocery:Drink:Juice"
+category = "grocery_drink_juice"
+tags = ["grocery", "drink", "juice"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0026"
 keywords = ["COFFEE BEAN", "GROUND COFFEE", "INSTANT COFFEE", "COFFEE PODS", "K-CUP", "NESPRESSO", "TEA", "TEA BAG", "GREEN TEA", "BLACK TEA", "HERBAL TEA", "CHAMOMILE", "EARL GREY"]
-category = "Expenses:Food:Grocery:Drink:Coffee"
+category = "grocery_drink_coffee"
+tags = ["grocery", "drink", "coffee"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0027"
 keywords = ["WATER", "SPARKLING WATER", "MINERAL WATER", "SPRING WATER", "COCONUT WATER", "SPORTS DRINK", "GATORADE", "POWERADE", "ENERGY DRINK", "RED BULL", "MONSTER", "CRUSH", "FANTA STRAUBERRY", "FANTA STRAWBERRY", "FANTA", "PEACE TEA", "DRINK", "BEVERAGE"]
-category = "Expenses:Food:Grocery:Drink"
+category = "grocery_drink"
+tags = ["grocery", "drink"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0028"
 keywords = ["COORS", "BEER", "WINE", "VODKA", "WHISKEY", "WHISKY", "RUM", "GIN", "TEQUILA", "COGNAC", "CHAMPAGNE", "PROSECCO", "CIDER", "SAKE", "SOJU", "LIQUOR", "LIQUEUR", "LAGER", "STOUT", "PORTER"]
-category = "Expenses:Food:AlcoholicBeverage"
+category = "alcoholic_beverage"
+tags = ["alcoholic", "beverage"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0029"
 keywords = ["PAPER TOWEL", "TOILET PAPER", "TISSUE", "KLEENEX", "NAPKIN", "NAPKINS", "ALUMINUM FOIL", "PLASTIC WRAP", "CLING WRAP", "PARCHMENT", "WAX PAPER", "TRASH BAG", "GARBAGE BAG", "ZIPLOC", "STORAGE BAG", "SANDWICH BAG", "SPONGE", "DISH SOAP", "DISHWASHER", "LAUNDRY DETERGENT", "FABRIC SOFTENER", "BLEACH", "CLEANER", "CLEANING", "DISINFECTANT", "LYSOL", "CLOROX", "WINDEX", "MR CLEAN", "FEBREZE", "AIR FRESHENER", "CANDLE", "LIGHT BULB", "BATTERY", "BATTERIES"]
-category = "Expenses:Home:HouseholdSupply"
+category = "home_household_supply"
+tags = ["home", "household", "supply"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0030"
 keywords = ["SHAMPOO", "CONDITIONER", "BODY WASH", "SOAP", "HAND SOAP", "LOTION", "MOISTURIZER", "SUNSCREEN", "DEODORANT", "ANTIPERSPIRANT", "RAZOR", "SHAVING", "COTTON", "COTTON BALL", "Q-TIP", "SWAB", "BAND-AID", "BANDAGE", "FIRST AID", "FEMININE", "TAMPON", "PAD", "PANTY LINER"]
-category = "Expenses:PersonalCare"
+category = "personal_care"
+tags = ["personal", "care"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0031"
 keywords = ["TOOTHPASTE", "TOOTHBRUSH", "MOUTHWASH", "DENTAL FLOSS", "FLOSS", "SONICARE"]
-category = "Expenses:PersonalCare:Tooth"
+category = "personal_care_tooth"
+tags = ["personal", "care", "tooth"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0032"
 keywords = ["DOG FOOD", "CAT FOOD", "PET FOOD", "KIBBLE", "DOG TREAT", "CAT TREAT", "PET TREAT", "KITTY LITTER", "CAT LITTER", "PET TOY", "DOG TOY", "CAT TOY", "LEASH", "COLLAR", "PET BED", "DOG BED", "CAT BED"]
-category = "Expenses:Pet"
+category = "pet"
+tags = ["pet"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0033"
 keywords = ["XL EGGS", "KS ORG 2%", "CHOC.MILK", "CHOC MILK", "FINE-FILT"]
-category = "Expenses:Food:Grocery:Dairy"
+category = "grocery_dairy"
+tags = ["grocery", "dairy"]
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "semantic_tag_0101"
+keywords = ["MILK", "CHOCOLATE MILK", "CHOC MILK", "CHOC MLK", "CHOC.MILK", "FINE-FILT", "KS ORG 2%"]
+tags = ["milk"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0036"
 keywords = ["COKE ZERO", "ZERO"]
-category = "Expenses:Food:Grocery:Drink:CocaCola"
+category = "grocery_drink_cocacola"
+tags = ["grocery", "drink", "cocacola"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0038"
 keywords = ["MANDARINS"]
-category = "Expenses:Food:Grocery:Fruit"
+category = "grocery_fruit"
+tags = ["grocery", "fruit"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0039"
 keywords = ["SKITTLE GUMM", "SNACK BITES"]
-category = "Expenses:Food:Grocery:Snacks"
+category = "grocery_snacks"
+tags = ["grocery", "snacks"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0040"
 keywords = ["KS HOME BAG", "HOME BAG"]
-category = "Expenses:Home:HouseholdSupply"
+category = "home_household_supply"
+tags = ["home", "household", "supply"]
 priority = 0
 exact_only = false
 
@@ -243,230 +291,277 @@ exact_only = false
 [[rules]]
 id = "legacy_0041"
 keywords = ["KS IBU", "KIRKLAND IBU", "IBUPROFEN", "IBU 400M"]
-category = "Expenses:Health:Pharmacy"
+category = "health_pharmacy"
+tags = ["health", "pharmacy"]
 priority = 0
 exact_only = false
 
 [[rules]]
 id = "legacy_0042"
 keywords = ["FISH CRACKER SEAWEE"]
-category = "Expenses:Food:Grocery:Snacks"
+category = "grocery_snacks"
+tags = ["grocery", "snacks"]
 priority = 80
 exact_only = false
 
 [[rules]]
 id = "legacy_0043"
 keywords = ["LEMON TEA"]
-category = "Expenses:Food:Grocery:Drink"
+category = "grocery_drink"
+tags = ["grocery", "drink"]
 priority = 70
 exact_only = false
 
 [[rules]]
 id = "legacy_0044"
 keywords = ["MALATANG"]
-category = "Expenses:Food:Grocery:Staple"
+category = "grocery_staple"
+tags = ["grocery", "staple"]
 priority = 70
 exact_only = false
 
 [[rules]]
 id = "legacy_0045"
 keywords = ["LARD", "PORK LARD"]
-category = "Expenses:Food:Grocery:Seasoning"
+category = "grocery_seasoning"
+tags = ["grocery", "seasoning"]
 priority = 60
 exact_only = true
 
 [[rules]]
 id = "legacy_0046"
 keywords = ["PEELED"]
-category = "Expenses:Food:Grocery:Seafood:Shrimp"
+category = "grocery_seafood_shrimp"
+tags = ["grocery", "seafood", "shrimp"]
 priority = -150
 exact_only = true
 
 [[rules]]
 id = "legacy_0047"
 keywords = ["BAKERY"]
-category = "Expenses:Food:Grocery:Bakery"
+category = "grocery_bakery"
+tags = ["grocery", "bakery"]
 priority = 20
 exact_only = true
 
 [[rules]]
 id = "legacy_0048"
 keywords = ["HOT FOOD"]
-category = "Expenses:Food:Grocery:PreparedMeal"
+category = "grocery_prepared_meal"
+tags = ["grocery", "prepared", "meal"]
 priority = 40
 exact_only = false
 
 [[rules]]
 id = "legacy_0049"
 keywords = ["FRUIT (FT)"]
-category = "Expenses:Food:Grocery:Fruit"
+category = "grocery_fruit"
+tags = ["grocery", "fruit"]
 priority = 20
 exact_only = true
 
 [[rules]]
 id = "legacy_0050"
 keywords = ["WING HING SWEET SOY BEVER"]
-category = "Expenses:Food:Grocery:Drink"
+category = "grocery_drink"
+tags = ["grocery", "drink"]
 priority = -5
 exact_only = false
 
 [[rules]]
 id = "legacy_0051"
 keywords = ["1944033 CHAMP SHORT", "CHAMP SHORT"]
-category = "Expenses:Shopping:Clothing"
+category = "shopping_clothing"
+tags = ["shopping", "clothing"]
 priority = -80
 exact_only = false
 
 [[rules]]
 id = "legacy_0052"
 keywords = ["295619 KS BAGS 60", "KS BAGS 60"]
-category = "Expenses:Home:HouseholdSupply"
+category = "home_household_supply"
+tags = ["home", "household", "supply"]
 priority = -80
 exact_only = false
 
 [[rules]]
 id = "legacy_0053"
 keywords = ["108934 RAINFOREST", "RAINFOREST"]
-category = "Expenses:Food:Grocery:Drink:Coffee"
+category = "grocery_drink_coffee"
+tags = ["grocery", "drink", "coffee"]
 priority = -80
 exact_only = false
 
 [[rules]]
 id = "legacy_0054"
 keywords = ["1218587 SWIFFER DUST", "SWIFFER DUST"]
-category = "Expenses:Home:HouseholdSupply"
+category = "home_household_supply"
+tags = ["home", "household", "supply"]
 priority = -80
 exact_only = false
 
 [[rules]]
 id = "legacy_0055"
 keywords = ["3458556 TIDE CQLDWTR", "TIDE CQLDWTR", "TIDE"]
-category = "Expenses:Home:HouseholdSupply"
+category = "home_household_supply"
+tags = ["home", "household", "supply"]
 priority = -80
 exact_only = false
 
 [[rules]]
 id = "legacy_0056"
 keywords = ["2946010 SKECHERSGLID", "SKECHERSGLID", "SKECHERS"]
-category = "Expenses:Shopping:Clothing"
+category = "shopping_clothing"
+tags = ["shopping", "clothing"]
 priority = -80
 exact_only = false
 
 [[rules]]
 id = "legacy_0057"
 keywords = ["1727590 CASCADE PLUS", "CASCADE PLUS", "CASCADE"]
-category = "Expenses:Home:HouseholdSupply"
+category = "home_household_supply"
+tags = ["home", "household", "supply"]
 priority = -80
 exact_only = false
 
 [[rules]]
 id = "legacy_0058"
 keywords = ["BAKING SODA"]
-category = "Expenses:Home:HouseholdSupply"
+category = "home_household_supply"
+tags = ["home", "household", "supply"]
 priority = 80
 exact_only = false
 
 [[rules]]
 id = "legacy_0059"
 keywords = ["1457015 GLIDE ADV", "GLIDE ADV"]
-category = "Expenses:PersonalCare:Tooth"
+category = "personal_care_tooth"
+tags = ["personal", "care", "tooth"]
 priority = -80
 exact_only = false
 
 [[rules]]
 id = "legacy_0060"
 keywords = ["1968518 WHITE RABBIT", "WHITE RABBIT"]
-category = "Expenses:Food:Grocery:Snacks"
+category = "grocery_snacks"
+tags = ["grocery", "snacks"]
 priority = -80
 exact_only = false
 
 [[rules]]
 id = "legacy_0061"
 keywords = ["443404 MARC ANTHONY", "MARC ANTHONY"]
-category = "Expenses:PersonalCare"
+category = "personal_care"
+tags = ["personal", "care"]
 priority = -80
 exact_only = false
 
 [[rules]]
 id = "legacy_0062"
 keywords = ["1796144 TOLIET 2PK", "TOLIET 2PK"]
-category = "Expenses:Home:HouseholdSupply"
+category = "home_household_supply"
+tags = ["home", "household", "supply"]
 priority = -80
 exact_only = false
 
 [[rules]]
 id = "legacy_0063"
 keywords = ["3966510 FO TANK S", "FO TANK S", "TANK TOP"]
-category = "Expenses:Shopping:Clothing"
+category = "shopping_clothing"
+tags = ["shopping", "clothing"]
 priority = -80
 exact_only = false
 
 [[rules]]
 id = "legacy_0064"
 keywords = ["599010 LAVAZZA 1KG", "LAVAZZA 1KG", "LAVAZZA"]
-category = "Expenses:Food:Grocery:Drink:Coffee"
+category = "grocery_drink_coffee"
+tags = ["grocery", "drink", "coffee"]
 priority = -80
 exact_only = false
 
 [[rules]]
 id = "legacy_0065"
 keywords = ["1355285 IOG0 VAN 2KG", "1355285 TOGO VAN 2KG", "IOG0 VAN 2KG", "TOGO VAN 2KG"]
-category = "Expenses:Food:Grocery:Dairy"
+category = "grocery_dairy"
+tags = ["grocery", "dairy"]
 priority = -80
 exact_only = false
 
 [[rules]]
 id = "legacy_0066"
 keywords = ["PINEAPPLE BUN", "PINAPPLE BUN", "BUN", "BUNS"]
-category = "Expenses:Food:Grocery:Bakery"
+category = "grocery_bakery"
+tags = ["grocery", "bakery"]
 priority = 80
 exact_only = true
 
 [[rules]]
 id = "legacy_0067"
 keywords = ["SANDWICH BISCUITS", "BISCUITS(MATCHA)", "BISCUITS MATCHA"]
-category = "Expenses:Food:Grocery:Snacks"
+category = "grocery_snacks"
+tags = ["grocery", "snacks"]
 priority = 80
 exact_only = false
 
 [[rules]]
 id = "legacy_0068"
 keywords = ["D.M.D WHITE PEPPER POWDER", "WHITE PEPPER POWDER"]
-category = "Expenses:Food:Grocery:Seasoning"
+category = "grocery_seasoning"
+tags = ["grocery", "seasoning"]
 priority = 80
 exact_only = false
 
 [[rules]]
 id = "legacy_0069"
 keywords = ["YUAN QI SEN LIN ICED TEA"]
-category = "Expenses:Food:Grocery:Drink"
+category = "grocery_drink"
+tags = ["grocery", "drink"]
 priority = 80
 exact_only = false
 
 [[rules]]
 id = "legacy_0070"
 keywords = ["TROPICANA DAILY C TEA", "DAILY C TEA DR"]
-category = "Expenses:Food:Grocery:Drink"
+category = "grocery_drink"
+tags = ["grocery", "drink"]
 priority = 80
 exact_only = false
 
 [[rules]]
 id = "legacy_0071"
 keywords = ["ORION DOUBLE CHOCO PIE", "OR:ION DOUBLE CHOCO PIE", "DOUBLE CHOCO PIE"]
-category = "Expenses:Food:Grocery:Snacks"
+category = "grocery_snacks"
+tags = ["grocery", "snacks"]
 priority = 80
 exact_only = false
 
 [[rules]]
 id = "legacy_0072"
 keywords = ["YYH CHILLIES", "YYH CHILIES"]
-category = "Expenses:Food:Grocery:Seasoning"
+category = "grocery_seasoning"
+tags = ["grocery", "seasoning"]
 priority = 40
 exact_only = false
 
 [[rules]]
 id = "legacy_0073"
 keywords = ["LA PIAN"]
-category = "Expenses:Food:Grocery:Snacks"
+category = "grocery_snacks"
+tags = ["grocery", "snacks"]
 priority = 40
+exact_only = false
+
+[[rules]]
+id = "semantic_tag_0102"
+keywords = ["LCBO CARD"]
+tags = ["alcohol", "gift_card"]
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "semantic_tag_0103"
+keywords = ["MONSTER"]
+tags = ["energy_drink"]
+priority = 0
 exact_only = false
