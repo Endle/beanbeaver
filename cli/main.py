@@ -260,7 +260,9 @@ Notes:
 
     if args.command == "match":
         from beanbeaver.application.receipts.match import cmd_match
+        from beanbeaver.cli.receipt import _resolve_editor
 
+        args.resolve_editor_cmd = _resolve_editor
         return _run_legacy_command(cmd_match, args)
 
     return 1
