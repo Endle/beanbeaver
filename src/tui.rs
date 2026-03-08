@@ -270,7 +270,9 @@ impl ServePageState {
         let log_lines = Arc::new(Mutex::new(VecDeque::new()));
         replace_log_lines(
             &log_lines,
-            vec!["Use `x` to start or stop a TUI-managed `bb serve` instance.".to_string()],
+            vec![
+                "Use `s` to start and `x` to stop the TUI-managed `bb serve` instance.".to_string(),
+            ],
         );
         Self {
             process: None,
@@ -436,7 +438,7 @@ impl App {
                 "1 receipts | 2 serve | 3 OCR | Tab switch queues | h/l pane focus | s toggle details/status | j/k move or scroll | e edit | m TUI match | M CLI match | arrows pan | r reload | a approve | c config | q quit"
             }
             Page::Serve => {
-                "1 receipts | 2 serve | 3 OCR | x start/stop `bb serve` | R restart | r refresh health | q quit"
+                "1 receipts | 2 serve | 3 OCR | s start `bb serve` | x stop `bb serve` | R restart | r refresh health | q quit"
             }
             Page::Ocr => {
                 "1 receipts | 2 serve | 3 OCR | s start container | x stop container | R restart container | r refresh podman status/logs | q quit"
@@ -956,15 +958,6 @@ impl App {
         }
 
         Ok(())
-    }
-
-    fn toggle_serve_process(&mut self) -> AppResult<()> {
-        self.poll_serve_process()?;
-        if self.serve_state.process.is_some() {
-            self.stop_serve_process()
-        } else {
-            self.start_serve_process()
-        }
     }
 
     fn restart_serve_process(&mut self) -> AppResult<()> {
@@ -1837,7 +1830,11 @@ fn render_serve_page(frame: &mut ratatui::Frame<'_>, app: &App, area: ratatui::l
         "Status: {process_status}\nHealth: {}\nEndpoints: http://{SERVE_HEALTH_HOST}:{SERVE_PORT}/upload | /beanbeaver | /bb\nCommand: {command}\nLast managed exit code: {last_exit}\nLifecycle: TUI-managed `bb serve` is terminated when `bb-tui` exits.",
         app.serve_state.health_message,
     ))
-    .block(Block::default().borders(Borders::ALL).title("`bb serve`"))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("`bb serve` (`s` start, `x` stop, `R` restart)"),
+    )
     .wrap(Wrap { trim: true });
     frame.render_widget(summary, sections[0]);
 
@@ -2392,8 +2389,13 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
                     _ => {}
                 },
                 Page::Serve => match (key.code, key.modifiers) {
+                    (KeyCode::Char('s'), KeyModifiers::NONE) => {
+                        if let Err(error) = app.start_serve_process() {
+                            app.set_error(error.to_string());
+                        }
+                    }
                     (KeyCode::Char('x'), KeyModifiers::NONE) => {
-                        if let Err(error) = app.toggle_serve_process() {
+                        if let Err(error) = app.stop_serve_process() {
                             app.set_error(error.to_string());
                         }
                     }
