@@ -189,6 +189,8 @@ def _select_receipts_for_match(
 
 def cmd_match(args: argparse.Namespace) -> None:
     """Match all approved receipts against ledger."""
+    from beancount.core import data as beancount_data
+
     from beanbeaver.ledger_access import get_ledger_reader
     from beanbeaver.receipt.formatter import format_enriched_transaction
     from beanbeaver.receipt.matcher import format_match_for_display, match_receipt_to_transactions
@@ -199,7 +201,6 @@ def cmd_match(args: argparse.Namespace) -> None:
         move_to_matched,
         parse_receipt_from_stage_json,
     )
-    from beancount.core import data as beancount_data
 
     if not sys.stdin.isatty():
         print("Error: bb match requires an interactive TTY.")
