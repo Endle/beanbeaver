@@ -25,7 +25,7 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[test]"
+          python -m pip install -e .[test]
 
       - name: Run tests (excluding e2e)
         run: python -m pytest tests --ignore=tests/test_e2e_receipts.py
@@ -55,7 +55,7 @@ jobs:
       - name: Install native test dependencies
         run: |
           "$VENV_PYTHON" -m pip install --upgrade pip
-          "$VENV_PYTHON" -m pip install -e ".[test,dev]"
+          "$VENV_PYTHON" -m pip install -e .[test,dev]
 
       - name: Build native matcher extension
         run: "$VENV_MATURIN" develop
