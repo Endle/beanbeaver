@@ -1,0 +1,14 @@
+[package]
+name = "bb-tui"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "bb-tui"
+path = "src/main.rs"
+
+[dependencies]
+crossterm = "0.28"
+ratatui = "0.29"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -105,6 +105,21 @@ Notes:
         help="Path to beancount ledger file (default: main.beancount)",
     )
 
+    api_parser = subparsers.add_parser("api", help="Machine-readable backend commands")
+    api_subparsers = api_parser.add_subparsers(dest="api_command", help="API commands")
+
+    api_subparsers.add_parser("list-scanned", help="List scanned receipts as JSON")
+    api_subparsers.add_parser("list-approved", help="List approved receipts as JSON")
+
+    show_receipt_parser = api_subparsers.add_parser("show-receipt", help="Show one staged receipt document as JSON")
+    show_receipt_parser.add_argument("path", help="Path to a staged receipt JSON file")
+
+    approve_scanned_parser = api_subparsers.add_parser(
+        "approve-scanned",
+        help="Approve one scanned receipt without interactive editing",
+    )
+    approve_scanned_parser.add_argument("path", help="Path to a staged receipt JSON file in scanned/")
+
     args = parser.parse_args(argv)
 
     if args.command is None:
@@ -183,6 +198,24 @@ Notes:
         from beanbeaver.cli.receipt import cmd_re_edit
 
         return _run_legacy_command(cmd_re_edit, args)
+    elif args.command == "api":
+        from beanbeaver.cli.api import (
+            cmd_api_approve_scanned,
+            cmd_api_list_approved,
+            cmd_api_list_scanned,
+            cmd_api_show_receipt,
+        )
+
+        if args.api_command == "list-scanned":
+            return _run_legacy_command(cmd_api_list_scanned, args)
+        if args.api_command == "list-approved":
+            return _run_legacy_command(cmd_api_list_approved, args)
+        if args.api_command == "show-receipt":
+            return _run_legacy_command(cmd_api_show_receipt, args)
+        if args.api_command == "approve-scanned":
+            return _run_legacy_command(cmd_api_approve_scanned, args)
+        parser.print_help()
+        return 1
 
     if args.command == "match":
         from beanbeaver.application.receipts.match import cmd_match

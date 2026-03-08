@@ -23,3 +23,4 @@ test-e2e-cached = "pytest tests/test_e2e_receipts.py --beanbeaver-e2e-mode cache
 test-e2e-live = "pytest tests/test_e2e_receipts.py --beanbeaver-e2e-mode live -v"
 serve = "python -m beanbeaver.cli.main serve"
 maturin-develop = "maturin develop"
+bb-tui = "cargo run --bin bb-tui"

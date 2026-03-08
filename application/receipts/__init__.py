@@ -1,5 +1,6 @@
 """Receipt workflows."""
 
+from beanbeaver.application.receipts.approval import ApproveScannedReceiptRequest, run_approve_scanned_receipt
 from beanbeaver.application.receipts.listing import run_list_approved_receipts, run_list_scanned_receipts
 from beanbeaver.application.receipts.match import cmd_match
 from beanbeaver.application.receipts.review import (
@@ -12,6 +13,8 @@ from beanbeaver.application.receipts.scan import ReceiptScanRequest, run_receipt
 
 __all__ = [
     "cmd_match",
+    "ApproveScannedReceiptRequest",
+    "run_approve_scanned_receipt",
     "ReceiptScanRequest",
     "run_receipt_scan",
     "EditScannedReceiptRequest",
