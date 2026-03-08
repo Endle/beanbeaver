@@ -13,11 +13,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
-
-      - name: Enable Nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
+      - name: Set up Pixi
+        uses: prefix-dev/setup-pixi@v0.9.3
 
       - name: Configure Git identity
         run: |
@@ -28,7 +25,7 @@ jobs:
         run: ./demo/run_demo.sh
 
       - name: Scan cached receipt and emit parsed JSON
-        run: nix develop -c bash ./demo/scan_receipt_to_json.sh
+        run: pixi run --manifest-path pixi.toml bash ./demo/scan_receipt_to_json.sh
 
       - name: Upload parsed receipt JSON artifact
         uses: actions/upload-artifact@v4
