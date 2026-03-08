@@ -1,6 +1,7 @@
 use std::env;
 use std::error::Error;
 use std::io::{self, Stdout, Write};
+use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
@@ -227,7 +228,9 @@ impl MatchState {
     }
 
     fn selected(&self) -> Option<&MatchCandidateSummary> {
-        self.state.selected().and_then(|index| self.candidates.get(index))
+        self.state
+            .selected()
+            .and_then(|index| self.candidates.get(index))
     }
 
     fn move_selection(&mut self, delta: isize) {
@@ -387,10 +390,7 @@ impl App {
 
     fn refresh(&mut self) -> AppResult<()> {
         self.config = backend_get_config()?;
-        self.scanned = backend_list_receipts(Queue::Scanned)?;
-        self.approved = backend_list_receipts(Queue::Approved)?;
-        self.sync_selection(Queue::Scanned);
-        self.sync_selection(Queue::Approved);
+        self.reload_receipts()?;
         self.load_detail()?;
         self.status = format!(
             "Loaded {} scanned / {} approved receipt(s)",
@@ -400,14 +400,35 @@ impl App {
         Ok(())
     }
 
+    fn reload_receipts(&mut self) -> AppResult<()> {
+        self.scanned = backend_list_receipts(Queue::Scanned)?;
+        self.approved = backend_list_receipts(Queue::Approved)?;
+        self.sync_selection(Queue::Scanned);
+        self.sync_selection(Queue::Approved);
+        Ok(())
+    }
+
     fn load_detail(&mut self) -> AppResult<()> {
-        let Some(path) = self.selected_receipt().map(|receipt| receipt.path.clone()) else {
+        let Some(mut path) = self.selected_receipt().map(|receipt| receipt.path.clone()) else {
             self.detail_lines = vec!["No receipt selected.".to_string()];
             self.detail_path = None;
             self.detail_scroll_y = 0;
             self.detail_scroll_x = 0;
             return Ok(());
         };
+        if !Path::new(&path).exists() {
+            self.reload_receipts()?;
+            let Some(reloaded_path) = self.selected_receipt().map(|receipt| receipt.path.clone())
+            else {
+                self.detail_lines = vec!["No receipt selected.".to_string()];
+                self.detail_path = None;
+                self.detail_scroll_y = 0;
+                self.detail_scroll_x = 0;
+                return Ok(());
+            };
+            path = reloaded_path;
+            self.status = "Selected receipt changed on disk; reloaded receipt list".to_string();
+        }
         let detail = backend_show_receipt(&path)?;
         self.detail_path = Some(detail.path.clone());
         self.detail_lines = render_detail_lines(&detail);
@@ -516,9 +537,9 @@ impl App {
                 self.refresh()?;
                 self.status = match result.updated_path {
                     Some(updated_path) => format!("Updated approved receipt: {updated_path}"),
-                    None => result
-                        .normalize_error
-                        .unwrap_or_else(|| format!("Approved receipt update failed: {}", result.status)),
+                    None => result.normalize_error.unwrap_or_else(|| {
+                        format!("Approved receipt update failed: {}", result.status)
+                    }),
                 };
             }
         }
@@ -530,10 +551,17 @@ impl App {
             self.status = "Match is only available in the Approved queue".to_string();
             return Ok(false);
         }
-        let Some(_) = self.selected_receipt().map(|receipt| receipt.path.clone()) else {
+        let Some(path) = self.selected_receipt().map(|receipt| receipt.path.clone()) else {
             self.status = "No approved receipt selected".to_string();
             return Ok(false);
         };
+        if !Path::new(&path).exists() {
+            self.reload_receipts()?;
+            self.load_detail()?;
+            self.status =
+                "Selected approved receipt changed on disk; reloaded receipt list".to_string();
+            return Ok(false);
+        }
         self.status = "Launching bb match...".to_string();
         Ok(true)
     }
@@ -579,7 +607,9 @@ impl App {
         let response = backend_apply_match(&path, &candidate.file_path, candidate.line_number)?;
         self.match_state = None;
         self.refresh()?;
-        self.status = response.message.unwrap_or_else(|| "Match applied".to_string());
+        self.status = response
+            .message
+            .unwrap_or_else(|| "Match applied".to_string());
         Ok(())
     }
 
@@ -597,7 +627,10 @@ impl App {
         let config = backend_set_config(&config_state.project_root)?;
         self.config = config;
         self.config_state = None;
-        self.status = format!("Configured project root -> {}", self.config.resolved_project_root);
+        self.status = format!(
+            "Configured project root -> {}",
+            self.config.resolved_project_root
+        );
         Ok(())
     }
 }
@@ -696,8 +729,10 @@ fn backend_re_edit_approved_with_review(
     path: &str,
     payload: &str,
 ) -> AppResult<ReEditApprovedResponse> {
-    let stdout =
-        run_backend_with_input(&["api", "re-edit-approved-with-review", path], Some(payload))?;
+    let stdout = run_backend_with_input(
+        &["api", "re-edit-approved-with-review", path],
+        Some(payload),
+    )?;
     Ok(serde_json::from_str(&stdout)?)
 }
 
@@ -722,7 +757,11 @@ fn backend_match_candidates(path: &str) -> AppResult<MatchCandidatesResponse> {
     Ok(serde_json::from_str(&stdout)?)
 }
 
-fn backend_apply_match(path: &str, file_path: &str, line_number: i32) -> AppResult<ApplyMatchResponse> {
+fn backend_apply_match(
+    path: &str,
+    file_path: &str,
+    line_number: i32,
+) -> AppResult<ApplyMatchResponse> {
     let payload = serde_json::json!({
         "file_path": file_path,
         "line_number": line_number,
@@ -790,7 +829,7 @@ fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
         .constraints([
             Constraint::Length(3),
             Constraint::Min(10),
-            Constraint::Length(2),
+            Constraint::Length(3),
         ])
         .split(frame.area());
 
@@ -981,21 +1020,32 @@ fn render_config_modal(
     frame.render_widget(input, rows[1]);
 
     let resolved = Paragraph::new(config.resolved_project_root.clone())
-        .block(Block::default().borders(Borders::ALL).title("Resolved Project Root"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Resolved Project Root"),
+        )
         .wrap(Wrap { trim: true });
     frame.render_widget(resolved, rows[2]);
 
     let saved_in = Paragraph::new(format!(
         "main.beancount: {}\nscanned: {}\napproved: {}\nconfig: {}",
-        config.resolved_main_beancount_path, config.scanned_dir, config.approved_dir, config.config_path
+        config.resolved_main_beancount_path,
+        config.scanned_dir,
+        config.approved_dir,
+        config.config_path
     ))
-        .block(Block::default().borders(Borders::ALL).title("Derived Paths"))
-        .style(Style::default().fg(Color::Gray))
-        .wrap(Wrap { trim: true });
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Derived Paths"),
+    )
+    .style(Style::default().fg(Color::Gray))
+    .wrap(Wrap { trim: true });
     frame.render_widget(saved_in, rows[3]);
 
-    let help = Paragraph::new("Enter save  |  Esc cancel  |  Backspace delete")
-        .wrap(Wrap { trim: true });
+    let help =
+        Paragraph::new("Enter save  |  Esc cancel  |  Backspace delete").wrap(Wrap { trim: true });
     frame.render_widget(help, rows[4]);
 }
 
@@ -1036,7 +1086,12 @@ fn render_match_modal(frame: &mut ratatui::Frame<'_>, match_state: &mut MatchSta
         .iter()
         .map(|candidate| {
             let amount = candidate.amount.as_deref().unwrap_or("UNKNOWN");
-            let line = format!("{}  {}  {:.0}%", candidate.date, amount, candidate.confidence * 100.0);
+            let line = format!(
+                "{}  {}  {:.0}%",
+                candidate.date,
+                amount,
+                candidate.confidence * 100.0
+            );
             ListItem::new(Line::from(line))
         })
         .collect();
@@ -1058,7 +1113,11 @@ fn render_match_modal(frame: &mut ratatui::Frame<'_>, match_state: &mut MatchSta
         None => "No candidate selected.".to_string(),
     };
     let detail = Paragraph::new(detail_text)
-        .block(Block::default().borders(Borders::ALL).title("Selected Candidate"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Selected Candidate"),
+        )
         .wrap(Wrap { trim: false });
     frame.render_widget(detail, body[1]);
 
@@ -1072,8 +1131,8 @@ fn render_match_modal(frame: &mut ratatui::Frame<'_>, match_state: &mut MatchSta
     .wrap(Wrap { trim: true });
     frame.render_widget(warning, rows[2]);
 
-    let help = Paragraph::new("Enter apply selected match  |  Esc cancel")
-        .wrap(Wrap { trim: true });
+    let help =
+        Paragraph::new("Enter apply selected match  |  Esc cancel").wrap(Wrap { trim: true });
     frame.render_widget(help, rows[3]);
 }
 
