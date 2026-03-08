@@ -13,7 +13,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Text};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Tabs, Wrap};
 use ratatui::Terminal;
 use serde::Deserialize;
 use serde_json::Value;
@@ -641,15 +641,14 @@ fn render_config_modal(
     config: &ConfigResponse,
     config_state: &ConfigState,
 ) {
-    let popup = centered_rect(80, 10, frame.area());
-    frame.render_widget(
-        Block::default().style(Style::default().bg(Color::Black)),
-        popup,
-    );
+    let popup = centered_rect(72, 14, frame.area());
+    frame.render_widget(Clear, popup);
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(2),
+            Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(2),
@@ -658,35 +657,47 @@ fn render_config_modal(
         .split(popup);
 
     frame.render_widget(
-        Block::default().borders(Borders::ALL).title("Configuration"),
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Ledger Configuration")
+            .style(Style::default().bg(Color::Black)),
         popup,
     );
 
-    let input = Paragraph::new(format!(
-        "main.beancount path: {}",
-        config_state.main_beancount_path
-    ))
-    .block(Block::default().borders(Borders::BOTTOM))
-    .style(
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD),
-    );
-    frame.render_widget(input, rows[0]);
+    let intro = Paragraph::new("Set the ledger entry file used by receipt matching.")
+        .style(Style::default().fg(Color::Gray))
+        .wrap(Wrap { trim: true });
+    frame.render_widget(intro, rows[0]);
 
-    let resolved = Paragraph::new(format!(
-        "Current resolved path: {}",
-        config.resolved_main_beancount_path
-    ))
-    .wrap(Wrap { trim: true });
-    frame.render_widget(resolved, rows[1]);
+    let input_value = if config_state.main_beancount_path.is_empty() {
+        "<project root>/main.beancount".to_string()
+    } else {
+        config_state.main_beancount_path.clone()
+    };
+    let input = Paragraph::new(input_value)
+        .block(Block::default().borders(Borders::ALL).title("main.beancount path"))
+        .style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(input, rows[1]);
 
-    let help = Paragraph::new(format!(
-        "Enter save | Esc cancel | Backspace delete | Config file: {}",
-        config.config_path
-    ))
-    .wrap(Wrap { trim: true });
-    frame.render_widget(help, rows[2]);
+    let resolved = Paragraph::new(config.resolved_main_beancount_path.clone())
+        .block(Block::default().borders(Borders::ALL).title("Current Resolved Path"))
+        .wrap(Wrap { trim: true });
+    frame.render_widget(resolved, rows[2]);
+
+    let saved_in = Paragraph::new(config.config_path.clone())
+        .block(Block::default().borders(Borders::ALL).title("Saved In"))
+        .style(Style::default().fg(Color::Gray))
+        .wrap(Wrap { trim: true });
+    frame.render_widget(saved_in, rows[3]);
+
+    let help = Paragraph::new("Enter save  |  Esc cancel  |  Backspace delete")
+        .wrap(Wrap { trim: true });
+    frame.render_widget(help, rows[4]);
 }
 
 fn centered_rect(
