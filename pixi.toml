@@ -7,7 +7,6 @@ version = "0.1.0"
 [dependencies]
 python = "3.12.*"
 rust = "*"
-cargo = "*"
 
 [pypi-dependencies]
 beanbeaver = { path = ".", editable = true, extras = ["dev", "test"] }
