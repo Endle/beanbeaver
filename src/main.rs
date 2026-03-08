@@ -4,7 +4,7 @@ use std::io::{self, Stdout};
 use std::process::Command;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -55,6 +55,12 @@ impl Queue {
             Queue::Approved
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PaneFocus {
+    List,
+    Detail,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -183,12 +189,15 @@ impl EditState {
 
 struct App {
     active_queue: Queue,
+    focus: PaneFocus,
     scanned: Vec<ReceiptSummary>,
     approved: Vec<ReceiptSummary>,
     scanned_state: ListState,
     approved_state: ListState,
     detail_lines: Vec<String>,
     detail_path: Option<String>,
+    detail_scroll_y: u16,
+    detail_scroll_x: u16,
     status: String,
     edit_state: Option<EditState>,
     config: ConfigResponse,
@@ -204,14 +213,18 @@ impl App {
         approved_state.select(Some(0));
         Self {
             active_queue: Queue::Scanned,
+            focus: PaneFocus::List,
             scanned: Vec::new(),
             approved: Vec::new(),
             scanned_state,
             approved_state,
             detail_lines: vec!["Loading receipts...".to_string()],
             detail_path: None,
-            status: "q quit | Tab switch queues | j/k move | r reload | a approve scanned | c config"
-                .to_string(),
+            detail_scroll_y: 0,
+            detail_scroll_x: 0,
+            status:
+                "q quit | Tab switch queues | h/l pane focus | j/k list or detail | arrows pan detail | r reload | a approve | c config"
+                    .to_string(),
             edit_state: None,
             config: ConfigResponse {
                 config_path: String::new(),
@@ -281,6 +294,7 @@ impl App {
             Queue::Approved => Queue::Scanned,
         };
         self.sync_selection(self.active_queue);
+        self.focus = PaneFocus::List;
     }
 
     fn refresh(&mut self) -> AppResult<()> {
@@ -302,12 +316,48 @@ impl App {
         let Some(path) = self.selected_receipt().map(|receipt| receipt.path.clone()) else {
             self.detail_lines = vec!["No receipt selected.".to_string()];
             self.detail_path = None;
+            self.detail_scroll_y = 0;
+            self.detail_scroll_x = 0;
             return Ok(());
         };
         let detail = backend_show_receipt(&path)?;
         self.detail_path = Some(detail.path.clone());
         self.detail_lines = render_detail_lines(&detail);
+        self.detail_scroll_y = 0;
+        self.detail_scroll_x = 0;
         Ok(())
+    }
+
+    fn scroll_detail_vertical(&mut self, delta: i32) {
+        if delta >= 0 {
+            self.detail_scroll_y = self.detail_scroll_y.saturating_add(delta as u16);
+        } else {
+            self.detail_scroll_y = self.detail_scroll_y.saturating_sub((-delta) as u16);
+        }
+    }
+
+    fn scroll_detail_horizontal(&mut self, delta: i32) {
+        if delta >= 0 {
+            self.detail_scroll_x = self.detail_scroll_x.saturating_add(delta as u16);
+        } else {
+            self.detail_scroll_x = self.detail_scroll_x.saturating_sub((-delta) as u16);
+        }
+    }
+
+    fn scroll_detail_to_top(&mut self) {
+        self.detail_scroll_y = 0;
+    }
+
+    fn scroll_detail_to_bottom(&mut self) {
+        self.detail_scroll_y = self.detail_lines.len().saturating_sub(1) as u16;
+    }
+
+    fn focus_list(&mut self) {
+        self.focus = PaneFocus::List;
+    }
+
+    fn focus_detail(&mut self) {
+        self.focus = PaneFocus::Detail;
     }
 
     fn approve_selected_scanned(&mut self) -> AppResult<()> {
@@ -561,7 +611,16 @@ fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
         app.receipts(app.active_queue).len()
     );
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(list_title))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(list_title)
+                .border_style(if app.focus == PaneFocus::List {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default()
+                }),
+        )
         .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
         .highlight_symbol(">> ");
     match app.active_queue {
@@ -580,7 +639,17 @@ fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
             .map(Line::from)
             .collect::<Vec<_>>(),
     ))
-    .block(Block::default().borders(Borders::ALL).title(detail_title))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(detail_title)
+            .border_style(if app.focus == PaneFocus::Detail {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default()
+            }),
+    )
+    .scroll((app.detail_scroll_y, app.detail_scroll_x))
     .wrap(Wrap { trim: false });
     frame.render_widget(detail, body[1]);
 
@@ -817,39 +886,73 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
             continue;
         }
 
-        match key.code {
-            KeyCode::Char('q') => app.should_quit = true,
-            KeyCode::Tab => {
+        match (key.code, key.modifiers) {
+            (KeyCode::Char('q'), _) => app.should_quit = true,
+            (KeyCode::Tab, _) => {
                 app.switch_queue();
                 if let Err(error) = app.load_detail() {
                     app.status = error.to_string();
                 }
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                app.move_selection(1);
-                if let Err(error) = app.load_detail() {
-                    app.status = error.to_string();
+            (KeyCode::Char('l'), KeyModifiers::NONE) => {
+                app.focus_detail();
+            }
+            (KeyCode::Char('h'), KeyModifiers::NONE) => {
+                app.focus_list();
+            }
+            (KeyCode::Down, _) | (KeyCode::Char('j'), KeyModifiers::NONE) => {
+                if app.focus == PaneFocus::List {
+                    app.move_selection(1);
+                    if let Err(error) = app.load_detail() {
+                        app.status = error.to_string();
+                    }
+                } else {
+                    app.scroll_detail_vertical(1);
                 }
             }
-            KeyCode::Up | KeyCode::Char('k') => {
-                app.move_selection(-1);
-                if let Err(error) = app.load_detail() {
-                    app.status = error.to_string();
+            (KeyCode::Up, _) | (KeyCode::Char('k'), KeyModifiers::NONE) => {
+                if app.focus == PaneFocus::List {
+                    app.move_selection(-1);
+                    if let Err(error) = app.load_detail() {
+                        app.status = error.to_string();
+                    }
+                } else {
+                    app.scroll_detail_vertical(-1);
                 }
             }
-            KeyCode::Char('r') => {
+            (KeyCode::PageDown, _)
+            | (KeyCode::Char('d'), KeyModifiers::CONTROL)
+            | (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
+                app.scroll_detail_vertical(12);
+            }
+            (KeyCode::PageUp, _) | (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
+                app.scroll_detail_vertical(-12);
+            }
+            (KeyCode::Char('g'), KeyModifiers::NONE) => {
+                app.scroll_detail_to_top();
+            }
+            (KeyCode::Char('G'), KeyModifiers::SHIFT) => {
+                app.scroll_detail_to_bottom();
+            }
+            (KeyCode::Right, _) => {
+                app.scroll_detail_horizontal(4);
+            }
+            (KeyCode::Left, _) => {
+                app.scroll_detail_horizontal(-4);
+            }
+            (KeyCode::Char('r'), _) => {
                 if let Err(error) = app.refresh() {
                     app.status = error.to_string();
                 }
             }
-            KeyCode::Char('a') => {
+            (KeyCode::Char('a'), _) => {
                 if let Err(error) = app.approve_selected_scanned() {
                     app.status = error.to_string();
                 }
             }
-            KeyCode::Char('e') => app.begin_edit_selected_scanned(),
-            KeyCode::Char('c') => app.begin_config_edit(),
-            KeyCode::Char('1') | KeyCode::Char('2') => {
+            (KeyCode::Char('e'), _) => app.begin_edit_selected_scanned(),
+            (KeyCode::Char('c'), _) => app.begin_config_edit(),
+            (KeyCode::Char('1'), _) | (KeyCode::Char('2'), _) => {
                 let next = if key.code == KeyCode::Char('1') { 0 } else { 1 };
                 app.active_queue = Queue::from_tab(next);
                 if let Err(error) = app.load_detail() {
