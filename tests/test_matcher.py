@@ -14,6 +14,7 @@ from beanbeaver.receipt.matcher import (
     _merchant_similarity,
     _try_match,
     match_receipt_to_transactions,
+    relaxed_candidate_match_config,
     rust_backend_loaded,
 )
 
@@ -136,6 +137,16 @@ class TestMatchReceiptToTransactions:
         matches = match_receipt_to_transactions(receipt, [txn])
 
         assert len(matches) == 0
+
+    def test_relaxed_candidate_config_surfaces_near_miss(self) -> None:
+        receipt = make_receipt(merchant="Market", total=Decimal("100.00"))
+        txn = make_transaction(payee="Market", amount=Decimal("-107.00"))
+
+        strict_matches = match_receipt_to_transactions(receipt, [txn])
+        relaxed_matches = match_receipt_to_transactions(receipt, [txn], relaxed_candidate_match_config())
+
+        assert strict_matches == []
+        assert len(relaxed_matches) == 1
 
 
 class TestMerchantSimilarity:

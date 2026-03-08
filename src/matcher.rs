@@ -8,6 +8,7 @@ pub(crate) struct MatchConfig {
     pub(crate) date_tolerance_days: i32,
     pub(crate) amount_tolerance_scaled: i64,
     pub(crate) amount_tolerance_percent_scaled: i64,
+    pub(crate) merchant_min_similarity_scaled: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -302,7 +303,7 @@ pub(crate) fn match_receipt_to_transaction_impl(
         txn.payee.as_deref().unwrap_or(""),
         families,
     );
-    if merchant_score < 0.3 {
+    if merchant_score < (config.merchant_min_similarity_scaled as f64) / (SCALE as f64) {
         return None;
     }
 
@@ -367,7 +368,7 @@ pub(crate) fn match_transaction_to_receipt_impl(
 
     let (merchant_score, matched_family) =
         merchant_similarity_impl(&receipt.merchant, txn_payee, families);
-    if merchant_score < 0.3 {
+    if merchant_score < (config.merchant_min_similarity_scaled as f64) / (SCALE as f64) {
         return None;
     }
 
@@ -406,6 +407,7 @@ mod tests {
             date_tolerance_days: 3,
             amount_tolerance_scaled: 1_000,
             amount_tolerance_percent_scaled: 100,
+            merchant_min_similarity_scaled: 3_000,
         }
     }
 

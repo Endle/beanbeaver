@@ -58,6 +58,7 @@ class MatchConfig:
     date_tolerance_days: int = 3
     amount_tolerance: Decimal = Decimal("0.10")
     amount_tolerance_percent: Decimal = Decimal("0.01")  # 1%
+    merchant_min_similarity: float = 0.3
 
 
 @dataclass
@@ -118,10 +119,7 @@ _rust_matcher = _load_rust_matcher()
 def _merchant_family_payload(
     merchant_families: Sequence[MerchantFamily] | None,
 ) -> list[tuple[str, list[str]]]:
-    return [
-        (family.canonical, list(family.aliases))
-        for family in (merchant_families or ())
-    ]
+    return [(family.canonical, list(family.aliases)) for family in (merchant_families or ())]
 
 
 def _normalize_merchant_py(value: str) -> str:
@@ -169,6 +167,17 @@ def rust_backend_loaded() -> bool:
 
 def _config_or_default(config: MatchConfig | None) -> MatchConfig:
     return config if config is not None else MatchConfig()
+
+
+def relaxed_candidate_match_config(config: MatchConfig | None = None) -> MatchConfig:
+    """Return a looser config used only for manual-review candidate fallback."""
+    resolved = _config_or_default(config)
+    return MatchConfig(
+        date_tolerance_days=max(resolved.date_tolerance_days, 7),
+        amount_tolerance=max(resolved.amount_tolerance, Decimal("2.00")),
+        amount_tolerance_percent=max(resolved.amount_tolerance_percent, Decimal("0.08")),
+        merchant_min_similarity=min(resolved.merchant_min_similarity, 0.15),
+    )
 
 
 def _decimal_to_scaled(value: Decimal) -> int:
@@ -222,6 +231,8 @@ def _match_receipt_to_transactions_rust(
 ) -> list[tuple[int, float, str]] | None:
     if _rust_matcher is None:
         return None
+    if config.merchant_min_similarity != MatchConfig().merchant_min_similarity:
+        return None
 
     payload = [
         (
@@ -231,13 +242,29 @@ def _match_receipt_to_transactions_rust(
         )
         for txn in transactions
     ]
-    return list(
+    try:
+        return list(
             _rust_matcher.match_receipt_to_transactions(
                 receipt.date.toordinal(),
                 _decimal_to_scaled(receipt.total),
                 receipt.merchant,
                 receipt.date_is_placeholder,
-            config.date_tolerance_days,
+                config.date_tolerance_days,
+                _decimal_to_scaled(config.amount_tolerance),
+                _decimal_to_scaled(config.amount_tolerance_percent),
+                _decimal_to_scaled(Decimal(str(config.merchant_min_similarity))),
+                payload,
+                _merchant_family_payload(merchant_families),
+            )
+        )
+    except TypeError:
+        return list(
+            _rust_matcher.match_receipt_to_transactions(
+                receipt.date.toordinal(),
+                _decimal_to_scaled(receipt.total),
+                receipt.merchant,
+                receipt.date_is_placeholder,
+                config.date_tolerance_days,
                 _decimal_to_scaled(config.amount_tolerance),
                 _decimal_to_scaled(config.amount_tolerance_percent),
                 payload,
@@ -256,6 +283,8 @@ def _match_transaction_to_receipts_rust(
 ) -> list[tuple[int, float, str]] | None:
     if _rust_matcher is None:
         return None
+    if config.merchant_min_similarity != MatchConfig().merchant_min_similarity:
+        return None
 
     payload = [
         (
@@ -266,7 +295,22 @@ def _match_transaction_to_receipts_rust(
         )
         for _, receipt in candidates
     ]
-    return list(
+    try:
+        return list(
+            _rust_matcher.match_transaction_to_receipts(
+                txn_date.toordinal(),
+                _decimal_to_scaled(txn_amount),
+                txn_payee,
+                config.date_tolerance_days,
+                _decimal_to_scaled(config.amount_tolerance),
+                _decimal_to_scaled(config.amount_tolerance_percent),
+                _decimal_to_scaled(Decimal(str(config.merchant_min_similarity))),
+                payload,
+                _merchant_family_payload(merchant_families),
+            )
+        )
+    except TypeError:
+        return list(
             _rust_matcher.match_transaction_to_receipts(
                 txn_date.toordinal(),
                 _decimal_to_scaled(txn_amount),
@@ -411,7 +455,7 @@ def _try_match_receipt_py(
         txn_payee,
         merchant_families=merchant_families,
     )
-    if merchant_score < 0.3:
+    if merchant_score < config.merchant_min_similarity:
         return None
 
     confidence += 0.2 * merchant_score
@@ -548,7 +592,7 @@ def _try_match_py(
         txn.payee or "",
         merchant_families=merchant_families,
     )
-    if merchant_score < 0.3:
+    if merchant_score < config.merchant_min_similarity:
         return None
 
     confidence += 0.2 * merchant_score
@@ -611,13 +655,7 @@ def _merchant_similarity_info_py(
     if not normalized_receipt or not normalized_txn:
         return 0.0, None
 
-    if (
-        normalized_receipt == normalized_txn
-        and (
-            receipt_family is not None
-            or txn_family is not None
-        )
-    ):
+    if normalized_receipt == normalized_txn and (receipt_family is not None or txn_family is not None):
         return 1.0, receipt_family or txn_family
 
     if normalized_receipt in normalized_txn or normalized_txn in normalized_receipt:

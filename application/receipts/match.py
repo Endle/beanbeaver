@@ -67,6 +67,15 @@ class MatchCandidatesResult:
 
 
 @dataclass(frozen=True)
+class _ResolvedMatchCandidates:
+    """Resolved candidate set after strict match and optional fallback."""
+
+    matches: list[Any]
+    used_relaxed_threshold: bool
+    warning: str | None
+
+
+@dataclass(frozen=True)
 class ApplyMatchResult:
     """Outcome of applying one receipt-to-ledger match."""
 
@@ -154,13 +163,57 @@ def _load_ledger_transactions(ledger_path: Path) -> tuple[object, list[str]]:
     return snapshot, errors
 
 
+def _resolve_receipt_match_candidates(
+    receipt: Receipt,
+    transactions: Sequence[object],
+    *,
+    merchant_families: Sequence[object] | None,
+) -> _ResolvedMatchCandidates:
+    """Return strict matches, or weaker manual-review candidates when strict yields none."""
+    from beanbeaver.receipt.matcher import (
+        match_receipt_to_transactions,
+        relaxed_candidate_match_config,
+    )
+
+    strict_matches = match_receipt_to_transactions(
+        receipt,
+        transactions,
+        merchant_families=merchant_families,
+    )
+    if strict_matches:
+        return _ResolvedMatchCandidates(
+            matches=list(strict_matches),
+            used_relaxed_threshold=False,
+            warning=None,
+        )
+
+    relaxed_matches = match_receipt_to_transactions(
+        receipt,
+        transactions,
+        config=relaxed_candidate_match_config(),
+        merchant_families=merchant_families,
+    )
+    if relaxed_matches:
+        return _ResolvedMatchCandidates(
+            matches=list(relaxed_matches),
+            used_relaxed_threshold=True,
+            warning="No reliable matches found. Showing weaker candidates for manual review.",
+        )
+
+    return _ResolvedMatchCandidates(
+        matches=[],
+        used_relaxed_threshold=False,
+        warning="No reliable matches found, and no weaker fallback candidates were found.",
+    )
+
+
 def list_match_candidates_for_receipt(
     approved_receipt_path: Path,
     *,
     ledger_path: Path | None = None,
 ) -> MatchCandidatesResult:
     """Return candidate matches for one approved receipt."""
-    from beanbeaver.receipt.matcher import format_match_for_display, match_receipt_to_transactions
+    from beanbeaver.receipt.matcher import format_match_for_display
     from beanbeaver.runtime.receipt_storage import parse_receipt_from_stage_json
 
     resolved_ledger_path = ledger_path if ledger_path is not None else get_paths().main_beancount
@@ -181,7 +234,7 @@ def list_match_candidates_for_receipt(
 
     receipt = parse_receipt_from_stage_json(approved_receipt_path)
     merchant_families = load_merchant_families()
-    matches = match_receipt_to_transactions(
+    resolved_matches = _resolve_receipt_match_candidates(
         receipt,
         snapshot.transactions,
         merchant_families=merchant_families,
@@ -197,19 +250,20 @@ def list_match_candidates_for_receipt(
             date=match.transaction.date,
             amount=transaction_charge_amount(match),
         )
-        for match in matches
+        for match in resolved_matches.matches
     ]
 
-    warning = None
+    warning = resolved_matches.warning
     if receipt.total is None:
-        warning = "No total found in the latest stage"
+        total_warning = "No total found in the latest stage"
+        warning = f"{warning} {total_warning}".strip() if warning else total_warning
 
     return MatchCandidatesResult(
         ledger_path=resolved_ledger_path,
         candidates=candidates,
         errors=[],
         warning=warning,
-        )
+    )
 
 
 def apply_match_for_receipt(
@@ -221,7 +275,6 @@ def apply_match_for_receipt(
 ) -> ApplyMatchResult:
     """Apply one selected candidate match for an approved receipt."""
     from beanbeaver.receipt.beancount_rendering import format_enriched_transaction
-    from beanbeaver.receipt.matcher import match_receipt_to_transactions
     from beanbeaver.runtime.receipt_storage import move_to_matched, parse_receipt_from_stage_json
 
     resolved_ledger_path = ledger_path if ledger_path is not None else get_paths().main_beancount
@@ -242,7 +295,7 @@ def apply_match_for_receipt(
 
     receipt = parse_receipt_from_stage_json(approved_receipt_path)
     merchant_families = load_merchant_families()
-    matches = match_receipt_to_transactions(
+    resolved_matches = _resolve_receipt_match_candidates(
         receipt,
         snapshot.transactions,
         merchant_families=merchant_families,
@@ -250,7 +303,7 @@ def apply_match_for_receipt(
     selected_match = next(
         (
             match
-            for match in matches
+            for match in resolved_matches.matches
             if match.file_path == candidate_file_path and match.line_number == candidate_line_number
         ),
         None,
@@ -308,7 +361,8 @@ def apply_match_for_receipt(
         ledger_path=resolved_ledger_path,
         matched_receipt_path=matched_receipt_path,
         enriched_path=enriched_path,
-        message=f"Transaction {action_msg}. Enriched file: {enriched_path}",
+        message=("Weak candidate applied after relaxed fallback. " if resolved_matches.used_relaxed_threshold else "")
+        + f"Transaction {action_msg}. Enriched file: {enriched_path}",
     )
 
 
@@ -647,7 +701,7 @@ def _re_edit_receipt_after_failed_match(
 def cmd_match(args: argparse.Namespace) -> None:
     """Match all approved receipts against ledger."""
     from beanbeaver.receipt.beancount_rendering import format_enriched_transaction
-    from beanbeaver.receipt.matcher import format_match_for_display, match_receipt_to_transactions
+    from beanbeaver.receipt.matcher import format_match_for_display
     from beanbeaver.runtime.receipt_storage import (
         delete_receipt,
         list_approved_receipts,
@@ -722,11 +776,14 @@ def cmd_match(args: argparse.Namespace) -> None:
             amount_str = f"${amount:.2f}"
             print(f"  {merchant or 'UNKNOWN'} | {date_str} | {amount_str}")
 
-            matches = match_receipt_to_transactions(
+            resolved_matches = _resolve_receipt_match_candidates(
                 receipt,
                 transactions,
                 merchant_families=load_merchant_families(),
             )
+            matches = resolved_matches.matches
+            if resolved_matches.warning:
+                print(f"  Warning: {resolved_matches.warning}")
             available_matches = [m for m in matches if match_key(m) not in used_matches]
 
             if not available_matches and matches:
@@ -764,7 +821,8 @@ def cmd_match(args: argparse.Namespace) -> None:
                 skipped_count += 1
                 break
 
-            print(f"  Found {len(matches)} match(es), {len(available_matches)} available:")
+            match_label = "weak candidate(s)" if resolved_matches.used_relaxed_threshold else "match(es)"
+            print(f"  Found {len(matches)} {match_label}, {len(available_matches)} available:")
             display_matches = available_matches[:5]
             for i, match in enumerate(display_matches, 1):
                 already_used = " (already used)" if match_key(match) in used_matches else ""

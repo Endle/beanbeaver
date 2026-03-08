@@ -124,7 +124,9 @@ def test_api_list_scanned_uses_configured_project_root(
     assert captured["receipts"][0]["path"] == str(stage_path)
 
 
-def test_api_show_receipt_returns_document(tmp_path: Path, monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]) -> None:
+def test_api_show_receipt_returns_document(
+    tmp_path: Path, monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]
+) -> None:
     paths = _configure_temp_root(tmp_path, monkeypatch)
     stage_path = paths.receipts_json_approved / "2026-03-02_shop_30_00_beef" / "review_stage_1.receipt.json"
     document = _stage_document(
@@ -317,6 +319,62 @@ include "records/2026/carda_0101_0131.beancount"
     assert applied["enriched_path"].endswith("2026-03-04_market_10_00_feed.beancount")
     updated_statement = statement_path.read_text(encoding="utf-8")
     assert 'include "_enriched/2026-03-04_market_10_00_feed.beancount"' in updated_statement
+
+
+def test_api_match_candidates_falls_back_to_weaker_candidates(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    paths = _configure_temp_root(tmp_path, monkeypatch)
+    _write(
+        paths.main_beancount,
+        """
+option "operating_currency" "CAD"
+2026-01-01 open Liabilities:CreditCard:CardA CAD
+2026-01-01 open Expenses:Food CAD
+include "records/2026/carda_0101_0131.beancount"
+""".lstrip(),
+    )
+    statement_path = paths.records / "2026" / "carda_0101_0131.beancount"
+    _write(
+        statement_path,
+        """
+2026-03-04 * "Market" ""
+  Liabilities:CreditCard:CardA -10.70 CAD
+  Expenses:Food 10.70 CAD
+""".lstrip(),
+    )
+    approved_dir = paths.receipts_json_approved / "2026-03-04_market_10_00_feed"
+    stage_path = approved_dir / "review_stage_1.receipt.json"
+    save_stage_document(
+        stage_path,
+        _stage_document(
+            merchant="Market",
+            receipt_date="2026-03-04",
+            total="10.00",
+            stage="review_stage_1",
+            stage_index=1,
+        ),
+    )
+
+    exit_code = unified_cli.main(["api", "match-candidates", str(stage_path)])
+    captured = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert captured["errors"] == []
+    assert captured["warning"] == "No reliable matches found. Showing weaker candidates for manual review."
+    assert len(captured["candidates"]) == 1
+
+    candidate = captured["candidates"][0]
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(json.dumps({"file_path": candidate["file_path"], "line_number": candidate["line_number"]})),
+    )
+    exit_code = unified_cli.main(["api", "apply-match", str(stage_path)])
+    applied = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert applied["status"] in {"applied", "already_applied"}
+    assert applied["message"].startswith("Weak candidate applied after relaxed fallback.")
 
 
 def test_api_get_config_returns_resolved_project_root(

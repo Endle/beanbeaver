@@ -27,6 +27,7 @@ fn match_receipt_to_transactions(
     date_tolerance_days: i32,
     amount_tolerance_scaled: i64,
     amount_tolerance_percent_scaled: i64,
+    merchant_min_similarity_scaled: i64,
     transactions: Vec<(i32, Option<String>, Vec<Option<i64>>)>,
     merchant_families: Vec<(String, Vec<String>)>,
 ) -> Vec<(usize, f64, String)> {
@@ -40,6 +41,7 @@ fn match_receipt_to_transactions(
         date_tolerance_days,
         amount_tolerance_scaled,
         amount_tolerance_percent_scaled,
+        merchant_min_similarity_scaled,
     };
     let families = build_merchant_families(&merchant_families);
 
@@ -69,6 +71,7 @@ fn match_transaction_to_receipts(
     date_tolerance_days: i32,
     amount_tolerance_scaled: i64,
     amount_tolerance_percent_scaled: i64,
+    merchant_min_similarity_scaled: i64,
     candidates: Vec<(i32, i64, String, bool)>,
     merchant_families: Vec<(String, Vec<String>)>,
 ) -> Vec<(usize, f64, String)> {
@@ -76,6 +79,7 @@ fn match_transaction_to_receipts(
         date_tolerance_days,
         amount_tolerance_scaled,
         amount_tolerance_percent_scaled,
+        merchant_min_similarity_scaled,
     };
     let families = build_merchant_families(&merchant_families);
 
