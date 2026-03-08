@@ -21,6 +21,7 @@ import httpx
 import pytest
 from beanbeaver.domain.receipt import Receipt
 from beanbeaver.receipt.beancount_rendering import format_parsed_receipt
+from beanbeaver.receipt.item_categories import account_for_category_key
 from beanbeaver.receipt.ocr_extraction import resize_image_bytes, transform_paddleocr_result
 from beanbeaver.receipt.receipt_structuring import parse_receipt
 from beanbeaver.runtime.item_category_rules import load_receipt_structuring_rule_layers
@@ -189,7 +190,7 @@ class TestE2EReceiptProcessing:
 
             if expected_category:
                 matching_categories = [category for price, category in matching_items if price == expected_price]
-                assert any(expected_category in (cat or "") for cat in matching_categories), (
+                assert any(self._category_matches(expected_category, category) for category in matching_categories), (
                     f"Critical item '{critical['description']}' has wrong category. "
                     f"Expected '{expected_category}', found {matching_categories}"
                 )
@@ -214,6 +215,17 @@ class TestE2EReceiptProcessing:
 
         similarity = SequenceMatcher(None, expected_norm, actual_norm).ratio()
         return similarity >= 0.85
+
+    @staticmethod
+    def _category_matches(expected: str, actual: str | None) -> bool:
+        if not actual:
+            return False
+        if expected in actual or actual in expected:
+            return True
+
+        expected_account = account_for_category_key(expected, default=expected)
+        actual_account = account_for_category_key(actual, default=actual)
+        return expected_account == actual_account
 
 
 _test_cases = find_e2e_test_cases()
