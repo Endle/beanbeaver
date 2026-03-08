@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 from .detection_normalization import normalize_detections
-from .ocr_extraction.schema import OCR_ENGINE_NAME_PADDLE, OCR_SCHEMA_VERSION, OcrBBox, OcrDocument
+from .ocr_schema import OCR_ENGINE_NAME_PADDLE, OCR_SCHEMA_VERSION, OcrBBox, OcrDocument
 
 MAX_IMAGE_DIMENSION = 3000  # Resize if either dimension exceeds this
 OCR_IMAGE_PADDING = 50  # White padding around image to prevent edge truncation

@@ -1,7 +1,7 @@
 """Step 1 OCR Extraction Stage public API."""
 
 from beanbeaver.receipt.detection_normalization import normalize_detections
-from beanbeaver.receipt.ocr_extraction.schema import (
+from beanbeaver.receipt.ocr_schema import (
     OCR_ENGINE_NAME_PADDLE,
     OCR_SCHEMA_VERSION,
     OcrBBox,
