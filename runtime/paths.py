@@ -6,12 +6,11 @@ eliminating scattered path definitions across modules.
 
 from __future__ import annotations
 
-import os
 import json
+import os
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-
 
 _PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 
@@ -179,9 +178,24 @@ class ProjectPaths:
         return self.config / "merchant_rules.toml"
 
     @property
+    def merchant_families(self) -> Path:
+        """Project-local merchant identity/family TOML file."""
+        return self.config / "merchant_families.toml"
+
+    @property
     def rules(self) -> Path:
         """Shared default rules directory."""
         return self.src / "rules"
+
+    @property
+    def default_merchant_families(self) -> Path:
+        """Default merchant identity/family rules TOML file."""
+        return self.rules / "default_merchant_families.toml"
+
+    @property
+    def legacy_default_merchant_families(self) -> Path:
+        """Legacy default merchant family rules path."""
+        return self.src / "runtime" / "rules" / "default_merchant_families.toml"
 
     @property
     def default_merchant_rules(self) -> Path:

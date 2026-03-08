@@ -70,6 +70,14 @@ class ReceiptMatchResult:
     match_details: str  # Human-readable explanation
 
 
+@dataclass(frozen=True)
+class MerchantFamily:
+    """Canonical merchant identity plus aliases."""
+
+    canonical: str
+    aliases: tuple[str, ...]
+
+
 def _load_rust_matcher() -> ModuleType | None:
     for module_name in ("beanbeaver._rust_matcher", "_rust_matcher"):
         try:
@@ -105,6 +113,53 @@ def _load_rust_matcher() -> ModuleType | None:
 
 
 _rust_matcher = _load_rust_matcher()
+
+
+def _merchant_family_payload(
+    merchant_families: Sequence[MerchantFamily] | None,
+) -> list[tuple[str, list[str]]]:
+    return [
+        (family.canonical, list(family.aliases))
+        for family in (merchant_families or ())
+    ]
+
+
+def _normalize_merchant_py(value: str) -> str:
+    normalized = value.strip().upper()
+    normalized = re.sub(r"\s+(INC|LLC|LTD|CORP|CO|#\d+|\d+)\.?$", "", normalized)
+    normalized = re.sub(r",?\s*[A-Z]{2}\s*$", "", normalized)
+    normalized = re.sub(r"(?:,\s*|\s+)[A-Z][A-Za-z]+\s*$", "", normalized)
+    normalized = re.sub(r"[^A-Z0-9]", "", normalized)
+    return normalized
+
+
+def _canonicalize_merchant_py(value: str) -> tuple[str, str | None]:
+    return _canonicalize_merchant_with_families_py(value, merchant_families=None)
+
+
+def _canonicalize_merchant_with_families_py(
+    value: str,
+    *,
+    merchant_families: Sequence[MerchantFamily] | None,
+) -> tuple[str, str | None]:
+    normalized_value = _normalize_merchant_py(value)
+    if not normalized_value:
+        return normalized_value, None
+
+    for family in merchant_families or ():
+        aliases = (family.canonical, *family.aliases)
+        for alias in aliases:
+            normalized_alias = _normalize_merchant_py(alias)
+            if not normalized_alias:
+                continue
+            if (
+                normalized_value == normalized_alias
+                or normalized_value in normalized_alias
+                or normalized_alias in normalized_value
+            ):
+                return _normalize_merchant_py(family.canonical), family.canonical
+
+    return normalized_value, None
 
 
 def rust_backend_loaded() -> bool:
@@ -163,6 +218,7 @@ def _match_receipt_to_transactions_rust(
     receipt: Receipt,
     transactions: Sequence[object],
     config: MatchConfig,
+    merchant_families: Sequence[MerchantFamily] | None,
 ) -> list[tuple[int, float, str]] | None:
     if _rust_matcher is None:
         return None
@@ -176,17 +232,18 @@ def _match_receipt_to_transactions_rust(
         for txn in transactions
     ]
     return list(
-        _rust_matcher.match_receipt_to_transactions(
-            receipt.date.toordinal(),
-            _decimal_to_scaled(receipt.total),
-            receipt.merchant,
-            receipt.date_is_placeholder,
+            _rust_matcher.match_receipt_to_transactions(
+                receipt.date.toordinal(),
+                _decimal_to_scaled(receipt.total),
+                receipt.merchant,
+                receipt.date_is_placeholder,
             config.date_tolerance_days,
-            _decimal_to_scaled(config.amount_tolerance),
-            _decimal_to_scaled(config.amount_tolerance_percent),
-            payload,
+                _decimal_to_scaled(config.amount_tolerance),
+                _decimal_to_scaled(config.amount_tolerance_percent),
+                payload,
+                _merchant_family_payload(merchant_families),
+            )
         )
-    )
 
 
 def _match_transaction_to_receipts_rust(
@@ -195,6 +252,7 @@ def _match_transaction_to_receipts_rust(
     txn_payee: str,
     candidates: Sequence[tuple[Path, Receipt]],
     config: MatchConfig,
+    merchant_families: Sequence[MerchantFamily] | None,
 ) -> list[tuple[int, float, str]] | None:
     if _rust_matcher is None:
         return None
@@ -209,16 +267,17 @@ def _match_transaction_to_receipts_rust(
         for _, receipt in candidates
     ]
     return list(
-        _rust_matcher.match_transaction_to_receipts(
-            txn_date.toordinal(),
-            _decimal_to_scaled(txn_amount),
-            txn_payee,
-            config.date_tolerance_days,
-            _decimal_to_scaled(config.amount_tolerance),
-            _decimal_to_scaled(config.amount_tolerance_percent),
-            payload,
+            _rust_matcher.match_transaction_to_receipts(
+                txn_date.toordinal(),
+                _decimal_to_scaled(txn_amount),
+                txn_payee,
+                config.date_tolerance_days,
+                _decimal_to_scaled(config.amount_tolerance),
+                _decimal_to_scaled(config.amount_tolerance_percent),
+                payload,
+                _merchant_family_payload(merchant_families),
+            )
         )
-    )
 
 
 def match_transaction_to_receipts(
@@ -227,6 +286,7 @@ def match_transaction_to_receipts(
     txn_payee: str,
     candidates: Sequence[tuple[Path, Receipt]],
     config: MatchConfig | None = None,
+    merchant_families: Sequence[MerchantFamily] | None = None,
 ) -> list[ReceiptMatchResult]:
     """
     Find receipts matching a CC transaction (reverse of current flow).
@@ -241,6 +301,7 @@ def match_transaction_to_receipts(
         txn_payee,
         candidates,
         resolved_config,
+        merchant_families,
     )
     if rust_matches is not None:
         return [
@@ -255,7 +316,15 @@ def match_transaction_to_receipts(
 
     matches: list[ReceiptMatchResult] = []
     for filepath, receipt in candidates:
-        result = _try_match_receipt_py(txn_date, txn_amount, txn_payee, receipt, filepath, resolved_config)
+        result = _try_match_receipt_py(
+            txn_date,
+            txn_amount,
+            txn_payee,
+            receipt,
+            filepath,
+            resolved_config,
+            merchant_families=merchant_families,
+        )
         if result:
             matches.append(result)
     matches.sort(key=lambda m: m.confidence, reverse=True)
@@ -269,6 +338,7 @@ def _try_match_receipt(
     receipt: Receipt,
     receipt_path: Path,
     config: MatchConfig,
+    merchant_families: Sequence[MerchantFamily] | None = None,
 ) -> ReceiptMatchResult | None:
     rust_matches = _match_transaction_to_receipts_rust(
         txn_date,
@@ -276,6 +346,7 @@ def _try_match_receipt(
         txn_payee,
         [(receipt_path, receipt)],
         config,
+        merchant_families,
     )
     if rust_matches is not None:
         if not rust_matches:
@@ -287,7 +358,15 @@ def _try_match_receipt(
             confidence=confidence,
             match_details=details,
         )
-    return _try_match_receipt_py(txn_date, txn_amount, txn_payee, receipt, receipt_path, config)
+    return _try_match_receipt_py(
+        txn_date,
+        txn_amount,
+        txn_payee,
+        receipt,
+        receipt_path,
+        config,
+        merchant_families=merchant_families,
+    )
 
 
 def _try_match_receipt_py(
@@ -297,6 +376,8 @@ def _try_match_receipt_py(
     receipt: Receipt,
     receipt_path: Path,
     config: MatchConfig,
+    *,
+    merchant_families: Sequence[MerchantFamily] | None = None,
 ) -> ReceiptMatchResult | None:
     confidence = 0.0
     details: list[str] = []
@@ -325,12 +406,18 @@ def _try_match_receipt_py(
         confidence += 0.4 * (1 - float(amount_diff / amount_tolerance))
         details.append(f"amount: ${amount_diff:.2f} off")
 
-    merchant_score = _merchant_similarity(receipt.merchant, txn_payee)
+    merchant_score, merchant_family = _merchant_similarity_info_py(
+        receipt.merchant,
+        txn_payee,
+        merchant_families=merchant_families,
+    )
     if merchant_score < 0.3:
         return None
 
     confidence += 0.2 * merchant_score
-    if merchant_score > 0.8:
+    if merchant_family is not None:
+        details.append(f"merchant: family match ({merchant_family})")
+    elif merchant_score > 0.8:
         details.append("merchant: good match")
     else:
         details.append(f"merchant: partial match ({merchant_score:.0%})")
@@ -356,10 +443,16 @@ def match_receipt_to_transactions(
     receipt: Receipt,
     transactions: Sequence[object],
     config: MatchConfig | None = None,
+    merchant_families: Sequence[MerchantFamily] | None = None,
 ) -> list[MatchResult]:
     """Find transactions that match the given receipt from a pre-loaded list."""
     resolved_config = _config_or_default(config)
-    rust_matches = _match_receipt_to_transactions_rust(receipt, transactions, resolved_config)
+    rust_matches = _match_receipt_to_transactions_rust(
+        receipt,
+        transactions,
+        resolved_config,
+        merchant_families,
+    )
     if rust_matches is not None:
         results: list[MatchResult] = []
         for index, confidence, details in rust_matches:
@@ -378,7 +471,12 @@ def match_receipt_to_transactions(
 
     matches: list[MatchResult] = []
     for txn in transactions:
-        result = _try_match_py(receipt, cast(TransactionLike, txn), resolved_config)
+        result = _try_match_py(
+            receipt,
+            cast(TransactionLike, txn),
+            resolved_config,
+            merchant_families=merchant_families,
+        )
         if result:
             matches.append(result)
     matches.sort(key=lambda m: m.confidence, reverse=True)
@@ -389,8 +487,9 @@ def _try_match(
     receipt: Receipt,
     txn: TransactionLike,
     config: MatchConfig,
+    merchant_families: Sequence[MerchantFamily] | None = None,
 ) -> MatchResult | None:
-    rust_matches = _match_receipt_to_transactions_rust(receipt, [txn], config)
+    rust_matches = _match_receipt_to_transactions_rust(receipt, [txn], config, merchant_families)
     if rust_matches is not None:
         if not rust_matches:
             return None
@@ -403,13 +502,15 @@ def _try_match(
             confidence=confidence,
             match_details=details,
         )
-    return _try_match_py(receipt, txn, config)
+    return _try_match_py(receipt, txn, config, merchant_families=merchant_families)
 
 
 def _try_match_py(
     receipt: Receipt,
     txn: TransactionLike,
     config: MatchConfig,
+    *,
+    merchant_families: Sequence[MerchantFamily] | None = None,
 ) -> MatchResult | None:
     confidence = 0.0
     details: list[str] = []
@@ -442,12 +543,18 @@ def _try_match_py(
         confidence += 0.4 * (1 - float(amount_diff / amount_tolerance))
         details.append(f"amount: ${amount_diff:.2f} off")
 
-    merchant_score = _merchant_similarity(receipt.merchant, txn.payee or "")
+    merchant_score, merchant_family = _merchant_similarity_info_py(
+        receipt.merchant,
+        txn.payee or "",
+        merchant_families=merchant_families,
+    )
     if merchant_score < 0.3:
         return None
 
     confidence += 0.2 * merchant_score
-    if merchant_score > 0.8:
+    if merchant_family is not None:
+        details.append(f"merchant: family match ({merchant_family})")
+    elif merchant_score > 0.8:
         details.append("merchant: good match")
     else:
         details.append(f"merchant: partial match ({merchant_score:.0%})")
@@ -462,33 +569,59 @@ def _try_match_py(
     )
 
 
-def _merchant_similarity(receipt_merchant: str, txn_payee: str) -> float:
+def _merchant_similarity(
+    receipt_merchant: str,
+    txn_payee: str,
+    merchant_families: Sequence[MerchantFamily] | None = None,
+) -> float:
     """
     Calculate similarity between receipt merchant name and transaction payee.
 
     Returns a score from 0.0 to 1.0.
     """
     if _rust_matcher is not None:
-        return float(_rust_matcher.merchant_similarity(receipt_merchant, txn_payee))
-    return _merchant_similarity_py(receipt_merchant, txn_payee)
+        return float(
+            _rust_matcher.merchant_similarity(
+                receipt_merchant,
+                txn_payee,
+                _merchant_family_payload(merchant_families),
+            )
+        )
+    return _merchant_similarity_info_py(
+        receipt_merchant,
+        txn_payee,
+        merchant_families=merchant_families,
+    )[0]
 
 
-def _merchant_similarity_py(receipt_merchant: str, txn_payee: str) -> float:
-    def normalize(s: str) -> str:
-        s = s.upper()
-        s = re.sub(r"\s+(INC|LLC|LTD|CORP|CO|#\d+|\d+)\.?$", "", s)
-        s = re.sub(r",?\s*[A-Z]{2}\s*$", "", s)
-        s = re.sub(r"(?:,\s*|\s+)[A-Z][A-Za-z]+\s*$", "", s)
-        s = re.sub(r"[^A-Z0-9]", "", s)
-        return s
-
-    normalized_receipt = normalize(receipt_merchant)
-    normalized_txn = normalize(txn_payee)
+def _merchant_similarity_info_py(
+    receipt_merchant: str,
+    txn_payee: str,
+    *,
+    merchant_families: Sequence[MerchantFamily] | None = None,
+) -> tuple[float, str | None]:
+    normalized_receipt, receipt_family = _canonicalize_merchant_with_families_py(
+        receipt_merchant,
+        merchant_families=merchant_families,
+    )
+    normalized_txn, txn_family = _canonicalize_merchant_with_families_py(
+        txn_payee,
+        merchant_families=merchant_families,
+    )
     if not normalized_receipt or not normalized_txn:
-        return 0.0
+        return 0.0, None
+
+    if (
+        normalized_receipt == normalized_txn
+        and (
+            receipt_family is not None
+            or txn_family is not None
+        )
+    ):
+        return 1.0, receipt_family or txn_family
 
     if normalized_receipt in normalized_txn or normalized_txn in normalized_receipt:
-        return 0.9
+        return 0.9, None
 
     min_len = min(len(normalized_receipt), len(normalized_txn))
     common_prefix = 0
@@ -498,15 +631,15 @@ def _merchant_similarity_py(receipt_merchant: str, txn_payee: str) -> float:
         else:
             break
     if common_prefix >= 4:
-        return 0.5 + 0.4 * (common_prefix / min_len)
+        return 0.5 + 0.4 * (common_prefix / min_len), None
 
     receipt_words = set(re.findall(r"[A-Z]{3,}", receipt_merchant.upper()))
     txn_words = set(re.findall(r"[A-Z]{3,}", txn_payee.upper()))
     if receipt_words and txn_words:
         common_words = receipt_words & txn_words
         if common_words:
-            return 0.3 + 0.4 * (len(common_words) / len(receipt_words | txn_words))
-    return 0.0
+            return 0.3 + 0.4 * (len(common_words) / len(receipt_words | txn_words)), None
+    return 0.0, None
 
 
 def format_match_for_display(match: MatchResult) -> str:

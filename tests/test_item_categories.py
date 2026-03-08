@@ -3,7 +3,11 @@
 from pathlib import Path
 
 import pytest
-from beanbeaver.receipt.item_categories import categorize_item, classify_item_semantic
+from beanbeaver.receipt.item_categories import (
+    account_for_category_key,
+    categorize_item,
+    classify_item_semantic,
+)
 from beanbeaver.runtime.item_category_rules import load_item_category_rule_layers, load_receipt_structuring_rule_layers
 
 
@@ -190,6 +194,13 @@ grocery_staple = "Expenses:Food:Grocery:Staple"
             ),
         )
         == "Expenses:Food:Grocery:Staple"
+    )
+
+
+def test_legacy_direct_icecream_account_alias_maps_to_frozen_icecream() -> None:
+    assert (
+        account_for_category_key("Expenses:Food:Grocery:IceCream")
+        == "Expenses:Food:Grocery:Frozen:IceCream"
     )
 
 

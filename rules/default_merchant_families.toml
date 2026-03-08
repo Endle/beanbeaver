@@ -1,0 +1,7 @@
+# Public default merchant identity rules.
+# These map common alias spellings to a canonical merchant family.
+# Project-local overrides belong in config/merchant_families.toml.
+
+[[families]]
+canonical = "REAL CANADIAN SUPERSTORE"
+aliases = ["REAL CANADIAN", "RCSS"]

@@ -23,6 +23,7 @@ from beanbeaver.runtime.logging import (
     get_logger,
     set_log_level,
 )
+from beanbeaver.runtime.merchant_families import load_merchant_families
 from beanbeaver.runtime.merchant_rules import load_known_merchant_keywords
 from beanbeaver.runtime.paths import (
     TMPDIR,
@@ -48,6 +49,7 @@ __all__ = [
     "LOG_FORMAT",
     "LOG_FORMAT_DEBUG",
     # Rules
+    "load_merchant_families",
     "load_known_merchant_keywords",
     "load_item_category_rule_layers",
     "load_receipt_structuring_rule_layers",

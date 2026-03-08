@@ -29,7 +29,7 @@ from beanbeaver.ledger_access import (
     restore_receipt_match_files,
     snapshot_receipt_match_files,
 )
-from beanbeaver.runtime import get_logger, get_paths
+from beanbeaver.runtime import get_logger, get_paths, load_merchant_families
 
 logger = get_logger(__name__)
 
@@ -180,7 +180,12 @@ def list_match_candidates_for_receipt(
         )
 
     receipt = parse_receipt_from_stage_json(approved_receipt_path)
-    matches = match_receipt_to_transactions(receipt, snapshot.transactions)
+    merchant_families = load_merchant_families()
+    matches = match_receipt_to_transactions(
+        receipt,
+        snapshot.transactions,
+        merchant_families=merchant_families,
+    )
     candidates = [
         MatchCandidate(
             file_path=match.file_path,
@@ -236,7 +241,12 @@ def apply_match_for_receipt(
         )
 
     receipt = parse_receipt_from_stage_json(approved_receipt_path)
-    matches = match_receipt_to_transactions(receipt, snapshot.transactions)
+    merchant_families = load_merchant_families()
+    matches = match_receipt_to_transactions(
+        receipt,
+        snapshot.transactions,
+        merchant_families=merchant_families,
+    )
     selected_match = next(
         (
             match
@@ -712,7 +722,11 @@ def cmd_match(args: argparse.Namespace) -> None:
             amount_str = f"${amount:.2f}"
             print(f"  {merchant or 'UNKNOWN'} | {date_str} | {amount_str}")
 
-            matches = match_receipt_to_transactions(receipt, transactions)
+            matches = match_receipt_to_transactions(
+                receipt,
+                transactions,
+                merchant_families=load_merchant_families(),
+            )
             available_matches = [m for m in matches if match_key(m) not in used_matches]
 
             if not available_matches and matches:

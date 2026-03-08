@@ -69,6 +69,10 @@ DEFAULT_CATEGORY_ACCOUNTS: dict[str, str] = {
     "shopping_clothing": "Expenses:Shopping:Clothing",
 }
 
+LEGACY_ACCOUNT_ALIASES: dict[str, str] = {
+    "Expenses:Food:Grocery:IceCream": "Expenses:Food:Grocery:Frozen:IceCream",
+}
+
 
 OCR_CONFUSABLE_TRANS_TABLE = str.maketrans("0D", "OO")
 
@@ -487,8 +491,11 @@ def _resolve_account_target(
     if target is None:
         return default
     if target.startswith("Expenses:"):
-        return target
-    return account_mapping.get(target, default)
+        return LEGACY_ACCOUNT_ALIASES.get(target, target)
+    resolved = account_mapping.get(target, default)
+    if resolved is None:
+        return None
+    return LEGACY_ACCOUNT_ALIASES.get(resolved, resolved)
 
 
 def account_for_category_key(

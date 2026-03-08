@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 from beanbeaver.domain.receipt import Receipt, ReceiptItem
 from beanbeaver.receipt.matcher import (
     MatchConfig,
+    MerchantFamily,
     _merchant_similarity,
     _try_match,
     match_receipt_to_transactions,
@@ -49,6 +50,15 @@ def make_transaction(
     txn.postings = [posting]
 
     return txn
+
+
+def merchant_families() -> tuple[MerchantFamily, ...]:
+    return (
+        MerchantFamily(
+            canonical="REAL CANADIAN SUPERSTORE",
+            aliases=("REAL CANADIAN", "RCSS"),
+        ),
+    )
 
 
 class TestMatchReceiptToTransactions:
@@ -147,6 +157,14 @@ class TestMerchantSimilarity:
         score = _merchant_similarity("COSTCO", "COSTCO BUSINESS CENTER")
         assert score > 0.8
 
+    def test_family_alias_match(self) -> None:
+        score = _merchant_similarity(
+            "REAL CANADIAN",
+            "RCSS 1077 TORONTO ON",
+            merchant_families=merchant_families(),
+        )
+        assert score > 0.8
+
 
 class TestTryMatch:
     """Tests for the internal _try_match function."""
@@ -172,6 +190,24 @@ class TestTryMatch:
         assert "date:" in result.match_details
         assert "amount:" in result.match_details
         assert "merchant:" in result.match_details
+
+    def test_match_details_report_family_match(self) -> None:
+        receipt = make_receipt(
+            merchant="REAL CANADIAN",
+            receipt_date=date(2026, 1, 30),
+            total=Decimal("73.63"),
+        )
+        txn = make_transaction(
+            payee="RCSS 1077 TORONTO ON",
+            txn_date=date(2026, 2, 2),
+            amount=Decimal("-73.63"),
+        )
+
+        config = MatchConfig()
+        result = _try_match(receipt, txn, config, merchant_families=merchant_families())
+
+        assert result is not None
+        assert "family match" in result.match_details
 
 
 def test_rust_backend_loads_when_required() -> None:
