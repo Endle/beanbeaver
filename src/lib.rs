@@ -3,9 +3,9 @@ mod matcher;
 use pyo3::prelude::*;
 
 use crate::matcher::{
-    build_merchant_families, compare_matches, match_receipt_to_transaction_impl,
-    match_transaction_to_receipt_impl, merchant_similarity_impl, MatchConfig, ReceiptInput,
-    TransactionInput,
+    MatchConfig, ReceiptInput, TransactionInput, build_merchant_families, compare_matches,
+    match_receipt_to_transaction_impl, match_transaction_to_receipt_impl,
+    merchant_similarity_impl,
 };
 
 #[pyfunction]
