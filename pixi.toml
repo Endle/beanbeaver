@@ -10,9 +10,11 @@ rust = "*"
 
 [pypi-dependencies]
 beanbeaver = { path = ".", editable = true, extras = ["dev", "test"] }
+fava = ">=1.27,<2"
 
 [tasks]
 bb = "bb"
+fava = "fava ../../main.beancount"
 ruff-check = "ruff check ."
 ruff-format-check = "ruff format --check ."
 mypy = "mypy --config-file pyproject.toml . --ignore-missing-imports --no-error-summary"
