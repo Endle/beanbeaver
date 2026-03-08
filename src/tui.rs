@@ -547,14 +547,19 @@ impl App {
         let message = message.into();
         self.status = message.clone();
         self.push_status_log(message);
+        if self.active_page == Page::Receipts && self.right_pane == RightPane::StatusLog {
+            self.scroll_detail_to_bottom();
+        }
     }
 
     fn set_error(&mut self, message: impl Into<String>) {
+        self.show_status_log();
+        self.set_status(message);
+    }
+
+    fn show_status_log(&mut self) {
         if self.active_page == Page::Receipts {
             self.right_pane = RightPane::StatusLog;
-        }
-        self.set_status(message);
-        if self.active_page == Page::Receipts {
             self.scroll_detail_to_bottom();
         }
     }
@@ -2600,14 +2605,17 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
                                         app.set_error(error.to_string());
                                         continue;
                                     }
+                                    app.show_status_log();
                                     app.set_status(format!("Returned from external editor for approved receipt: {path}"));
                                 }
                                 Ok(exit_code) => {
+                                    app.show_status_log();
                                     app.set_error(format!(
                                         "`bb re-edit` exited with code {exit_code}."
                                     ));
                                 }
                                 Err(error) => {
+                                    app.show_status_log();
                                     app.set_error(format!("Failed to run `bb re-edit`: {error}"));
                                 }
                             }
