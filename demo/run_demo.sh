@@ -3,8 +3,8 @@ set -euo pipefail
 
 # Run relative to this script's directory so it works from any cwd.
 
-REPO_URL="https://github.com/Endle/beanbeaver.git"
 CLONE_PATH="beanbeaver"
+SOURCE_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # 1) Set up a demo beancount directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,12 +21,13 @@ git add .
 git commit -a -m "set demo ledger"
 
 # 2) Set up beanbeaver
-ls
-git submodule add "${REPO_URL}" "${CLONE_PATH}"
-cp "${CLONE_PATH}"/flake.nix .
-git add flake.nix
-git commit -m "Add flake"
+command -v pixi >/dev/null || {
+  echo "pixi is required to run this demo." >&2
+  exit 1
+}
 
-# 3) In nix develop, run bb --help.
-nix develop -c bb --help
+git -c protocol.file.allow=always submodule add "${SOURCE_REPO_ROOT}" "${CLONE_PATH}"
+git commit -m "Add beanbeaver"
 
+# 3) In the beanbeaver Pixi environment, run bb --help.
+pixi run --manifest-path "${CLONE_PATH}/pixi.toml" bb --help
