@@ -2,20 +2,13 @@ mod matcher;
 
 use pyo3::prelude::*;
 
-use crate::matcher::{
-    MatchConfig, ReceiptInput, TransactionInput, build_merchant_families, compare_matches,
-    match_receipt_to_transaction_impl, match_transaction_to_receipt_impl,
-    merchant_similarity_impl,
-};
-
 #[pyfunction]
 fn merchant_similarity(
     receipt_merchant: &str,
     txn_payee: &str,
     merchant_families: Vec<(String, Vec<String>)>,
 ) -> f64 {
-    let families = build_merchant_families(&merchant_families);
-    merchant_similarity_impl(receipt_merchant, txn_payee, &families).0
+    matcher::merchant_similarity(receipt_merchant, txn_payee, merchant_families)
 }
 
 #[pyfunction]
@@ -30,35 +23,17 @@ fn match_receipt_to_transactions(
     transactions: Vec<(i32, Option<String>, Vec<Option<i64>>)>,
     merchant_families: Vec<(String, Vec<String>)>,
 ) -> Vec<(usize, f64, String)> {
-    let receipt = ReceiptInput {
-        date_ordinal: receipt_date_ordinal,
-        total_scaled: receipt_total_scaled,
-        merchant: receipt_merchant,
-        date_is_placeholder: receipt_date_is_placeholder,
-    };
-    let config = MatchConfig {
+    matcher::match_receipt_to_transactions(
+        receipt_date_ordinal,
+        receipt_total_scaled,
+        receipt_merchant,
+        receipt_date_is_placeholder,
         date_tolerance_days,
         amount_tolerance_scaled,
         amount_tolerance_percent_scaled,
-    };
-    let families = build_merchant_families(&merchant_families);
-
-    let mut matches: Vec<(usize, f64, String)> = transactions
-        .into_iter()
-        .enumerate()
-        .filter_map(|(index, (date_ordinal, payee, posting_amounts_scaled))| {
-            let txn = TransactionInput {
-                date_ordinal,
-                payee,
-                posting_amounts_scaled,
-            };
-            match_receipt_to_transaction_impl(&receipt, &txn, &config, &families)
-                .map(|(confidence, details)| (index, confidence, details))
-        })
-        .collect();
-
-    matches.sort_by(compare_matches);
-    matches
+        transactions,
+        merchant_families,
+    )
 }
 
 #[pyfunction]
@@ -72,39 +47,16 @@ fn match_transaction_to_receipts(
     candidates: Vec<(i32, i64, String, bool)>,
     merchant_families: Vec<(String, Vec<String>)>,
 ) -> Vec<(usize, f64, String)> {
-    let config = MatchConfig {
+    matcher::match_transaction_to_receipts(
+        txn_date_ordinal,
+        txn_amount_scaled,
+        txn_payee,
         date_tolerance_days,
         amount_tolerance_scaled,
         amount_tolerance_percent_scaled,
-    };
-    let families = build_merchant_families(&merchant_families);
-
-    let mut matches: Vec<(usize, f64, String)> = candidates
-        .into_iter()
-        .enumerate()
-        .filter_map(
-            |(index, (date_ordinal, total_scaled, merchant, date_is_placeholder))| {
-                let receipt = ReceiptInput {
-                    date_ordinal,
-                    total_scaled,
-                    merchant,
-                    date_is_placeholder,
-                };
-                match_transaction_to_receipt_impl(
-                    txn_date_ordinal,
-                    txn_amount_scaled,
-                    &txn_payee,
-                    &receipt,
-                    &config,
-                    &families,
-                )
-                .map(|(confidence, details)| (index, confidence, details))
-            },
-        )
-        .collect();
-
-    matches.sort_by(compare_matches);
-    matches
+        candidates,
+        merchant_families,
+    )
 }
 
 #[pymodule]

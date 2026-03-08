@@ -1,32 +1,32 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
 
-pub(crate) const SCALE: i64 = 10_000;
+const SCALE: i64 = 10_000;
 
 #[derive(Clone, Debug)]
-pub(crate) struct MatchConfig {
-    pub(crate) date_tolerance_days: i32,
-    pub(crate) amount_tolerance_scaled: i64,
-    pub(crate) amount_tolerance_percent_scaled: i64,
+struct MatchConfig {
+    date_tolerance_days: i32,
+    amount_tolerance_scaled: i64,
+    amount_tolerance_percent_scaled: i64,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ReceiptInput {
-    pub(crate) date_ordinal: i32,
-    pub(crate) total_scaled: i64,
-    pub(crate) merchant: String,
-    pub(crate) date_is_placeholder: bool,
+struct ReceiptInput {
+    date_ordinal: i32,
+    total_scaled: i64,
+    merchant: String,
+    date_is_placeholder: bool,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct TransactionInput {
-    pub(crate) date_ordinal: i32,
-    pub(crate) payee: Option<String>,
-    pub(crate) posting_amounts_scaled: Vec<Option<i64>>,
+struct TransactionInput {
+    date_ordinal: i32,
+    payee: Option<String>,
+    posting_amounts_scaled: Vec<Option<i64>>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct MerchantFamily {
+struct MerchantFamily {
     canonical_label: String,
     canonical_normalized: String,
     aliases_normalized: Vec<String>,
@@ -145,9 +145,7 @@ fn alpha_words(value: &str) -> HashSet<String> {
         .collect()
 }
 
-pub(crate) fn build_merchant_families(
-    raw_families: &[(String, Vec<String>)],
-) -> Vec<MerchantFamily> {
+fn build_merchant_families(raw_families: &[(String, Vec<String>)]) -> Vec<MerchantFamily> {
     raw_families
         .iter()
         .filter_map(|(canonical, aliases)| {
@@ -197,7 +195,7 @@ fn canonicalize_merchant(value: &str, families: &[MerchantFamily]) -> (String, O
     (normalized_value, None)
 }
 
-pub(crate) fn merchant_similarity_impl(
+fn merchant_similarity_impl(
     receipt_merchant: &str,
     txn_payee: &str,
     families: &[MerchantFamily],
@@ -249,7 +247,7 @@ pub(crate) fn merchant_similarity_impl(
     (0.0, None)
 }
 
-pub(crate) fn match_receipt_to_transaction_impl(
+fn match_receipt_to_transaction_impl(
     receipt: &ReceiptInput,
     txn: &TransactionInput,
     config: &MatchConfig,
@@ -321,7 +319,7 @@ pub(crate) fn match_receipt_to_transaction_impl(
     Some((confidence, details.join(", ")))
 }
 
-pub(crate) fn match_transaction_to_receipt_impl(
+fn match_transaction_to_receipt_impl(
     txn_date_ordinal: i32,
     txn_amount_scaled: i64,
     txn_payee: &str,
@@ -386,15 +384,108 @@ pub(crate) fn match_transaction_to_receipt_impl(
     Some((confidence, details.join(", ")))
 }
 
-pub(crate) fn compare_matches(
-    left: &(usize, f64, String),
-    right: &(usize, f64, String),
-) -> Ordering {
+fn compare_matches(left: &(usize, f64, String), right: &(usize, f64, String)) -> Ordering {
     right
         .1
         .partial_cmp(&left.1)
         .unwrap_or(Ordering::Equal)
         .then(left.0.cmp(&right.0))
+}
+
+pub(crate) fn merchant_similarity(
+    receipt_merchant: &str,
+    txn_payee: &str,
+    merchant_families: Vec<(String, Vec<String>)>,
+) -> f64 {
+    let families = build_merchant_families(&merchant_families);
+    merchant_similarity_impl(receipt_merchant, txn_payee, &families).0
+}
+
+pub(crate) fn match_receipt_to_transactions(
+    receipt_date_ordinal: i32,
+    receipt_total_scaled: i64,
+    receipt_merchant: String,
+    receipt_date_is_placeholder: bool,
+    date_tolerance_days: i32,
+    amount_tolerance_scaled: i64,
+    amount_tolerance_percent_scaled: i64,
+    transactions: Vec<(i32, Option<String>, Vec<Option<i64>>)>,
+    merchant_families: Vec<(String, Vec<String>)>,
+) -> Vec<(usize, f64, String)> {
+    let receipt = ReceiptInput {
+        date_ordinal: receipt_date_ordinal,
+        total_scaled: receipt_total_scaled,
+        merchant: receipt_merchant,
+        date_is_placeholder: receipt_date_is_placeholder,
+    };
+    let config = MatchConfig {
+        date_tolerance_days,
+        amount_tolerance_scaled,
+        amount_tolerance_percent_scaled,
+    };
+    let families = build_merchant_families(&merchant_families);
+
+    let mut matches: Vec<(usize, f64, String)> = transactions
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, (date_ordinal, payee, posting_amounts_scaled))| {
+            let txn = TransactionInput {
+                date_ordinal,
+                payee,
+                posting_amounts_scaled,
+            };
+            match_receipt_to_transaction_impl(&receipt, &txn, &config, &families)
+                .map(|(confidence, details)| (index, confidence, details))
+        })
+        .collect();
+
+    matches.sort_by(compare_matches);
+    matches
+}
+
+pub(crate) fn match_transaction_to_receipts(
+    txn_date_ordinal: i32,
+    txn_amount_scaled: i64,
+    txn_payee: String,
+    date_tolerance_days: i32,
+    amount_tolerance_scaled: i64,
+    amount_tolerance_percent_scaled: i64,
+    candidates: Vec<(i32, i64, String, bool)>,
+    merchant_families: Vec<(String, Vec<String>)>,
+) -> Vec<(usize, f64, String)> {
+    let config = MatchConfig {
+        date_tolerance_days,
+        amount_tolerance_scaled,
+        amount_tolerance_percent_scaled,
+    };
+    let families = build_merchant_families(&merchant_families);
+
+    let mut matches: Vec<(usize, f64, String)> = candidates
+        .into_iter()
+        .enumerate()
+        .filter_map(
+            |(index, (date_ordinal, total_scaled, merchant, date_is_placeholder))| {
+                let receipt = ReceiptInput {
+                    date_ordinal,
+                    total_scaled,
+                    merchant,
+                    date_is_placeholder,
+                };
+                match_transaction_to_receipt_impl(
+                    txn_date_ordinal,
+                    txn_amount_scaled,
+                    &txn_payee,
+                    &receipt,
+                    &config,
+                    &families,
+                )
+                .map(|(confidence, details)| (index, confidence, details))
+            },
+        )
+        .collect();
+
+    matches.sort_by(compare_matches);
+    matches
 }
 
 #[cfg(test)]
