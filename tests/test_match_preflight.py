@@ -7,6 +7,7 @@ from pathlib import Path
 from _pytest.monkeypatch import MonkeyPatch
 from beanbeaver.application.receipts.match import (
     _format_ledger_errors,
+    _format_match_apply_error,
     _prompt_failed_match_recovery,
     _re_edit_receipt_after_failed_match,
 )
@@ -36,6 +37,29 @@ def test_format_ledger_errors_includes_filename_and_line() -> None:
 def test_format_ledger_errors_limits_output() -> None:
     errors = [_Err(message=f"err-{i}") for i in range(7)]
     assert _format_ledger_errors(errors, limit=3) == ["err-0", "err-1", "err-2"]
+
+
+def test_format_match_apply_error_for_validation_failure() -> None:
+    exc = RuntimeError(
+        "ledger validation failed after replacement: "
+        "ValidationError(source={'filename': '/tmp/enriched.beancount', 'lineno': 6}, "
+        'message="Invalid reference to unknown account '
+        "'Expenses:Food:Grocery:Frozen:Dumplings'\""
+        ")"
+    )
+
+    assert _format_match_apply_error(exc) == [
+        "  Failed to apply match: ledger validation failed after replacement.",
+        "    File: /tmp/enriched.beancount:6",
+        "    Error: Invalid reference to unknown account 'Expenses:Food:Grocery:Frozen:Dumplings'",
+        "    Unknown account: Expenses:Food:Grocery:Frozen:Dumplings",
+    ]
+
+
+def test_format_match_apply_error_for_generic_exception() -> None:
+    exc = ValueError("boom")
+
+    assert _format_match_apply_error(exc) == ["  Failed to apply match: boom"]
 
 
 def test_prompt_failed_match_recovery_accepts_edit_after_invalid(monkeypatch: MonkeyPatch) -> None:

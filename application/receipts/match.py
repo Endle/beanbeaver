@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
@@ -100,6 +101,38 @@ def _format_ledger_errors(errors: Sequence[Any], *, limit: int = 5) -> list[str]
                 formatted.append(f"{filename} - {message}")
                 continue
         formatted.append(str(message))
+    return formatted
+
+
+def _format_match_apply_error(exc: Exception) -> list[str]:
+    """Render a user-facing error block for receipt match application failures."""
+    message = str(exc).strip() or exc.__class__.__name__
+    validation_prefix = "ledger validation failed after replacement:"
+    if not message.startswith(validation_prefix):
+        return [f"  Failed to apply match: {message}"]
+
+    details = message[len(validation_prefix) :].strip()
+    file_match = re.search(r"'filename': '([^']+)'", details)
+    line_match = re.search(r"'lineno': (\d+)", details)
+    message_match = re.search(r'message="([^"]+)"', details)
+    if message_match is None:
+        message_match = re.search(r"message='([^']+)'", details)
+
+    formatted = ["  Failed to apply match: ledger validation failed after replacement."]
+    if file_match and line_match:
+        formatted.append(f"    File: {file_match.group(1)}:{line_match.group(1)}")
+    elif file_match:
+        formatted.append(f"    File: {file_match.group(1)}")
+
+    if message_match:
+        formatted.append(f"    Error: {message_match.group(1)}")
+    elif details:
+        formatted.append(f"    Details: {details}")
+
+    unknown_account_match = re.search(r"unknown account '([^']+)'", details)
+    if unknown_account_match:
+        formatted.append(f"    Unknown account: {unknown_account_match.group(1)}")
+
     return formatted
 
 
@@ -473,7 +506,8 @@ def cmd_match(args: argparse.Namespace) -> None:
                     transactions = reloaded.transactions
                 break
             except Exception as exc:
-                print(f"  Failed to apply match: {exc}")
+                for line in _format_match_apply_error(exc):
+                    print(line)
                 recovery = _prompt_failed_match_recovery()
                 if recovery == "skip":
                     print("  Skipped")
