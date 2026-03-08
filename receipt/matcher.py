@@ -5,15 +5,22 @@ Supports bidirectional matching:
 - Transaction -> Receipts: find approved receipts matching a CC transaction (Workflow A)
 """
 
+from __future__ import annotations
+
+import importlib
+import importlib.util
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Protocol, cast
 
 from beanbeaver.domain.receipt import Receipt
+
+_SCALE_FACTOR = Decimal("10000")
 
 
 class AmountLike(Protocol):
@@ -63,6 +70,142 @@ class ReceiptMatchResult:
     match_details: str  # Human-readable explanation
 
 
+def _load_rust_matcher() -> ModuleType | None:
+    for module_name in ("beanbeaver._rust_matcher", "_rust_matcher"):
+        try:
+            return importlib.import_module(module_name)
+        except ImportError:
+            continue
+
+    project_root = Path(__file__).resolve().parents[1]
+    for candidate in (
+        project_root / "target" / "maturin" / "lib_rust_matcher.so",
+        project_root / "target" / "debug" / "lib_rust_matcher.so",
+    ):
+        if not candidate.exists():
+            continue
+        spec = importlib.util.spec_from_file_location("beanbeaver._rust_matcher", candidate)
+        if spec is None or spec.loader is None:
+            continue
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    return None
+
+
+_rust_matcher = _load_rust_matcher()
+
+
+def _config_or_default(config: MatchConfig | None) -> MatchConfig:
+    return config if config is not None else MatchConfig()
+
+
+def _decimal_to_scaled(value: Decimal) -> int:
+    return int(value * _SCALE_FACTOR)
+
+
+def _amount_tolerance(receipt_total: Decimal, config: MatchConfig) -> Decimal:
+    return max(config.amount_tolerance, receipt_total * config.amount_tolerance_percent)
+
+
+def _posting_amount_to_scaled(posting: PostingLike) -> int | None:
+    units = posting.units
+    number = units.number if units else None
+    if number is None:
+        return None
+    return _decimal_to_scaled(number)
+
+
+def _negative_posting_amount(txn: TransactionLike) -> Decimal | None:
+    for posting in txn.postings:
+        number = posting.units.number if posting.units else None
+        if number is not None and number < 0:
+            return abs(number)
+    return None
+
+
+def _transaction_location(txn: object) -> tuple[str, int]:
+    file_path = str(getattr(txn, "file_path", "unknown"))
+    raw_line_number = getattr(txn, "line_number", 0)
+    try:
+        line_number = int(raw_line_number)
+    except (TypeError, ValueError):
+        line_number = 0
+    if file_path == "unknown" and line_number == 0:
+        meta = getattr(txn, "meta", {})
+        if isinstance(meta, dict):
+            file_path = str(meta.get("filename", "unknown"))
+            raw_lineno: Any = meta.get("lineno", 0)
+            try:
+                line_number = int(raw_lineno)
+            except (TypeError, ValueError):
+                line_number = 0
+    return file_path, line_number
+
+
+def _match_receipt_to_transactions_rust(
+    receipt: Receipt,
+    transactions: Sequence[object],
+    config: MatchConfig,
+) -> list[tuple[int, float, str]] | None:
+    if _rust_matcher is None:
+        return None
+
+    payload = [
+        (
+            cast(TransactionLike, txn).date.toordinal(),
+            cast(TransactionLike, txn).payee,
+            [_posting_amount_to_scaled(posting) for posting in cast(TransactionLike, txn).postings],
+        )
+        for txn in transactions
+    ]
+    return list(
+        _rust_matcher.match_receipt_to_transactions(
+            receipt.date.toordinal(),
+            _decimal_to_scaled(receipt.total),
+            receipt.merchant,
+            receipt.date_is_placeholder,
+            config.date_tolerance_days,
+            _decimal_to_scaled(config.amount_tolerance),
+            _decimal_to_scaled(config.amount_tolerance_percent),
+            payload,
+        )
+    )
+
+
+def _match_transaction_to_receipts_rust(
+    txn_date: date,
+    txn_amount: Decimal,
+    txn_payee: str,
+    candidates: Sequence[tuple[Path, Receipt]],
+    config: MatchConfig,
+) -> list[tuple[int, float, str]] | None:
+    if _rust_matcher is None:
+        return None
+
+    payload = [
+        (
+            receipt.date.toordinal(),
+            _decimal_to_scaled(receipt.total),
+            receipt.merchant,
+            receipt.date_is_placeholder,
+        )
+        for _, receipt in candidates
+    ]
+    return list(
+        _rust_matcher.match_transaction_to_receipts(
+            txn_date.toordinal(),
+            _decimal_to_scaled(txn_amount),
+            txn_payee,
+            config.date_tolerance_days,
+            _decimal_to_scaled(config.amount_tolerance),
+            _decimal_to_scaled(config.amount_tolerance_percent),
+            payload,
+        )
+    )
+
+
 def match_transaction_to_receipts(
     txn_date: date,
     txn_amount: Decimal,
@@ -75,30 +218,32 @@ def match_transaction_to_receipts(
 
     This supports Workflow A where receipts are scanned early and
     matched later during CC import.
-
-    Args:
-        txn_date: Transaction date
-        txn_amount: Transaction amount (positive)
-        txn_payee: Transaction payee/merchant name
-        candidates: Pre-loaded receipt candidates as (path, receipt) pairs
-        config: Matching configuration
-
-    Returns:
-        List of matching receipts, sorted by confidence (highest first)
     """
-    if config is None:
-        config = MatchConfig()
+    resolved_config = _config_or_default(config)
+    rust_matches = _match_transaction_to_receipts_rust(
+        txn_date,
+        txn_amount,
+        txn_payee,
+        candidates,
+        resolved_config,
+    )
+    if rust_matches is not None:
+        return [
+            ReceiptMatchResult(
+                receipt=candidates[index][1],
+                receipt_path=candidates[index][0],
+                confidence=confidence,
+                match_details=details,
+            )
+            for index, confidence, details in rust_matches
+        ]
 
-    matches = []
-
+    matches: list[ReceiptMatchResult] = []
     for filepath, receipt in candidates:
-        result = _try_match_receipt(txn_date, txn_amount, txn_payee, receipt, filepath, config)
+        result = _try_match_receipt_py(txn_date, txn_amount, txn_payee, receipt, filepath, resolved_config)
         if result:
             matches.append(result)
-
-    # Sort by confidence (highest first)
     matches.sort(key=lambda m: m.confidence, reverse=True)
-
     return matches
 
 
@@ -110,22 +255,43 @@ def _try_match_receipt(
     receipt_path: Path,
     config: MatchConfig,
 ) -> ReceiptMatchResult | None:
-    """
-    Try to match a transaction to a single receipt.
+    rust_matches = _match_transaction_to_receipts_rust(
+        txn_date,
+        txn_amount,
+        txn_payee,
+        [(receipt_path, receipt)],
+        config,
+    )
+    if rust_matches is not None:
+        if not rust_matches:
+            return None
+        _, confidence, details = rust_matches[0]
+        return ReceiptMatchResult(
+            receipt=receipt,
+            receipt_path=receipt_path,
+            confidence=confidence,
+            match_details=details,
+        )
+    return _try_match_receipt_py(txn_date, txn_amount, txn_payee, receipt, receipt_path, config)
 
-    Uses the same scoring logic as _try_match but in reverse direction.
-    """
+
+def _try_match_receipt_py(
+    txn_date: date,
+    txn_amount: Decimal,
+    txn_payee: str,
+    receipt: Receipt,
+    receipt_path: Path,
+    config: MatchConfig,
+) -> ReceiptMatchResult | None:
     confidence = 0.0
-    details = []
+    details: list[str] = []
 
-    # Check date (skip if receipt date is unknown)
     if receipt.date_is_placeholder:
         details.append("date: unknown")
     else:
         date_diff = abs((txn_date - receipt.date).days)
         if date_diff > config.date_tolerance_days:
             return None
-
         if date_diff == 0:
             confidence += 0.4
             details.append("date: exact match")
@@ -133,13 +299,10 @@ def _try_match_receipt(
             confidence += 0.4 * (1 - date_diff / (config.date_tolerance_days + 1))
             details.append(f"date: {date_diff} day(s) off")
 
-    # Check amount
     amount_diff = abs(txn_amount - receipt.total)
-    amount_tolerance = max(config.amount_tolerance, receipt.total * config.amount_tolerance_percent)
-
+    amount_tolerance = _amount_tolerance(receipt.total, config)
     if amount_diff > amount_tolerance:
         return None
-
     if amount_diff == Decimal("0"):
         confidence += 0.4
         details.append("amount: exact match")
@@ -147,10 +310,8 @@ def _try_match_receipt(
         confidence += 0.4 * (1 - float(amount_diff / amount_tolerance))
         details.append(f"amount: ${amount_diff:.2f} off")
 
-    # Check merchant name (fuzzy)
     merchant_score = _merchant_similarity(receipt.merchant, txn_payee)
     if merchant_score < 0.3:
-        # Very low similarity - probably not a match
         return None
 
     confidence += 0.2 * merchant_score
@@ -172,20 +333,7 @@ def find_matching_transactions(
     ledger_entries: Sequence[object],
     config: MatchConfig | None = None,
 ) -> list[MatchResult]:
-    """
-    Find transactions in pre-loaded ledger entries that match the given receipt.
-
-    Args:
-        receipt: Approved receipt data
-        ledger_entries: Pre-loaded beancount entries from caller
-        config: Matching configuration
-
-    Returns:
-        List of matching transactions, sorted by confidence (highest first)
-    """
-    if config is None:
-        config = MatchConfig()
-
+    """Find transactions in pre-loaded ledger entries that match the given receipt."""
     return match_receipt_to_transactions(receipt, list(ledger_entries), config)
 
 
@@ -194,30 +342,31 @@ def match_receipt_to_transactions(
     transactions: Sequence[object],
     config: MatchConfig | None = None,
 ) -> list[MatchResult]:
-    """
-    Find transactions that match the given receipt from a pre-loaded list.
+    """Find transactions that match the given receipt from a pre-loaded list."""
+    resolved_config = _config_or_default(config)
+    rust_matches = _match_receipt_to_transactions_rust(receipt, transactions, resolved_config)
+    if rust_matches is not None:
+        results: list[MatchResult] = []
+        for index, confidence, details in rust_matches:
+            txn = cast(TransactionLike, transactions[index])
+            file_path, line_number = _transaction_location(txn)
+            results.append(
+                MatchResult(
+                    transaction=txn,
+                    file_path=file_path,
+                    line_number=line_number,
+                    confidence=confidence,
+                    match_details=details,
+                )
+            )
+        return results
 
-    Args:
-        receipt: Approved receipt data
-        transactions: List of pre-loaded beancount transactions
-        config: Matching configuration
-
-    Returns:
-        List of matching transactions, sorted by confidence (highest first)
-    """
-    if config is None:
-        config = MatchConfig()
-
-    matches = []
-
+    matches: list[MatchResult] = []
     for txn in transactions:
-        result = _try_match(receipt, cast(TransactionLike, txn), config)
+        result = _try_match_py(receipt, cast(TransactionLike, txn), resolved_config)
         if result:
             matches.append(result)
-
-    # Sort by confidence (highest first)
     matches.sort(key=lambda m: m.confidence, reverse=True)
-
     return matches
 
 
@@ -226,22 +375,36 @@ def _try_match(
     txn: TransactionLike,
     config: MatchConfig,
 ) -> MatchResult | None:
-    """
-    Try to match a receipt to a single transaction.
+    rust_matches = _match_receipt_to_transactions_rust(receipt, [txn], config)
+    if rust_matches is not None:
+        if not rust_matches:
+            return None
+        _, confidence, details = rust_matches[0]
+        file_path, line_number = _transaction_location(txn)
+        return MatchResult(
+            transaction=txn,
+            file_path=file_path,
+            line_number=line_number,
+            confidence=confidence,
+            match_details=details,
+        )
+    return _try_match_py(receipt, txn, config)
 
-    Returns MatchResult if it matches, None otherwise.
-    """
+
+def _try_match_py(
+    receipt: Receipt,
+    txn: TransactionLike,
+    config: MatchConfig,
+) -> MatchResult | None:
     confidence = 0.0
-    details = []
+    details: list[str] = []
 
-    # Check date (skip if receipt date is unknown)
     if receipt.date_is_placeholder:
         details.append("date: unknown")
     else:
         date_diff = abs((txn.date - receipt.date).days)
         if date_diff > config.date_tolerance_days:
             return None
-
         if date_diff == 0:
             confidence += 0.4
             details.append("date: exact match")
@@ -249,23 +412,14 @@ def _try_match(
             confidence += 0.4 * (1 - date_diff / (config.date_tolerance_days + 1))
             details.append(f"date: {date_diff} day(s) off")
 
-    # Check amount - find the credit card posting (negative amount)
-    txn_amount: Decimal | None = None
-    for posting in txn.postings:
-        number = posting.units.number if posting.units else None
-        if number is not None and number < 0:
-            txn_amount = abs(number)
-            break
-
+    txn_amount = _negative_posting_amount(txn)
     if txn_amount is None:
         return None
 
     amount_diff = abs(txn_amount - receipt.total)
-    amount_tolerance = max(config.amount_tolerance, receipt.total * config.amount_tolerance_percent)
-
+    amount_tolerance = _amount_tolerance(receipt.total, config)
     if amount_diff > amount_tolerance:
         return None
-
     if amount_diff == Decimal("0"):
         confidence += 0.4
         details.append("amount: exact match")
@@ -273,10 +427,8 @@ def _try_match(
         confidence += 0.4 * (1 - float(amount_diff / amount_tolerance))
         details.append(f"amount: ${amount_diff:.2f} off")
 
-    # Check merchant name (fuzzy)
     merchant_score = _merchant_similarity(receipt.merchant, txn.payee or "")
     if merchant_score < 0.3:
-        # Very low similarity - probably not a match
         return None
 
     confidence += 0.2 * merchant_score
@@ -285,19 +437,7 @@ def _try_match(
     else:
         details.append(f"merchant: partial match ({merchant_score:.0%})")
 
-    # Prefer DTO-provided source location; fall back to beancount-like metadata.
-    file_path = str(getattr(txn, "file_path", "unknown"))
-    line_number = int(getattr(txn, "line_number", 0))
-    if file_path == "unknown" and line_number == 0:
-        meta = getattr(txn, "meta", {})
-        if isinstance(meta, dict):
-            file_path = str(meta.get("filename", "unknown"))
-            raw_lineno: Any = meta.get("lineno", 0)
-            try:
-                line_number = int(raw_lineno)
-            except (TypeError, ValueError):
-                line_number = 0
-
+    file_path, line_number = _transaction_location(txn)
     return MatchResult(
         transaction=txn,
         file_path=file_path,
@@ -313,52 +453,44 @@ def _merchant_similarity(receipt_merchant: str, txn_payee: str) -> float:
 
     Returns a score from 0.0 to 1.0.
     """
+    if _rust_matcher is not None:
+        return float(_rust_matcher.merchant_similarity(receipt_merchant, txn_payee))
+    return _merchant_similarity_py(receipt_merchant, txn_payee)
 
-    # Normalize both strings
+
+def _merchant_similarity_py(receipt_merchant: str, txn_payee: str) -> float:
     def normalize(s: str) -> str:
         s = s.upper()
-        # Remove common suffixes/noise
         s = re.sub(r"\s+(INC|LLC|LTD|CORP|CO|#\d+|\d+)\.?$", "", s)
-        # Remove location info
-        s = re.sub(r",?\s*[A-Z]{2}\s*$", "", s)  # State/province codes
-        # Strip trailing city names only when they appear after a separator.
-        # This avoids removing single-word merchants like "COSTCO".
+        s = re.sub(r",?\s*[A-Z]{2}\s*$", "", s)
         s = re.sub(r"(?:,\s*|\s+)[A-Z][A-Za-z]+\s*$", "", s)
-        # Keep only alphanumeric
         s = re.sub(r"[^A-Z0-9]", "", s)
         return s
 
-    r = normalize(receipt_merchant)
-    t = normalize(txn_payee)
-
-    if not r or not t:
+    normalized_receipt = normalize(receipt_merchant)
+    normalized_txn = normalize(txn_payee)
+    if not normalized_receipt or not normalized_txn:
         return 0.0
 
-    # Check if one contains the other
-    if r in t or t in r:
+    if normalized_receipt in normalized_txn or normalized_txn in normalized_receipt:
         return 0.9
 
-    # Check common prefix
-    min_len = min(len(r), len(t))
+    min_len = min(len(normalized_receipt), len(normalized_txn))
     common_prefix = 0
     for i in range(min_len):
-        if r[i] == t[i]:
+        if normalized_receipt[i] == normalized_txn[i]:
             common_prefix += 1
         else:
             break
-
-    if common_prefix >= 4:  # At least 4 chars match
+    if common_prefix >= 4:
         return 0.5 + 0.4 * (common_prefix / min_len)
 
-    # Check if key words match
-    r_words = set(re.findall(r"[A-Z]{3,}", receipt_merchant.upper()))
-    t_words = set(re.findall(r"[A-Z]{3,}", txn_payee.upper()))
-
-    if r_words and t_words:
-        common_words = r_words & t_words
+    receipt_words = set(re.findall(r"[A-Z]{3,}", receipt_merchant.upper()))
+    txn_words = set(re.findall(r"[A-Z]{3,}", txn_payee.upper()))
+    if receipt_words and txn_words:
+        common_words = receipt_words & txn_words
         if common_words:
-            return 0.3 + 0.4 * (len(common_words) / len(r_words | t_words))
-
+            return 0.3 + 0.4 * (len(common_words) / len(receipt_words | txn_words))
     return 0.0
 
 
