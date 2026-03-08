@@ -56,10 +56,8 @@ jobs:
         run: |
           "$VENV_PYTHON" -m pip install --upgrade pip
           "$VENV_PYTHON" -m pip install -e ".[test,dev]"
-
       - name: Build native matcher extension
         run: "$VENV_MATURIN" develop
-
       - name: Assert native matcher backend is loaded
         env:
           BEANBEAVER_REQUIRE_RUST_MATCHER: "1"
