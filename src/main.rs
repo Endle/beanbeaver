@@ -86,6 +86,75 @@ struct ApproveReceiptResponse {
     approved_path: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EditField {
+    Merchant,
+    Date,
+    Total,
+}
+
+impl EditField {
+    fn label(self) -> &'static str {
+        match self {
+            EditField::Merchant => "Merchant",
+            EditField::Date => "Date",
+            EditField::Total => "Total",
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            EditField::Merchant => EditField::Date,
+            EditField::Date => EditField::Total,
+            EditField::Total => EditField::Merchant,
+        }
+    }
+
+    fn previous(self) -> Self {
+        match self {
+            EditField::Merchant => EditField::Total,
+            EditField::Date => EditField::Merchant,
+            EditField::Total => EditField::Date,
+        }
+    }
+}
+
+struct EditState {
+    merchant: String,
+    date: String,
+    total: String,
+    active_field: EditField,
+}
+
+impl EditState {
+    fn from_summary(summary: &ReceiptSummary) -> Self {
+        Self {
+            merchant: summary.merchant.clone().unwrap_or_default(),
+            date: summary.date.clone().unwrap_or_default(),
+            total: summary.total.clone().unwrap_or_default(),
+            active_field: EditField::Merchant,
+        }
+    }
+
+    fn active_value_mut(&mut self) -> &mut String {
+        match self.active_field {
+            EditField::Merchant => &mut self.merchant,
+            EditField::Date => &mut self.date,
+            EditField::Total => &mut self.total,
+        }
+    }
+
+    fn review_payload(&self) -> Value {
+        serde_json::json!({
+            "review": {
+                "merchant": self.merchant,
+                "date": self.date,
+                "total": self.total,
+            }
+        })
+    }
+}
+
 struct App {
     active_queue: Queue,
     scanned: Vec<ReceiptSummary>,
@@ -95,6 +164,7 @@ struct App {
     detail_lines: Vec<String>,
     detail_path: Option<String>,
     status: String,
+    edit_state: Option<EditState>,
     should_quit: bool,
 }
 
@@ -114,6 +184,7 @@ impl App {
             detail_path: None,
             status: "q quit | Tab switch queues | j/k move | r reload | a approve scanned"
                 .to_string(),
+            edit_state: None,
             should_quit: false,
         }
     }
@@ -218,6 +289,43 @@ impl App {
         );
         Ok(())
     }
+
+    fn begin_edit_selected_scanned(&mut self) {
+        if self.active_queue != Queue::Scanned {
+            self.status = "Structured review is only available in the Scanned queue".to_string();
+            return;
+        }
+        let Some(receipt) = self.selected_receipt() else {
+            self.status = "No scanned receipt selected".to_string();
+            return;
+        };
+        self.edit_state = Some(EditState::from_summary(receipt));
+        self.status =
+            "Edit review fields, Tab/Shift-Tab or Up/Down to move, Enter to save+approve, Esc to cancel"
+                .to_string();
+    }
+
+    fn apply_edit_and_approve(&mut self) -> AppResult<()> {
+        let Some(path) = self.selected_receipt().map(|receipt| receipt.path.clone()) else {
+            self.status = "No scanned receipt selected".to_string();
+            return Ok(());
+        };
+        let payload = {
+            let edit_state = self
+                .edit_state
+                .as_ref()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Missing edit state"))?;
+            serde_json::to_string(&edit_state.review_payload())?
+        };
+        let result = backend_approve_scanned_with_review(&path, &payload)?;
+        self.edit_state = None;
+        self.refresh()?;
+        self.status = format!(
+            "Approved {} -> {}",
+            result.source_path, result.approved_path
+        );
+        Ok(())
+    }
 }
 
 fn backend_command() -> Vec<String> {
@@ -235,14 +343,31 @@ fn backend_command() -> Vec<String> {
 }
 
 fn run_backend(args: &[&str]) -> AppResult<String> {
+    run_backend_with_input(args, None)
+}
+
+fn run_backend_with_input(args: &[&str], stdin_input: Option<&str>) -> AppResult<String> {
     let backend = backend_command();
     let (program, program_args) = backend
         .split_first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Empty backend command"))?;
-    let output = Command::new(program)
-        .args(program_args)
-        .args(args)
-        .output()?;
+    let mut command = Command::new(program);
+    command.args(program_args).args(args);
+    if stdin_input.is_some() {
+        command.stdin(std::process::Stdio::piped());
+    }
+    let mut child = command
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+    if let Some(input) = stdin_input {
+        use std::io::Write;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(input.as_bytes())?;
+        }
+    }
+    let output = child.wait_with_output()?;
 
     if output.status.success() {
         Ok(String::from_utf8(output.stdout)?)
@@ -273,6 +398,19 @@ fn backend_show_receipt(path: &str) -> AppResult<ShowReceiptResponse> {
 
 fn backend_approve_scanned(path: &str) -> AppResult<ApproveReceiptResponse> {
     let stdout = run_backend(&["api", "approve-scanned", path])?;
+    let response: ApproveReceiptResponse = serde_json::from_str(&stdout)?;
+    if response.status != "approved" {
+        return Err(format!("unexpected approve status: {}", response.status).into());
+    }
+    Ok(response)
+}
+
+fn backend_approve_scanned_with_review(
+    path: &str,
+    payload: &str,
+) -> AppResult<ApproveReceiptResponse> {
+    let stdout =
+        run_backend_with_input(&["api", "approve-scanned-with-review", path], Some(payload))?;
     let response: ApproveReceiptResponse = serde_json::from_str(&stdout)?;
     if response.status != "approved" {
         return Err(format!("unexpected approve status: {}", response.status).into());
@@ -378,6 +516,80 @@ fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
         .block(Block::default().borders(Borders::ALL).title("Status"))
         .wrap(Wrap { trim: true });
     frame.render_widget(footer, chunks[2]);
+
+    if let Some(edit_state) = &app.edit_state {
+        render_edit_modal(frame, edit_state);
+    }
+}
+
+fn render_edit_modal(frame: &mut ratatui::Frame<'_>, edit_state: &EditState) {
+    let popup = centered_rect(70, 14, frame.area());
+    frame.render_widget(
+        Block::default().style(Style::default().bg(Color::Black)),
+        popup,
+    );
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Min(1),
+        ])
+        .split(popup);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Review And Approve");
+    frame.render_widget(block, popup);
+
+    for (row, field, value) in [
+        (rows[0], EditField::Merchant, edit_state.merchant.as_str()),
+        (rows[1], EditField::Date, edit_state.date.as_str()),
+        (rows[2], EditField::Total, edit_state.total.as_str()),
+    ] {
+        let style = if edit_state.active_field == field {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        let paragraph = Paragraph::new(format!("{}: {}", field.label(), value))
+            .block(Block::default().borders(Borders::BOTTOM))
+            .style(style);
+        frame.render_widget(paragraph, row);
+    }
+
+    let help = Paragraph::new("Enter save+approve | Esc cancel | Backspace delete | Tab move")
+        .wrap(Wrap { trim: true });
+    frame.render_widget(help, rows[3]);
+}
+
+fn centered_rect(
+    width_percent: u16,
+    height: u16,
+    area: ratatui::layout::Rect,
+) -> ratatui::layout::Rect {
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(height),
+            Constraint::Min(1),
+        ])
+        .split(area);
+    let horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - width_percent) / 2),
+            Constraint::Percentage(width_percent),
+            Constraint::Percentage((100 - width_percent) / 2),
+        ])
+        .split(vertical[1]);
+    horizontal[1]
 }
 
 fn setup_terminal() -> AppResult<Terminal<CrosstermBackend<Stdout>>> {
@@ -413,6 +625,34 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
             continue;
         }
 
+        if let Some(edit_state) = app.edit_state.as_mut() {
+            match key.code {
+                KeyCode::Esc => {
+                    app.edit_state = None;
+                    app.status = "Review cancelled".to_string();
+                }
+                KeyCode::Enter => {
+                    if let Err(error) = app.apply_edit_and_approve() {
+                        app.status = error.to_string();
+                    }
+                }
+                KeyCode::Tab | KeyCode::Down => {
+                    edit_state.active_field = edit_state.active_field.next();
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    edit_state.active_field = edit_state.active_field.previous();
+                }
+                KeyCode::Backspace => {
+                    edit_state.active_value_mut().pop();
+                }
+                KeyCode::Char(ch) => {
+                    edit_state.active_value_mut().push(ch);
+                }
+                _ => {}
+            }
+            continue;
+        }
+
         match key.code {
             KeyCode::Char('q') => app.should_quit = true,
             KeyCode::Tab => {
@@ -443,6 +683,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
                     app.status = error.to_string();
                 }
             }
+            KeyCode::Char('e') => app.begin_edit_selected_scanned(),
             KeyCode::Char('1') | KeyCode::Char('2') => {
                 let next = if key.code == KeyCode::Char('1') { 0 } else { 1 };
                 app.active_queue = Queue::from_tab(next);

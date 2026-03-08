@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -79,6 +80,35 @@ def cmd_api_approve_scanned(args: argparse.Namespace) -> None:
 
     target_path = _resolve_stage_path(args.path)
     result = run_approve_scanned_receipt(ApproveScannedReceiptRequest(target_path=target_path))
+    _print_json(
+        {
+            "status": "approved",
+            "source_path": str(target_path),
+            "approved_path": str(result.approved_path),
+        }
+    )
+
+
+def cmd_api_approve_scanned_with_review(args: argparse.Namespace) -> None:
+    """Approve one scanned receipt after applying receipt-level review overrides from stdin JSON."""
+    from beanbeaver.application.receipts.approval import (
+        ApproveScannedReceiptRequest,
+        run_approve_scanned_receipt_with_review,
+    )
+
+    payload = json.load(sys.stdin)
+    if not isinstance(payload, dict):
+        raise ValueError("Review payload must be a JSON object")
+
+    review_patch = payload.get("review", {})
+    if not isinstance(review_patch, dict):
+        raise ValueError("Review payload field 'review' must be a JSON object")
+
+    target_path = _resolve_stage_path(args.path)
+    result = run_approve_scanned_receipt_with_review(
+        ApproveScannedReceiptRequest(target_path=target_path),
+        review_patch=review_patch,
+    )
     _print_json(
         {
             "status": "approved",

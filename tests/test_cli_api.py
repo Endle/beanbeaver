@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import io
 import json
 from pathlib import Path
 
@@ -143,3 +144,39 @@ def test_api_approve_scanned_moves_receipt_and_creates_review_stage(
     assert approved_document["meta"]["stage_index"] == 1
     assert approved_document["meta"]["created_by"] == "tui_review"
     assert approved_document["meta"]["pass_name"] == "tui_approve"
+
+
+def test_api_approve_scanned_with_review_applies_receipt_overrides(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    paths = _configure_temp_root(tmp_path, monkeypatch)
+    scanned_dir = paths.receipts_json_scanned / "2026-03-04_market_10_00_feed"
+    stage_path = scanned_dir / "parsed.receipt.json"
+    save_stage_document(
+        stage_path,
+        _stage_document(
+            merchant="Market",
+            receipt_date="2026-03-04",
+            total="10.00",
+            stage="parsed",
+            stage_index=0,
+        ),
+    )
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(json.dumps({"review": {"merchant": "Better Market", "date": "2026-03-05", "total": "11.25"}})),
+    )
+
+    exit_code = unified_cli.main(["api", "approve-scanned-with-review", str(stage_path)])
+
+    captured = json.loads(capsys.readouterr().out)
+    approved_path = Path(captured["approved_path"])
+    approved_document = json.loads(approved_path.read_text())
+    assert exit_code == 0
+    assert approved_document["review"] == {
+        "merchant": "Better Market",
+        "date": "2026-03-05",
+        "total": "11.25",
+    }

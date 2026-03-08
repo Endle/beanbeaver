@@ -120,6 +120,12 @@ Notes:
     )
     approve_scanned_parser.add_argument("path", help="Path to a staged receipt JSON file in scanned/")
 
+    approve_scanned_review_parser = api_subparsers.add_parser(
+        "approve-scanned-with-review",
+        help="Approve one scanned receipt with receipt-level review overrides from stdin JSON",
+    )
+    approve_scanned_review_parser.add_argument("path", help="Path to a staged receipt JSON file in scanned/")
+
     args = parser.parse_args(argv)
 
     if args.command is None:
@@ -201,6 +207,7 @@ Notes:
     elif args.command == "api":
         from beanbeaver.cli.api import (
             cmd_api_approve_scanned,
+            cmd_api_approve_scanned_with_review,
             cmd_api_list_approved,
             cmd_api_list_scanned,
             cmd_api_show_receipt,
@@ -214,6 +221,8 @@ Notes:
             return _run_legacy_command(cmd_api_show_receipt, args)
         if args.api_command == "approve-scanned":
             return _run_legacy_command(cmd_api_approve_scanned, args)
+        if args.api_command == "approve-scanned-with-review":
+            return _run_legacy_command(cmd_api_approve_scanned_with_review, args)
         parser.print_help()
         return 1
 
