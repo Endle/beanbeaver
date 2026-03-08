@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from beanbeaver.domain.receipt import Receipt
+from beanbeaver.domain.receipt import Receipt, ReceiptItem
 from beanbeaver.receipt.beancount_rendering import render_stage_document_as_beancount
+from beanbeaver.receipt.date_utils import placeholder_receipt_date
 from beanbeaver.receipt.receipt_structuring import (
     build_parsed_receipt_stage,
     clone_stage_document,
@@ -19,7 +22,12 @@ from beanbeaver.receipt.receipt_structuring import (
     receipt_from_stage_document,
     save_stage_document,
 )
-from beanbeaver.runtime import get_logger, get_paths, load_item_category_rule_layers, load_receipt_structuring_rule_layers
+from beanbeaver.runtime import (
+    get_logger,
+    get_paths,
+    load_item_category_rule_layers,
+    load_receipt_structuring_rule_layers,
+)
 
 logger = get_logger(__name__)
 
@@ -30,11 +38,43 @@ MATCHED_DIR = _paths.receipts_json_matched
 RENDERED_SCANNED_DIR = _paths.receipts_rendered_scanned
 RENDERED_APPROVED_DIR = _paths.receipts_rendered_approved
 RENDERED_MATCHED_DIR = _paths.receipts_rendered_matched
+LEGACY_SCANNED_DIR = _paths.receipts / "scanned"
+LEGACY_APPROVED_DIR = _paths.receipts / "approved"
+LEGACY_MATCHED_DIR = _paths.receipts / "matched"
 
 
 def ensure_directories() -> None:
     """Create required receipt directories if they do not exist."""
     _paths.ensure_receipt_directories()
+    _migrate_legacy_flat_receipts()
+
+
+def _next_available_dir(path: Path) -> Path:
+    """Return a unique directory path when collisions exist."""
+    if not path.exists():
+        return path
+
+    counter = 1
+    while True:
+        candidate = path.parent / f"{path.name}_{counter}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
+def _next_available_file(path: Path) -> Path:
+    """Return a unique file path when collisions exist."""
+    if not path.exists():
+        return path
+
+    counter = 1
+    stem = path.stem
+    suffix = path.suffix
+    while True:
+        candidate = path.parent / f"{stem}_{counter}{suffix}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
 
 
 def _slug(text: str | None) -> str:
@@ -69,6 +109,209 @@ def _receipt_dir_name(document: dict[str, Any]) -> str:
 def _rendered_filename(document: dict[str, Any]) -> str:
     """Return the rendered Beancount filename for a stage document."""
     return f"{_receipt_dir_name(document)}.beancount"
+
+
+def _legacy_receipt_mappings() -> tuple[tuple[Path, Path, Path, str], ...]:
+    """Return legacy flat-file receipt roots paired with staged targets."""
+    return (
+        (LEGACY_SCANNED_DIR, SCANNED_DIR, RENDERED_SCANNED_DIR, "scanned"),
+        (LEGACY_APPROVED_DIR, APPROVED_DIR, RENDERED_APPROVED_DIR, "approved"),
+        (LEGACY_MATCHED_DIR, MATCHED_DIR, RENDERED_MATCHED_DIR, "matched"),
+    )
+
+
+def _parse_legacy_receipt_from_beancount(filepath: Path) -> tuple[Receipt, str | None]:
+    """Reconstruct a Receipt and metadata from a legacy flat Beancount file."""
+    content = filepath.read_text()
+    lines = content.splitlines()
+
+    merchant = "Unknown"
+    receipt_date: date | None = None
+    date_is_unknown = False
+    total = Decimal("0")
+    items = []
+    tax: Decimal | None = None
+    image_filename = ""
+    image_sha256: str | None = None
+
+    raw_text_lines: list[str] = []
+    in_raw_text = False
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "; --- Raw OCR Text (for reference) ---":
+            in_raw_text = True
+            continue
+        if in_raw_text:
+            if stripped.startswith(";"):
+                raw_line = stripped[1:]
+                if raw_line.startswith(" "):
+                    raw_line = raw_line[1:]
+                raw_text_lines.append(raw_line)
+                continue
+            if not stripped:
+                continue
+            in_raw_text = False
+
+        if stripped.startswith("; @merchant:"):
+            merchant = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("; @date:"):
+            date_value = stripped.split(":", 1)[1].strip()
+            if date_value.upper() == "UNKNOWN":
+                date_is_unknown = True
+                receipt_date = None
+            else:
+                try:
+                    receipt_date = date.fromisoformat(date_value)
+                except ValueError:
+                    receipt_date = None
+        elif stripped.startswith("; @total:"):
+            try:
+                total = Decimal(stripped.split(":", 1)[1].strip())
+            except InvalidOperation:
+                pass
+        elif stripped.startswith("; @tax:"):
+            try:
+                tax = Decimal(stripped.split(":", 1)[1].strip())
+            except InvalidOperation:
+                pass
+        elif stripped.startswith("; @image_filename:"):
+            image_filename = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("; @image:"):
+            image_filename = stripped.split(":", 1)[1].strip()
+        elif stripped.startswith("; @image_sha256:"):
+            candidate = stripped.split(":", 1)[1].strip()
+            image_sha256 = candidate or None
+
+    for line in lines:
+        stripped = line.strip()
+        if re.match(r"^\d{4}-\d{2}-\d{2}\s+\S", stripped):
+            if receipt_date is None or date_is_unknown:
+                try:
+                    receipt_date = date.fromisoformat(stripped[:10])
+                    date_is_unknown = False
+                except ValueError:
+                    pass
+            payee_match = re.search(r'\S+\s+"([^"]*)"', stripped)
+            if payee_match and merchant == "Unknown":
+                merchant = payee_match.group(1)
+            break
+
+    expense_pattern = re.compile(r"^\s+(Expenses:\S+)\s+([+-]?\d+(?:\.\d+)?)\s+\w+\s*;?\s*(.*)$")
+    for line in lines:
+        match = expense_pattern.match(line)
+        if not match:
+            continue
+
+        category = match.group(1)
+        try:
+            price = Decimal(match.group(2))
+        except InvalidOperation:
+            continue
+
+        description = match.group(3).strip()
+        if "Tax:HST" in category or "Tax:GST" in category:
+            tax = price
+            continue
+        if "FIXME: unaccounted" in description:
+            continue
+
+        quantity = 1
+        qty_match = re.search(r"\(qty\s+(\d+)\)", description)
+        if qty_match:
+            quantity = int(qty_match.group(1))
+            description = re.sub(r"\s*\(qty\s+\d+\)", "", description)
+
+        items.append(
+            {
+                "description": description,
+                "price": price,
+                "quantity": quantity,
+                "category": category,
+            }
+        )
+
+    if total == Decimal("0") and items:
+        total = sum((item["price"] for item in items), Decimal("0"))
+        if tax:
+            total += tax
+
+    date_is_placeholder = date_is_unknown
+    if receipt_date is None:
+        receipt_date = placeholder_receipt_date()
+        date_is_placeholder = True
+
+    receipt = Receipt(
+        merchant=merchant,
+        date=receipt_date,
+        date_is_placeholder=date_is_placeholder,
+        total=total,
+        items=[
+            ReceiptItem(
+                description=item["description"],
+                price=item["price"],
+                quantity=item["quantity"],
+                category=item["category"],
+            )
+            for item in items
+        ],
+        tax=tax,
+        raw_text="\n".join(raw_text_lines),
+        image_filename=image_filename,
+    )
+    return receipt, image_sha256
+
+
+def _migrate_legacy_flat_receipt(
+    legacy_path: Path,
+    *,
+    target_json_root: Path,
+    target_rendered_root: Path,
+    status: str,
+) -> None:
+    """Convert one legacy flat receipt file into the staged JSON layout."""
+    receipt, image_sha256 = _parse_legacy_receipt_from_beancount(legacy_path)
+    document = build_parsed_receipt_stage(
+        receipt,
+        rule_layers=load_receipt_structuring_rule_layers(),
+        image_sha256=image_sha256,
+        created_by="legacy_migration",
+        pass_name=f"legacy_flat_{status}",
+    )
+    document["meta"]["receipt_id"] = hashlib.sha256(legacy_path.read_bytes()).hexdigest()
+    document["meta"]["legacy_source_path"] = str(legacy_path.relative_to(_paths.root))
+
+    for item_doc, item in zip(document.get("items") or [], receipt.items):
+        if item.category:
+            classification = dict(item_doc.get("classification") or {})
+            classification["category"] = item.category
+            item_doc["classification"] = classification
+
+    receipt_dir = _next_available_dir(target_json_root / _receipt_dir_name(document))
+    receipt_dir.mkdir(parents=True, exist_ok=False)
+    stage_path = receipt_dir / "parsed.receipt.json"
+    save_stage_document(stage_path, document)
+
+    rendered_path = _next_available_file(target_rendered_root / _rendered_filename(document))
+    legacy_path.rename(rendered_path)
+    logger.info("Migrated legacy %s receipt %s -> %s", status, legacy_path, stage_path)
+
+
+def _migrate_legacy_flat_receipts() -> None:
+    """Move legacy flat receipt files into the current staged layout."""
+    for legacy_root, json_root, rendered_root, status in _legacy_receipt_mappings():
+        if not legacy_root.exists():
+            continue
+        for legacy_path in sorted(legacy_root.glob("*.beancount")):
+            try:
+                _migrate_legacy_flat_receipt(
+                    legacy_path,
+                    target_json_root=json_root,
+                    target_rendered_root=rendered_root,
+                    status=status,
+                )
+            except Exception as exc:
+                logger.warning("Failed to migrate legacy %s receipt %s: %s", status, legacy_path, exc)
 
 
 def _stage_files(receipt_dir: Path) -> list[Path]:
