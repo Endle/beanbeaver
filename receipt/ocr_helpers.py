@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from .detection_normalization import normalize_detections
+from .ocr_extraction.schema import OCR_ENGINE_NAME_PADDLE, OCR_SCHEMA_VERSION, OcrBBox, OcrDocument
 
 MAX_IMAGE_DIMENSION = 3000  # Resize if either dimension exceeds this
 OCR_IMAGE_PADDING = 50  # White padding around image to prevent edge truncation
@@ -294,7 +295,24 @@ def _group_detections_by_y_overlap(detections: list[dict], image_width: int = 10
     return lines
 
 
-def transform_paddleocr_result(raw_result: dict[str, Any], padding: int = OCR_IMAGE_PADDING) -> dict[str, Any]:
+def _clamp_unit_interval(value: float) -> float:
+    """Clamp one float to the normalized [0, 1] bbox range."""
+    return max(0.0, min(1.0, value))
+
+
+def _normalized_bbox_from_points(points: list[list[float]], image_width: int, image_height: int) -> OcrBBox:
+    """Convert a 4-point OCR polygon into a normalized axis-aligned bbox."""
+    x_coords = [p[0] for p in points]
+    y_coords = [p[1] for p in points]
+    return {
+        "left": _clamp_unit_interval(min(x_coords) / image_width),
+        "top": _clamp_unit_interval(min(y_coords) / image_height),
+        "right": _clamp_unit_interval(max(x_coords) / image_width),
+        "bottom": _clamp_unit_interval(max(y_coords) / image_height),
+    }
+
+
+def transform_paddleocr_result(raw_result: dict[str, Any], padding: int = OCR_IMAGE_PADDING) -> OcrDocument:
     """
     Transform raw PaddleOCR result into the format expected by ocr_result_parser.
 
@@ -309,9 +327,22 @@ def transform_paddleocr_result(raw_result: dict[str, Any], padding: int = OCR_IM
 
     if not detections:
         return {
+            "schema_version": OCR_SCHEMA_VERSION,
+            "engine": {"name": OCR_ENGINE_NAME_PADDLE, "version": None},
+            "source": {
+                "image_width": image_width,
+                "image_height": image_height,
+            },
             "status": "success",
             "full_text": "",
-            "pages": [{"lines": []}],
+            "pages": [
+                {
+                    "page_index": 0,
+                    "width": image_width,
+                    "height": image_height,
+                    "lines": [],
+                }
+            ],
         }
 
     # Filter thresholds
@@ -370,38 +401,58 @@ def transform_paddleocr_result(raw_result: dict[str, Any], padding: int = OCR_IM
 
     # Convert to API format
     result_lines: list[dict[str, Any]] = []
-    for line in lines:
+    for line_idx, line in enumerate(lines, start=1):
         words: list[dict[str, Any]] = []
-        for det in line:
-            # Normalize bbox to [0,1] range
-            bbox_points = det["bbox"]
-            x_coords = [p[0] for p in bbox_points]
-            y_coords = [p[1] for p in bbox_points]
-
-            def clamp(val: float, min_val: float = 0.0, max_val: float = 1.0) -> float:
-                return max(min_val, min(max_val, val))
-
-            normalized_bbox = (
-                (clamp(min(x_coords) / image_width), clamp(min(y_coords) / image_height)),
-                (clamp(max(x_coords) / image_width), clamp(max(y_coords) / image_height)),
-            )
-
+        line_confidence_sum = 0.0
+        for word_idx, det in enumerate(line, start=1):
+            normalized_bbox = _normalized_bbox_from_points(det["bbox"], image_width, image_height)
+            confidence = float(det["confidence"])
+            line_confidence_sum += confidence
             words.append(
                 {
+                    "id": f"word-{line_idx:04d}-{word_idx:04d}",
                     "text": det["text"],
-                    "confidence": float(det["confidence"]),
+                    "confidence": confidence,
                     "bbox": normalized_bbox,
                 }
             )
 
         line_text = " ".join(str(w["text"]) for w in words)
-        result_lines.append({"text": line_text, "words": words})
+        line_bbox = {
+            "left": min(word["bbox"]["left"] for word in words),
+            "top": min(word["bbox"]["top"] for word in words),
+            "right": max(word["bbox"]["right"] for word in words),
+            "bottom": max(word["bbox"]["bottom"] for word in words),
+        }
+        line_confidence = line_confidence_sum / len(words) if words else None
+        result_lines.append(
+            {
+                "id": f"line-{line_idx:04d}",
+                "text": line_text,
+                "bbox": line_bbox,
+                "confidence": line_confidence,
+                "words": words,
+            }
+        )
 
     # Extract full text
     full_text = "\n".join(line["text"] for line in result_lines)
 
     return {
+        "schema_version": OCR_SCHEMA_VERSION,
+        "engine": {"name": OCR_ENGINE_NAME_PADDLE, "version": None},
+        "source": {
+            "image_width": image_width,
+            "image_height": image_height,
+        },
         "status": "success",
         "full_text": full_text,
-        "pages": [{"lines": result_lines}],
+        "pages": [
+            {
+                "page_index": 0,
+                "width": image_width,
+                "height": image_height,
+                "lines": result_lines,
+            }
+        ],
     }

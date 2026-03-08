@@ -25,6 +25,13 @@ def test_transform_filters_overlapping_bob_markers_keeps_real_item_lines() -> No
     transformed = transform_paddleocr_result(raw_result, padding=0)
     full_text = transformed["full_text"]
 
+    assert transformed["schema_version"] == "ocr.v1"
+    assert transformed["engine"]["name"] == "paddleocr"
+    assert transformed["source"] == {"image_width": 1000, "image_height": 1200}
+    assert transformed["pages"][0]["page_index"] == 0
+    first_word_bbox = transformed["pages"][0]["lines"][0]["words"][0]["bbox"]
+    assert set(first_word_bbox) == {"left", "top", "right", "bottom"}
+
     assert "Bottom of Baske" not in full_text
     assert "BOB Count 3" not in full_text
     assert "232952 COKE ZERO 17.19 H" in full_text

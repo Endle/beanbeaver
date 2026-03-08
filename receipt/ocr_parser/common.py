@@ -263,19 +263,42 @@ def _looks_like_quantity_expression(text: str) -> bool:
     )
 
 
+def _bbox_edges(value: Any) -> tuple[float, float, float, float]:
+    """Return normalized bbox edges from either legacy or canonical bbox data."""
+    if isinstance(value, dict):
+        left = float(value.get("left", 0.0))
+        top = float(value.get("top", 0.0))
+        right = float(value.get("right", left))
+        bottom = float(value.get("bottom", top))
+        return left, top, right, bottom
+
+    if isinstance(value, (list, tuple)) and len(value) >= 2:
+        first = value[0]
+        second = value[1]
+        if (
+            isinstance(first, (list, tuple))
+            and len(first) >= 2
+            and isinstance(second, (list, tuple))
+            and len(second) >= 2
+        ):
+            left = float(first[0])
+            top = float(first[1])
+            right = float(second[0])
+            bottom = float(second[1])
+            return left, top, right, bottom
+
+    return 0.0, 0.0, 0.0, 0.0
+
+
 def _get_word_y_center(word: dict[str, Any]) -> float:
     """Get the vertical center of a word from its bbox."""
-    bbox = word.get("bbox", [[0, 0], [0, 0]])
-    y_top = bbox[0][1]
-    y_bottom = bbox[1][1]
+    _, y_top, _, y_bottom = _bbox_edges(word.get("bbox"))
     return (y_top + y_bottom) / 2
 
 
 def _get_word_x_center(word: dict[str, Any]) -> float:
     """Get the horizontal center of a word from its bbox."""
-    bbox = word.get("bbox", [[0, 0], [0, 0]])
-    x_left = bbox[0][0]
-    x_right = bbox[1][0]
+    x_left, _, x_right, _ = _bbox_edges(word.get("bbox"))
     return (x_left + x_right) / 2
 
 
@@ -332,7 +355,10 @@ def _has_useful_bbox_data(pages: list[dict[str, Any]]) -> bool:
     # Check first page for bbox data
     for line in pages[0].get("lines", [])[:10]:
         for word in line.get("words", []):
-            if "bbox" in word and len(word["bbox"]) >= 2:
+            bbox = word.get("bbox")
+            if isinstance(bbox, dict) and {"left", "top", "right", "bottom"} <= set(bbox):
+                return True
+            if isinstance(bbox, (list, tuple)) and len(bbox) >= 2:
                 return True
     return False
 

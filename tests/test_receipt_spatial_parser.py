@@ -8,7 +8,12 @@ from beanbeaver.runtime.item_category_rules import load_receipt_structuring_rule
 def _word(text: str, x_left: float, y_top: float, x_right: float, y_bottom: float) -> dict:
     return {
         "text": text,
-        "bbox": [[x_left, y_top], [x_right, y_bottom]],
+        "bbox": {
+            "left": x_left,
+            "top": y_top,
+            "right": x_right,
+            "bottom": y_bottom,
+        },
         "confidence": 0.99,
     }
 
