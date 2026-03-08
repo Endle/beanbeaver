@@ -215,3 +215,54 @@ def test_rust_backend_loads_when_required() -> None:
         return
 
     assert rust_backend_loaded()
+
+
+def test_rust_backend_accepts_named_dict_payloads_when_required() -> None:
+    if os.environ.get("BEANBEAVER_REQUIRE_RUST_MATCHER") != "1":
+        return
+
+    assert rust_backend_loaded()
+
+    from beanbeaver.receipt import matcher as matcher_module
+
+    assert matcher_module._rust_matcher is not None
+
+    receipt_payload = {
+        "date_ordinal": date(2024, 1, 15).toordinal(),
+        "total_scaled": 1_000_000,
+        "merchant": "REAL CANADIAN",
+        "date_is_placeholder": False,
+    }
+    config_payload = {
+        "date_tolerance_days": 3,
+        "amount_tolerance_scaled": 1_000,
+        "amount_tolerance_percent_scaled": 100,
+    }
+    transaction_payloads = [
+        {
+            "date_ordinal": date(2024, 1, 17).toordinal(),
+            "payee": "RCSS 1077 TORONTO ON",
+            "posting_amounts_scaled": [-1_000_000],
+        }
+    ]
+    merchant_family_payloads = [
+        {
+            "canonical": "REAL CANADIAN SUPERSTORE",
+            "aliases": ["REAL CANADIAN", "RCSS"],
+        }
+    ]
+
+    matches = list(
+        matcher_module._rust_matcher.match_receipt_to_transactions(
+            receipt_payload,
+            config_payload,
+            transaction_payloads,
+            merchant_family_payloads,
+        )
+    )
+
+    assert matches
+    index, confidence, details = matches[0]
+    assert index == 0
+    assert confidence > 0.8
+    assert "family match" in details

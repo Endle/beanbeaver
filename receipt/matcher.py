@@ -117,11 +117,31 @@ _rust_matcher = _load_rust_matcher()
 
 def _merchant_family_payload(
     merchant_families: Sequence[MerchantFamily] | None,
-) -> list[tuple[str, list[str]]]:
+) -> list[dict[str, object]]:
     return [
-        (family.canonical, list(family.aliases))
+        {
+            "canonical": family.canonical,
+            "aliases": list(family.aliases),
+        }
         for family in (merchant_families or ())
     ]
+
+
+def _config_payload(config: MatchConfig) -> dict[str, int]:
+    return {
+        "date_tolerance_days": config.date_tolerance_days,
+        "amount_tolerance_scaled": _decimal_to_scaled(config.amount_tolerance),
+        "amount_tolerance_percent_scaled": _decimal_to_scaled(config.amount_tolerance_percent),
+    }
+
+
+def _receipt_payload(receipt: Receipt) -> dict[str, object]:
+    return {
+        "date_ordinal": receipt.date.toordinal(),
+        "total_scaled": _decimal_to_scaled(receipt.total),
+        "merchant": receipt.merchant,
+        "date_is_placeholder": receipt.date_is_placeholder,
+    }
 
 
 def _normalize_merchant_py(value: str) -> str:
@@ -224,26 +244,23 @@ def _match_receipt_to_transactions_rust(
         return None
 
     payload = [
-        (
-            cast(TransactionLike, txn).date.toordinal(),
-            cast(TransactionLike, txn).payee,
-            [_posting_amount_to_scaled(posting) for posting in cast(TransactionLike, txn).postings],
-        )
+        {
+            "date_ordinal": cast(TransactionLike, txn).date.toordinal(),
+            "payee": cast(TransactionLike, txn).payee,
+            "posting_amounts_scaled": [
+                _posting_amount_to_scaled(posting) for posting in cast(TransactionLike, txn).postings
+            ],
+        }
         for txn in transactions
     ]
     return list(
-            _rust_matcher.match_receipt_to_transactions(
-                receipt.date.toordinal(),
-                _decimal_to_scaled(receipt.total),
-                receipt.merchant,
-                receipt.date_is_placeholder,
-            config.date_tolerance_days,
-                _decimal_to_scaled(config.amount_tolerance),
-                _decimal_to_scaled(config.amount_tolerance_percent),
-                payload,
-                _merchant_family_payload(merchant_families),
-            )
+        _rust_matcher.match_receipt_to_transactions(
+            _receipt_payload(receipt),
+            _config_payload(config),
+            payload,
+            _merchant_family_payload(merchant_families),
         )
+    )
 
 
 def _match_transaction_to_receipts_rust(
@@ -258,26 +275,26 @@ def _match_transaction_to_receipts_rust(
         return None
 
     payload = [
-        (
-            receipt.date.toordinal(),
-            _decimal_to_scaled(receipt.total),
-            receipt.merchant,
-            receipt.date_is_placeholder,
-        )
+        {
+            "date_ordinal": receipt.date.toordinal(),
+            "total_scaled": _decimal_to_scaled(receipt.total),
+            "merchant": receipt.merchant,
+            "date_is_placeholder": receipt.date_is_placeholder,
+        }
         for _, receipt in candidates
     ]
     return list(
-            _rust_matcher.match_transaction_to_receipts(
-                txn_date.toordinal(),
-                _decimal_to_scaled(txn_amount),
-                txn_payee,
-                config.date_tolerance_days,
-                _decimal_to_scaled(config.amount_tolerance),
-                _decimal_to_scaled(config.amount_tolerance_percent),
-                payload,
-                _merchant_family_payload(merchant_families),
-            )
+        _rust_matcher.match_transaction_to_receipts(
+            {
+                "date_ordinal": txn_date.toordinal(),
+                "amount_scaled": _decimal_to_scaled(txn_amount),
+                "payee": txn_payee,
+            },
+            _config_payload(config),
+            payload,
+            _merchant_family_payload(merchant_families),
         )
+    )
 
 
 def match_transaction_to_receipts(
