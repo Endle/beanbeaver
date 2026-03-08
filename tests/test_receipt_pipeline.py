@@ -4,6 +4,7 @@ import importlib
 import json
 from pathlib import Path
 
+import beanbeaver.runtime.paths as runtime_paths
 import beanbeaver.runtime.receipt_pipeline as receipt_pipeline
 from _pytest.monkeypatch import MonkeyPatch
 from beanbeaver.runtime.paths import ProjectPaths
@@ -11,6 +12,7 @@ from beanbeaver.runtime.paths import ProjectPaths
 
 def test_save_stage1_ocr_json_writes_named_artifact(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setenv("BEANBEAVER_ROOT", str(tmp_path))
+    runtime_paths.reset_paths()
     importlib.reload(receipt_pipeline)
 
     receipt_path = tmp_path / "receipts" / "sample.jpg"
