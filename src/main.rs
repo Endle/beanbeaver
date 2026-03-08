@@ -1,6 +1,6 @@
 use std::env;
 use std::error::Error;
-use std::io::{self, Stdout};
+use std::io::{self, Stdout, Write};
 use std::process::Command;
 use std::time::Duration;
 
@@ -131,18 +131,6 @@ struct MatchCandidatesResponse {
     errors: Vec<String>,
     warning: Option<String>,
     candidates: Vec<MatchCandidateSummary>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct ApplyMatchResponse {
-    status: String,
-    #[serde(rename = "ledger_path")]
-    _ledger_path: String,
-    #[serde(rename = "matched_receipt_path")]
-    _matched_receipt_path: Option<String>,
-    #[serde(rename = "enriched_path")]
-    _enriched_path: Option<String>,
-    message: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -311,7 +299,7 @@ impl App {
             detail_scroll_y: 0,
             detail_scroll_x: 0,
             status:
-                "q quit | Tab switch queues | h/l pane focus | j/k list or detail | e edit | m match approved | arrows pan detail | r reload | a approve | c config"
+                "q quit | Tab switch queues | h/l pane focus | j/k list or detail | e edit | m TUI match | M CLI match | arrows pan detail | r reload | a approve | c config"
                     .to_string(),
             edit_state: None,
             edit_mode: None,
@@ -527,9 +515,21 @@ impl App {
         Ok(())
     }
 
-    fn begin_match_selected_approved(&mut self) -> AppResult<()> {
+    fn can_match_selected_approved(&mut self) -> AppResult<bool> {
         if self.active_queue != Queue::Approved {
             self.status = "Match is only available in the Approved queue".to_string();
+            return Ok(false);
+        }
+        let Some(_) = self.selected_receipt().map(|receipt| receipt.path.clone()) else {
+            self.status = "No approved receipt selected".to_string();
+            return Ok(false);
+        };
+        self.status = "Launching bb match...".to_string();
+        Ok(true)
+    }
+
+    fn begin_match_selected_approved(&mut self) -> AppResult<()> {
+        if !self.can_match_selected_approved()? {
             return Ok(());
         }
         let Some(path) = self.selected_receipt().map(|receipt| receipt.path.clone()) else {
@@ -569,9 +569,7 @@ impl App {
         let response = backend_apply_match(&path, &candidate.file_path, candidate.line_number)?;
         self.match_state = None;
         self.refresh()?;
-        self.status = response
-            .message
-            .unwrap_or_else(|| format!("Match status: {}", response.status));
+        self.status = response;
         Ok(())
     }
 
@@ -714,11 +712,7 @@ fn backend_match_candidates(path: &str) -> AppResult<MatchCandidatesResponse> {
     Ok(serde_json::from_str(&stdout)?)
 }
 
-fn backend_apply_match(
-    path: &str,
-    file_path: &str,
-    line_number: i32,
-) -> AppResult<ApplyMatchResponse> {
+fn backend_apply_match(path: &str, file_path: &str, line_number: i32) -> AppResult<String> {
     let payload = serde_json::json!({
         "file_path": file_path,
         "line_number": line_number,
@@ -727,7 +721,27 @@ fn backend_apply_match(
         &["api", "apply-match", path],
         Some(&serde_json::to_string(&payload)?),
     )?;
-    Ok(serde_json::from_str(&stdout)?)
+    let response: Value = serde_json::from_str(&stdout)?;
+    Ok(response
+        .get("message")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| "Match applied".to_string()))
+}
+
+fn run_backend_interactive(args: &[&str]) -> AppResult<i32> {
+    let backend = backend_command();
+    let (program, program_args) = backend
+        .split_first()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Empty backend command"))?;
+    let status = Command::new(program)
+        .args(program_args)
+        .args(args)
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()?;
+    Ok(status.code().unwrap_or(1))
 }
 
 fn render_detail_lines(detail: &ShowReceiptResponse) -> Vec<String> {
@@ -1089,6 +1103,21 @@ fn restore_terminal(mut terminal: Terminal<CrosstermBackend<Stdout>>) -> AppResu
     Ok(())
 }
 
+fn suspend_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> AppResult<()> {
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    terminal.show_cursor()?;
+    Ok(())
+}
+
+fn resume_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> AppResult<()> {
+    enable_raw_mode()?;
+    execute!(terminal.backend_mut(), EnterAlternateScreen)?;
+    terminal.hide_cursor()?;
+    terminal.clear()?;
+    Ok(())
+}
+
 fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> AppResult<()> {
     loop {
         terminal.draw(|frame| render_app(frame, app))?;
@@ -1144,32 +1173,6 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
             continue;
         }
 
-        if app.match_state.is_some() {
-            match key.code {
-                KeyCode::Esc => {
-                    app.match_state = None;
-                    app.status = "Match cancelled".to_string();
-                }
-                KeyCode::Enter => {
-                    if let Err(error) = app.apply_selected_match() {
-                        app.status = error.to_string();
-                    }
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    if let Some(match_state) = app.match_state.as_mut() {
-                        match_state.move_selection(1);
-                    }
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    if let Some(match_state) = app.match_state.as_mut() {
-                        match_state.move_selection(-1);
-                    }
-                }
-                _ => {}
-            }
-            continue;
-        }
-
         if app.config_state.is_some() {
             match key.code {
                 KeyCode::Esc => {
@@ -1189,6 +1192,32 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
                 KeyCode::Char(ch) => {
                     if let Some(config_state) = app.config_state.as_mut() {
                         config_state.project_root.push(ch);
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
+
+        if app.match_state.is_some() {
+            match key.code {
+                KeyCode::Esc => {
+                    app.match_state = None;
+                    app.status = "Match cancelled".to_string();
+                }
+                KeyCode::Enter => {
+                    if let Err(error) = app.apply_selected_match() {
+                        app.status = error.to_string();
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if let Some(match_state) = app.match_state.as_mut() {
+                        match_state.move_selection(1);
+                    }
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if let Some(match_state) = app.match_state.as_mut() {
+                        match_state.move_selection(-1);
                     }
                 }
                 _ => {}
@@ -1261,9 +1290,39 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
                 }
             }
             (KeyCode::Char('e'), _) => app.begin_edit_selected(),
-            (KeyCode::Char('m'), _) => {
+            (KeyCode::Char('m'), KeyModifiers::NONE) => {
                 if let Err(error) = app.begin_match_selected_approved() {
                     app.status = error.to_string();
+                }
+            }
+            (KeyCode::Char('M'), KeyModifiers::SHIFT) => {
+                match app.can_match_selected_approved() {
+                    Ok(true) => {}
+                    Ok(false) => continue,
+                    Err(error) => {
+                        app.status = error.to_string();
+                        continue;
+                    }
+                }
+                suspend_terminal(terminal)?;
+                let match_result = run_backend_interactive(&["match"]);
+                println!();
+                match match_result {
+                    Ok(exit_code) => {
+                        println!("`bb match` exited with code {exit_code}.");
+                    }
+                    Err(error) => {
+                        println!("Failed to run `bb match`: {error}");
+                    }
+                }
+                print!("Press Enter to return to bb-tui...");
+                io::stdout().flush()?;
+                let mut input = String::new();
+                io::stdin().read_line(&mut input)?;
+                resume_terminal(terminal)?;
+                if let Err(error) = app.refresh() {
+                    app.status = error.to_string();
+                    continue;
                 }
             }
             (KeyCode::Char('c'), _) => app.begin_config_edit(),
