@@ -607,4 +607,58 @@ mod tests {
             match_receipt_to_transaction_impl(&receipt, &txn, &default_config(), &[]).is_none()
         );
     }
+
+    #[test]
+    fn transaction_receipt_matching_reports_family_match_details() {
+        let receipt = ReceiptInput::new(739_281, 736_300, "REAL CANADIAN".to_string(), false);
+
+        let result = match_transaction_to_receipt_impl(
+            739_284,
+            736_300,
+            "RCSS 1077 TORONTO ON",
+            &receipt,
+            &default_config(),
+            &merchant_families(),
+        );
+
+        let (_, details) = result.expect("expected a reverse match");
+        assert!(details.contains("merchant: family match (REAL CANADIAN SUPERSTORE)"));
+    }
+
+    #[test]
+    fn public_match_receipt_to_transactions_sorts_by_confidence_then_index() {
+        let receipt = ReceiptInput::new(738_900, 1_000_000, "T&T".to_string(), false);
+        let config = default_config();
+        let transactions = vec![
+            TransactionInput::new(
+                738_900,
+                Some("T&T SUPERMARKET".to_string()),
+                vec![Some(-1_000_000)],
+            ),
+            TransactionInput::new(
+                738_900,
+                Some("T&T SUPERMARKET".to_string()),
+                vec![Some(-1_000_000)],
+            ),
+        ];
+
+        let matches = match_receipt_to_transactions(receipt, config, transactions, vec![]);
+
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].index, 0);
+        assert_eq!(matches[1].index, 1);
+        assert_eq!(matches[0].confidence, matches[1].confidence);
+    }
+
+    #[test]
+    fn public_match_transaction_to_receipts_preserves_unknown_date_details() {
+        let transaction = TransactionQueryInput::new(738_900, 1_000_000, "T&T SUPERMARKET".to_string());
+        let config = default_config();
+        let candidates = vec![ReceiptInput::new(738_899, 1_000_000, "T&T".to_string(), true)];
+
+        let matches = match_transaction_to_receipts(transaction, config, candidates, vec![]);
+
+        assert_eq!(matches.len(), 1);
+        assert!(matches[0].details.contains("date: unknown"));
+    }
 }
