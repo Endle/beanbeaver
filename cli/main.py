@@ -127,6 +127,21 @@ Notes:
         help="Approve one scanned receipt with receipt-level review overrides from stdin JSON",
     )
     approve_scanned_review_parser.add_argument("path", help="Path to a staged receipt JSON file in scanned/")
+    reedit_approved_review_parser = api_subparsers.add_parser(
+        "re-edit-approved-with-review",
+        help="Update one approved receipt with receipt-level review overrides from stdin JSON",
+    )
+    reedit_approved_review_parser.add_argument("path", help="Path to a staged receipt JSON file in approved/")
+    match_candidates_parser = api_subparsers.add_parser(
+        "match-candidates",
+        help="List candidate ledger matches for one approved receipt",
+    )
+    match_candidates_parser.add_argument("path", help="Path to a staged receipt JSON file in approved/")
+    apply_match_parser = api_subparsers.add_parser(
+        "apply-match",
+        help="Apply one selected ledger match for an approved receipt using stdin JSON",
+    )
+    apply_match_parser.add_argument("path", help="Path to a staged receipt JSON file in approved/")
 
     args = parser.parse_args(argv)
 
@@ -211,8 +226,11 @@ Notes:
             cmd_api_approve_scanned,
             cmd_api_approve_scanned_with_review,
             cmd_api_get_config,
+            cmd_api_apply_match,
             cmd_api_list_approved,
             cmd_api_list_scanned,
+            cmd_api_match_candidates,
+            cmd_api_re_edit_approved_with_review,
             cmd_api_set_config,
             cmd_api_show_receipt,
         )
@@ -227,6 +245,12 @@ Notes:
             return _run_legacy_command(cmd_api_approve_scanned, args)
         if args.api_command == "approve-scanned-with-review":
             return _run_legacy_command(cmd_api_approve_scanned_with_review, args)
+        if args.api_command == "re-edit-approved-with-review":
+            return _run_legacy_command(cmd_api_re_edit_approved_with_review, args)
+        if args.api_command == "match-candidates":
+            return _run_legacy_command(cmd_api_match_candidates, args)
+        if args.api_command == "apply-match":
+            return _run_legacy_command(cmd_api_apply_match, args)
         if args.api_command == "get-config":
             return _run_legacy_command(cmd_api_get_config, args)
         if args.api_command == "set-config":

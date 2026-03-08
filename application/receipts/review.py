@@ -13,6 +13,8 @@ from beanbeaver.runtime.receipt_storage import (
     move_scanned_to_approved,
     refresh_stage_artifacts,
 )
+from beanbeaver.receipt.receipt_structuring import load_stage_document, save_stage_document
+from beanbeaver.application.receipts.approval import _validate_review_patch
 
 EditScannedStatus = Literal[
     "editor_not_found",
@@ -124,6 +126,39 @@ def run_re_edit_approved_receipt(request: ReEditApprovedReceiptRequest) -> ReEdi
 
     if not review_stage_path.exists():
         return ReEditApprovedReceiptResult(status="edited_file_missing")
+
+    try:
+        normalized_stage_path, _ = refresh_stage_artifacts(review_stage_path)
+    except Exception as exc:
+        return ReEditApprovedReceiptResult(
+            status="normalize_failed",
+            normalize_error=str(exc),
+        )
+
+    return ReEditApprovedReceiptResult(
+        status="updated",
+        updated_path=normalized_stage_path,
+    )
+
+
+def run_re_edit_approved_receipt_with_review(
+    request: ReEditApprovedReceiptRequest,
+    *,
+    review_patch: dict[str, object],
+) -> ReEditApprovedReceiptResult:
+    """Create a new approved review stage and apply receipt-level review overrides."""
+    review_stage_path = create_next_review_stage(
+        request.target_path,
+        created_by="tui_review",
+        pass_name="tui_reedit",
+    )
+    normalized_patch = _validate_review_patch(review_patch)
+    if normalized_patch:
+        document = load_stage_document(review_stage_path)
+        review = dict(document.get("review") or {})
+        review.update(normalized_patch)
+        document["review"] = review
+        save_stage_document(review_stage_path, document)
 
     try:
         normalized_stage_path, _ = refresh_stage_artifacts(review_stage_path)

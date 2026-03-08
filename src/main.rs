@@ -93,6 +93,15 @@ struct ApproveReceiptResponse {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+struct ReEditApprovedResponse {
+    status: String,
+    #[serde(rename = "source_path")]
+    _source_path: String,
+    updated_path: Option<String>,
+    normalize_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 struct ConfigResponse {
     config_path: String,
     project_root: String,
@@ -100,6 +109,46 @@ struct ConfigResponse {
     resolved_main_beancount_path: String,
     scanned_dir: String,
     approved_dir: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct MatchCandidateSummary {
+    file_path: String,
+    line_number: i32,
+    confidence: f64,
+    display: String,
+    payee: Option<String>,
+    narration: Option<String>,
+    date: String,
+    amount: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct MatchCandidatesResponse {
+    #[serde(rename = "path")]
+    _path: String,
+    ledger_path: String,
+    errors: Vec<String>,
+    warning: Option<String>,
+    candidates: Vec<MatchCandidateSummary>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ApplyMatchResponse {
+    status: String,
+    #[serde(rename = "ledger_path")]
+    _ledger_path: String,
+    #[serde(rename = "matched_receipt_path")]
+    _matched_receipt_path: Option<String>,
+    #[serde(rename = "enriched_path")]
+    _enriched_path: Option<String>,
+    message: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EditMode {
+    ApproveScanned,
+    UpdateApproved,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -146,6 +195,13 @@ struct ConfigState {
     project_root: String,
 }
 
+struct MatchState {
+    candidates: Vec<MatchCandidateSummary>,
+    state: ListState,
+    ledger_path: String,
+    warning: Option<String>,
+}
+
 impl ConfigState {
     fn from_response(config: &ConfigResponse) -> Self {
         Self {
@@ -155,6 +211,36 @@ impl ConfigState {
                 config.project_root.clone()
             },
         }
+    }
+}
+
+impl MatchState {
+    fn new(response: MatchCandidatesResponse) -> Self {
+        let mut state = ListState::default();
+        if !response.candidates.is_empty() {
+            state.select(Some(0));
+        }
+        Self {
+            candidates: response.candidates,
+            state,
+            ledger_path: response.ledger_path,
+            warning: response.warning,
+        }
+    }
+
+    fn selected(&self) -> Option<&MatchCandidateSummary> {
+        self.state.selected().and_then(|index| self.candidates.get(index))
+    }
+
+    fn move_selection(&mut self, delta: isize) {
+        let len = self.candidates.len();
+        if len == 0 {
+            self.state.select(None);
+            return;
+        }
+        let current = self.state.selected().unwrap_or(0) as isize;
+        let next = (current + delta).clamp(0, (len - 1) as isize) as usize;
+        self.state.select(Some(next));
     }
 }
 
@@ -200,8 +286,10 @@ struct App {
     detail_scroll_x: u16,
     status: String,
     edit_state: Option<EditState>,
+    edit_mode: Option<EditMode>,
     config: ConfigResponse,
     config_state: Option<ConfigState>,
+    match_state: Option<MatchState>,
     should_quit: bool,
 }
 
@@ -223,9 +311,10 @@ impl App {
             detail_scroll_y: 0,
             detail_scroll_x: 0,
             status:
-                "q quit | Tab switch queues | h/l pane focus | j/k list or detail | arrows pan detail | r reload | a approve | c config"
+                "q quit | Tab switch queues | h/l pane focus | j/k list or detail | e edit | m match approved | arrows pan detail | r reload | a approve | c config"
                     .to_string(),
             edit_state: None,
+            edit_mode: None,
             config: ConfigResponse {
                 config_path: String::new(),
                 project_root: String::new(),
@@ -235,6 +324,7 @@ impl App {
                 approved_dir: String::new(),
             },
             config_state: None,
+            match_state: None,
             should_quit: false,
         }
     }
@@ -378,24 +468,29 @@ impl App {
         Ok(())
     }
 
-    fn begin_edit_selected_scanned(&mut self) {
-        if self.active_queue != Queue::Scanned {
-            self.status = "Structured review is only available in the Scanned queue".to_string();
-            return;
-        }
+    fn begin_edit_selected(&mut self) {
         let Some(receipt) = self.selected_receipt() else {
-            self.status = "No scanned receipt selected".to_string();
+            self.status = "No receipt selected".to_string();
             return;
         };
         self.edit_state = Some(EditState::from_summary(receipt));
+        self.edit_mode = Some(if self.active_queue == Queue::Scanned {
+            EditMode::ApproveScanned
+        } else {
+            EditMode::UpdateApproved
+        });
         self.status =
-            "Edit review fields, Tab/Shift-Tab or Up/Down to move, Enter to save+approve, Esc to cancel"
+            "Edit review fields, Tab/Shift-Tab or Up/Down to move, Enter to save, Esc to cancel"
                 .to_string();
     }
 
-    fn apply_edit_and_approve(&mut self) -> AppResult<()> {
+    fn apply_edit_changes(&mut self) -> AppResult<()> {
         let Some(path) = self.selected_receipt().map(|receipt| receipt.path.clone()) else {
-            self.status = "No scanned receipt selected".to_string();
+            self.status = "No receipt selected".to_string();
+            return Ok(());
+        };
+        let Some(edit_mode) = self.edit_mode else {
+            self.status = "Missing edit mode".to_string();
             return Ok(());
         };
         let payload = {
@@ -405,20 +500,85 @@ impl App {
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Missing edit state"))?;
             serde_json::to_string(&edit_state.review_payload())?
         };
-        let result = backend_approve_scanned_with_review(&path, &payload)?;
-        self.edit_state = None;
+        match edit_mode {
+            EditMode::ApproveScanned => {
+                let result = backend_approve_scanned_with_review(&path, &payload)?;
+                self.edit_state = None;
+                self.edit_mode = None;
+                self.refresh()?;
+                self.status = format!(
+                    "Approved {} -> {}",
+                    result.source_path, result.approved_path
+                );
+            }
+            EditMode::UpdateApproved => {
+                let result = backend_re_edit_approved_with_review(&path, &payload)?;
+                self.edit_state = None;
+                self.edit_mode = None;
+                self.refresh()?;
+                self.status = match result.updated_path {
+                    Some(updated_path) => format!("Updated approved receipt: {updated_path}"),
+                    None => result
+                        .normalize_error
+                        .unwrap_or_else(|| format!("Approved receipt update failed: {}", result.status)),
+                };
+            }
+        }
+        Ok(())
+    }
+
+    fn begin_match_selected_approved(&mut self) -> AppResult<()> {
+        if self.active_queue != Queue::Approved {
+            self.status = "Match is only available in the Approved queue".to_string();
+            return Ok(());
+        }
+        let Some(path) = self.selected_receipt().map(|receipt| receipt.path.clone()) else {
+            self.status = "No approved receipt selected".to_string();
+            return Ok(());
+        };
+        let response = backend_match_candidates(&path)?;
+        if !response.errors.is_empty() {
+            self.status = response.errors.join(" | ");
+            return Ok(());
+        }
+        if response.candidates.is_empty() {
+            self.status = response
+                .warning
+                .clone()
+                .unwrap_or_else(|| "No ledger matches found".to_string());
+            return Ok(());
+        }
+        self.match_state = Some(MatchState::new(response));
+        self.status = "Select a candidate match, Enter to apply, Esc to cancel".to_string();
+        Ok(())
+    }
+
+    fn apply_selected_match(&mut self) -> AppResult<()> {
+        let Some(path) = self.selected_receipt().map(|receipt| receipt.path.clone()) else {
+            self.status = "No approved receipt selected".to_string();
+            return Ok(());
+        };
+        let Some(match_state) = self.match_state.as_ref() else {
+            self.status = "Missing match state".to_string();
+            return Ok(());
+        };
+        let Some(candidate) = match_state.selected() else {
+            self.status = "No match candidate selected".to_string();
+            return Ok(());
+        };
+        let response = backend_apply_match(&path, &candidate.file_path, candidate.line_number)?;
+        self.match_state = None;
         self.refresh()?;
-        self.status = format!(
-            "Approved {} -> {}",
-            result.source_path, result.approved_path
-        );
+        self.status = response
+            .message
+            .unwrap_or_else(|| format!("Match status: {}", response.status));
         Ok(())
     }
 
     fn begin_config_edit(&mut self) {
         self.config_state = Some(ConfigState::from_response(&self.config));
         self.status =
-            "Edit main.beancount path, Enter to save, Esc to cancel, Backspace delete".to_string();
+            "Edit project root, Enter to save, Esc to cancel, Backspace delete".to_string();
     }
 
     fn apply_config(&mut self) -> AppResult<()> {
@@ -524,6 +684,15 @@ fn backend_approve_scanned_with_review(
     Ok(response)
 }
 
+fn backend_re_edit_approved_with_review(
+    path: &str,
+    payload: &str,
+) -> AppResult<ReEditApprovedResponse> {
+    let stdout =
+        run_backend_with_input(&["api", "re-edit-approved-with-review", path], Some(payload))?;
+    Ok(serde_json::from_str(&stdout)?)
+}
+
 fn backend_get_config() -> AppResult<ConfigResponse> {
     let stdout = run_backend(&["api", "get-config"])?;
     Ok(serde_json::from_str(&stdout)?)
@@ -535,6 +704,27 @@ fn backend_set_config(project_root: &str) -> AppResult<ConfigResponse> {
     });
     let stdout = run_backend_with_input(
         &["api", "set-config"],
+        Some(&serde_json::to_string(&payload)?),
+    )?;
+    Ok(serde_json::from_str(&stdout)?)
+}
+
+fn backend_match_candidates(path: &str) -> AppResult<MatchCandidatesResponse> {
+    let stdout = run_backend(&["api", "match-candidates", path])?;
+    Ok(serde_json::from_str(&stdout)?)
+}
+
+fn backend_apply_match(
+    path: &str,
+    file_path: &str,
+    line_number: i32,
+) -> AppResult<ApplyMatchResponse> {
+    let payload = serde_json::json!({
+        "file_path": file_path,
+        "line_number": line_number,
+    });
+    let stdout = run_backend_with_input(
+        &["api", "apply-match", path],
         Some(&serde_json::to_string(&payload)?),
     )?;
     Ok(serde_json::from_str(&stdout)?)
@@ -664,6 +854,9 @@ fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
     if let Some(config_state) = &app.config_state {
         render_config_modal(frame, &app.config, config_state);
     }
+    if let Some(match_state) = &mut app.match_state {
+        render_match_modal(frame, match_state);
+    }
 }
 
 fn render_edit_modal(frame: &mut ratatui::Frame<'_>, edit_state: &EditState) {
@@ -707,7 +900,7 @@ fn render_edit_modal(frame: &mut ratatui::Frame<'_>, edit_state: &EditState) {
         frame.render_widget(paragraph, row);
     }
 
-    let help = Paragraph::new("Enter save+approve | Esc cancel | Backspace delete | Tab move")
+    let help = Paragraph::new("Enter save | Esc cancel | Backspace delete | Tab move")
         .wrap(Wrap { trim: true });
     frame.render_widget(help, rows[3]);
 }
@@ -779,6 +972,84 @@ fn render_config_modal(
     frame.render_widget(help, rows[4]);
 }
 
+fn render_match_modal(frame: &mut ratatui::Frame<'_>, match_state: &mut MatchState) {
+    let popup = centered_rect(84, 18, frame.area());
+    frame.render_widget(Clear, popup);
+
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Match Approved Receipt")
+            .style(Style::default().bg(Color::Black)),
+        popup,
+    );
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(8),
+            Constraint::Length(2),
+            Constraint::Length(2),
+        ])
+        .split(popup);
+
+    let intro = Paragraph::new(format!("Ledger: {}", match_state.ledger_path))
+        .style(Style::default().fg(Color::Gray))
+        .wrap(Wrap { trim: true });
+    frame.render_widget(intro, rows[0]);
+
+    let body = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
+        .split(rows[1]);
+
+    let items: Vec<ListItem> = match_state
+        .candidates
+        .iter()
+        .map(|candidate| {
+            let amount = candidate.amount.as_deref().unwrap_or("UNKNOWN");
+            let line = format!("{}  {}  {:.0}%", candidate.date, amount, candidate.confidence * 100.0);
+            ListItem::new(Line::from(line))
+        })
+        .collect();
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title("Candidates"))
+        .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+        .highlight_symbol(">> ");
+    frame.render_stateful_widget(list, body[0], &mut match_state.state);
+
+    let detail_text = match match_state.selected() {
+        Some(candidate) => format!(
+            "{}\n\nFile: {}:{}\nPayee: {}\nNarration: {}",
+            candidate.display,
+            candidate.file_path,
+            candidate.line_number,
+            candidate.payee.as_deref().unwrap_or("UNKNOWN"),
+            candidate.narration.as_deref().unwrap_or(""),
+        ),
+        None => "No candidate selected.".to_string(),
+    };
+    let detail = Paragraph::new(detail_text)
+        .block(Block::default().borders(Borders::ALL).title("Selected Candidate"))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(detail, body[1]);
+
+    let warning = Paragraph::new(
+        match_state
+            .warning
+            .clone()
+            .unwrap_or_else(|| "Enter apply  |  Esc cancel  |  j/k move".to_string()),
+    )
+    .style(Style::default().fg(Color::Gray))
+    .wrap(Wrap { trim: true });
+    frame.render_widget(warning, rows[2]);
+
+    let help = Paragraph::new("Enter apply selected match  |  Esc cancel")
+        .wrap(Wrap { trim: true });
+    frame.render_widget(help, rows[3]);
+}
+
 fn centered_rect(
     width_percent: u16,
     height: u16,
@@ -836,35 +1107,70 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
             continue;
         }
 
-        if let Some(edit_state) = app.edit_state.as_mut() {
+        if app.edit_state.is_some() {
             match key.code {
                 KeyCode::Esc => {
                     app.edit_state = None;
+                    app.edit_mode = None;
                     app.status = "Review cancelled".to_string();
                 }
                 KeyCode::Enter => {
-                    if let Err(error) = app.apply_edit_and_approve() {
+                    if let Err(error) = app.apply_edit_changes() {
                         app.status = error.to_string();
                     }
                 }
                 KeyCode::Tab | KeyCode::Down => {
-                    edit_state.active_field = edit_state.active_field.next();
+                    if let Some(edit_state) = app.edit_state.as_mut() {
+                        edit_state.active_field = edit_state.active_field.next();
+                    }
                 }
                 KeyCode::BackTab | KeyCode::Up => {
-                    edit_state.active_field = edit_state.active_field.previous();
+                    if let Some(edit_state) = app.edit_state.as_mut() {
+                        edit_state.active_field = edit_state.active_field.previous();
+                    }
                 }
                 KeyCode::Backspace => {
-                    edit_state.active_value_mut().pop();
+                    if let Some(edit_state) = app.edit_state.as_mut() {
+                        edit_state.active_value_mut().pop();
+                    }
                 }
                 KeyCode::Char(ch) => {
-                    edit_state.active_value_mut().push(ch);
+                    if let Some(edit_state) = app.edit_state.as_mut() {
+                        edit_state.active_value_mut().push(ch);
+                    }
                 }
                 _ => {}
             }
             continue;
         }
 
-        if let Some(config_state) = app.config_state.as_mut() {
+        if app.match_state.is_some() {
+            match key.code {
+                KeyCode::Esc => {
+                    app.match_state = None;
+                    app.status = "Match cancelled".to_string();
+                }
+                KeyCode::Enter => {
+                    if let Err(error) = app.apply_selected_match() {
+                        app.status = error.to_string();
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if let Some(match_state) = app.match_state.as_mut() {
+                        match_state.move_selection(1);
+                    }
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if let Some(match_state) = app.match_state.as_mut() {
+                        match_state.move_selection(-1);
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
+
+        if app.config_state.is_some() {
             match key.code {
                 KeyCode::Esc => {
                     app.config_state = None;
@@ -876,10 +1182,14 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
                     }
                 }
                 KeyCode::Backspace => {
-                    config_state.project_root.pop();
+                    if let Some(config_state) = app.config_state.as_mut() {
+                        config_state.project_root.pop();
+                    }
                 }
                 KeyCode::Char(ch) => {
-                    config_state.project_root.push(ch);
+                    if let Some(config_state) = app.config_state.as_mut() {
+                        config_state.project_root.push(ch);
+                    }
                 }
                 _ => {}
             }
@@ -950,7 +1260,12 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
                     app.status = error.to_string();
                 }
             }
-            (KeyCode::Char('e'), _) => app.begin_edit_selected_scanned(),
+            (KeyCode::Char('e'), _) => app.begin_edit_selected(),
+            (KeyCode::Char('m'), _) => {
+                if let Err(error) = app.begin_match_selected_approved() {
+                    app.status = error.to_string();
+                }
+            }
             (KeyCode::Char('c'), _) => app.begin_config_edit(),
             (KeyCode::Char('1'), _) | (KeyCode::Char('2'), _) => {
                 let next = if key.code == KeyCode::Char('1') { 0 } else { 1 };

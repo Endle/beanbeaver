@@ -50,6 +50,11 @@ def _configure_temp_root(tmp_path: Path, monkeypatch: MonkeyPatch) -> ProjectPat
     return paths
 
 
+def _write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
 def test_api_list_scanned_returns_json(tmp_path: Path, monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]) -> None:
     paths = _configure_temp_root(tmp_path, monkeypatch)
     stage_path = paths.receipts_json_scanned / "2026-03-01_store_12_34_abcd" / "parsed.receipt.json"
@@ -216,6 +221,99 @@ def test_api_approve_scanned_with_review_applies_receipt_overrides(
         "date": "2026-03-05",
         "total": "11.25",
     }
+
+
+def test_api_re_edit_approved_with_review_applies_receipt_overrides(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    paths = _configure_temp_root(tmp_path, monkeypatch)
+    approved_dir = paths.receipts_json_approved / "2026-03-04_market_10_00_feed"
+    stage_path = approved_dir / "review_stage_1.receipt.json"
+    save_stage_document(
+        stage_path,
+        _stage_document(
+            merchant="Market",
+            receipt_date="2026-03-04",
+            total="10.00",
+            stage="review_stage_1",
+            stage_index=1,
+        ),
+    )
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(json.dumps({"review": {"merchant": "Better Market", "date": "2026-03-05", "total": "11.25"}})),
+    )
+
+    exit_code = unified_cli.main(["api", "re-edit-approved-with-review", str(stage_path)])
+
+    captured = json.loads(capsys.readouterr().out)
+    updated_path = Path(captured["updated_path"])
+    updated_document = json.loads(updated_path.read_text())
+    assert exit_code == 0
+    assert captured["status"] == "updated"
+    assert updated_document["review"] == {
+        "merchant": "Better Market",
+        "date": "2026-03-05",
+        "total": "11.25",
+    }
+
+
+def test_api_match_candidates_and_apply_match_for_approved_receipt(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    paths = _configure_temp_root(tmp_path, monkeypatch)
+    _write(
+        paths.main_beancount,
+        """
+option "operating_currency" "CAD"
+2026-01-01 open Liabilities:CreditCard:CardA CAD
+2026-01-01 open Expenses:Food CAD
+include "records/2026/carda_0101_0131.beancount"
+""".lstrip(),
+    )
+    statement_path = paths.records / "2026" / "carda_0101_0131.beancount"
+    _write(
+        statement_path,
+        """
+2026-03-04 * "Market" ""
+  Liabilities:CreditCard:CardA -10.00 CAD
+  Expenses:Food 10.00 CAD
+""".lstrip(),
+    )
+    approved_dir = paths.receipts_json_approved / "2026-03-04_market_10_00_feed"
+    stage_path = approved_dir / "review_stage_1.receipt.json"
+    save_stage_document(
+        stage_path,
+        _stage_document(
+            merchant="Market",
+            receipt_date="2026-03-04",
+            total="10.00",
+            stage="review_stage_1",
+            stage_index=1,
+        ),
+    )
+
+    exit_code = unified_cli.main(["api", "match-candidates", str(stage_path)])
+    captured = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert captured["errors"] == []
+    assert len(captured["candidates"]) == 1
+
+    candidate = captured["candidates"][0]
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(json.dumps({"file_path": candidate["file_path"], "line_number": candidate["line_number"]})),
+    )
+    exit_code = unified_cli.main(["api", "apply-match", str(stage_path)])
+    applied = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert applied["status"] in {"applied", "already_applied"}
+    assert Path(applied["matched_receipt_path"]).exists()
+    assert Path(applied["enriched_path"]).exists()
 
 
 def test_api_get_config_returns_resolved_project_root(

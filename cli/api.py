@@ -118,6 +118,100 @@ def cmd_api_approve_scanned_with_review(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_api_re_edit_approved_with_review(args: argparse.Namespace) -> None:
+    """Update one approved receipt after applying receipt-level review overrides from stdin JSON."""
+    from beanbeaver.application.receipts.review import (
+        ReEditApprovedReceiptRequest,
+        run_re_edit_approved_receipt_with_review,
+    )
+
+    payload = json.load(sys.stdin)
+    if not isinstance(payload, dict):
+        raise ValueError("Review payload must be a JSON object")
+
+    review_patch = payload.get("review", {})
+    if not isinstance(review_patch, dict):
+        raise ValueError("Review payload field 'review' must be a JSON object")
+
+    target_path = _resolve_stage_path(args.path)
+    result = run_re_edit_approved_receipt_with_review(
+        ReEditApprovedReceiptRequest(
+            target_path=target_path,
+            resolve_editor_cmd=lambda: [],
+        ),
+        review_patch=review_patch,
+    )
+    _print_json(
+        {
+            "status": result.status,
+            "source_path": str(target_path),
+            "updated_path": str(result.updated_path) if result.updated_path is not None else None,
+            "normalize_error": result.normalize_error,
+        }
+    )
+
+
+def cmd_api_match_candidates(args: argparse.Namespace) -> None:
+    """Return candidate ledger matches for one approved receipt."""
+    from beanbeaver.application.receipts.match import list_match_candidates_for_receipt
+
+    target_path = _resolve_stage_path(args.path)
+    result = list_match_candidates_for_receipt(target_path)
+    _print_json(
+        {
+            "path": str(target_path),
+            "ledger_path": str(result.ledger_path),
+            "errors": result.errors,
+            "warning": result.warning,
+            "candidates": [
+                {
+                    "file_path": candidate.file_path,
+                    "line_number": candidate.line_number,
+                    "confidence": candidate.confidence,
+                    "display": candidate.display,
+                    "payee": candidate.payee,
+                    "narration": candidate.narration,
+                    "date": candidate.date,
+                    "amount": candidate.amount,
+                }
+                for candidate in result.candidates
+            ],
+        }
+    )
+
+
+def cmd_api_apply_match(args: argparse.Namespace) -> None:
+    """Apply one selected ledger match for an approved receipt from stdin JSON."""
+    from beanbeaver.application.receipts.match import apply_match_for_receipt
+
+    payload = json.load(sys.stdin)
+    if not isinstance(payload, dict):
+        raise ValueError("Match payload must be a JSON object")
+
+    candidate_file_path = payload.get("file_path")
+    candidate_line_number = payload.get("line_number")
+    if not isinstance(candidate_file_path, str):
+        raise ValueError("Match payload field 'file_path' must be a string")
+    if not isinstance(candidate_line_number, int):
+        raise ValueError("Match payload field 'line_number' must be an integer")
+
+    target_path = _resolve_stage_path(args.path)
+    result = apply_match_for_receipt(
+        target_path,
+        candidate_file_path=candidate_file_path,
+        candidate_line_number=candidate_line_number,
+    )
+    _print_json(
+        {
+            "status": result.status,
+            "ledger_path": str(result.ledger_path),
+            "matched_receipt_path": str(result.matched_receipt_path) if result.matched_receipt_path else None,
+            "enriched_path": str(result.enriched_path) if result.enriched_path else None,
+            "message": result.message,
+        }
+    )
+
+
 def cmd_api_get_config(args: argparse.Namespace) -> None:
     """Return TUI/backend configuration as JSON."""
     from beanbeaver.runtime import bootstrap_tui_config_path, get_paths
