@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import re
 import shutil
 import subprocess
@@ -23,6 +24,7 @@ from beanbeaver.ledger_access import (
     ReceiptMatchFileSnapshot,
     apply_receipt_match,
     list_transactions,
+    open_accounts,
     restore_receipt_match_files,
     snapshot_receipt_match_files,
 )
@@ -104,7 +106,77 @@ def _format_ledger_errors(errors: Sequence[Any], *, limit: int = 5) -> list[str]
     return formatted
 
 
-def _format_match_apply_error(exc: Exception) -> list[str]:
+def _suggest_open_accounts_for_unknown_account(
+    unknown_account: str,
+    *,
+    ledger_path: Path | str | None,
+    limit: int = 3,
+) -> list[str]:
+    """Suggest likely open ledger accounts for an unknown account reference."""
+    parts = [part for part in unknown_account.split(":") if part]
+    if not parts:
+        return []
+
+    patterns: list[str] = []
+    if len(parts) >= 2:
+        parent = ":".join(parts[:-1])
+        patterns.extend([parent, f"{parent}:*"])
+    if len(parts) >= 3:
+        grandparent = ":".join(parts[:-2])
+        patterns.append(f"{grandparent}:*")
+    patterns.append(f"{parts[0]}:*")
+
+    seen_patterns: set[str] = set()
+    deduped_patterns: list[str] = []
+    for pattern in patterns:
+        if pattern not in seen_patterns:
+            deduped_patterns.append(pattern)
+            seen_patterns.add(pattern)
+
+    candidates = open_accounts(deduped_patterns, ledger_path=ledger_path)
+    if not candidates:
+        return []
+
+    parent_prefix = ":".join(parts[:-1])
+    exact_parent = parent_prefix if parent_prefix in candidates else None
+    same_parent_descendants = [
+        candidate for candidate in candidates if parent_prefix and candidate.startswith(f"{parent_prefix}:")
+    ]
+    same_parent_descendants.sort(
+        key=lambda candidate: (difflib.SequenceMatcher(a=unknown_account, b=candidate).ratio(), candidate),
+        reverse=True,
+    )
+    other_candidates = [
+        candidate for candidate in candidates if candidate not in same_parent_descendants and candidate != exact_parent
+    ]
+    other_candidates.sort(
+        key=lambda candidate: (difflib.SequenceMatcher(a=unknown_account, b=candidate).ratio(), candidate),
+        reverse=True,
+    )
+
+    ranked: list[str] = []
+    if same_parent_descendants:
+        ranked.append(same_parent_descendants[0])
+        if exact_parent is not None:
+            ranked.append(exact_parent)
+        ranked.extend(same_parent_descendants[1:])
+    elif exact_parent is not None:
+        ranked.append(exact_parent)
+    ranked.extend(other_candidates)
+
+    suggestions: list[str] = []
+    seen_accounts: set[str] = set()
+    for candidate in ranked:
+        if candidate == unknown_account or candidate in seen_accounts:
+            continue
+        suggestions.append(candidate)
+        seen_accounts.add(candidate)
+        if len(suggestions) >= limit:
+            break
+    return suggestions
+
+
+def _format_match_apply_error(exc: Exception, *, ledger_path: Path | str | None = None) -> list[str]:
     """Render a user-facing error block for receipt match application failures."""
     message = str(exc).strip() or exc.__class__.__name__
     validation_prefix = "ledger validation failed after replacement:"
@@ -131,7 +203,16 @@ def _format_match_apply_error(exc: Exception) -> list[str]:
 
     unknown_account_match = re.search(r"unknown account '([^']+)'", details)
     if unknown_account_match:
-        formatted.append(f"    Unknown account: {unknown_account_match.group(1)}")
+        unknown_account = unknown_account_match.group(1)
+        formatted.append(f"    Unknown account: {unknown_account}")
+        suggestions = _suggest_open_accounts_for_unknown_account(
+            unknown_account,
+            ledger_path=ledger_path,
+        )
+        if suggestions:
+            formatted.append("    Suggestions:")
+            for suggestion in suggestions:
+                formatted.append(f"      - {suggestion}")
 
     return formatted
 
@@ -506,7 +587,7 @@ def cmd_match(args: argparse.Namespace) -> None:
                     transactions = reloaded.transactions
                 break
             except Exception as exc:
-                for line in _format_match_apply_error(exc):
+                for line in _format_match_apply_error(exc, ledger_path=ledger_path):
                     print(line)
                 recovery = _prompt_failed_match_recovery()
                 if recovery == "skip":
