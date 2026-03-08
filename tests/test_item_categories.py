@@ -71,7 +71,7 @@ def test_lcbo_card_emits_alcohol_and_giftcard_tags_without_category() -> None:
 
     assert classification == {
         "category": None,
-        "tags": ["alcohol", "giftcard"],
+        "tags": ["alcohol", "gift_card"],
         "confidence": 1.0,
         "source": "rule_engine",
     }
