@@ -3,10 +3,10 @@ from decimal import Decimal
 
 import pytest
 from beanbeaver.domain.receipt import Receipt, ReceiptItem, ReceiptWarning
-from beanbeaver.receipt.staged_json import (
+from beanbeaver.receipt.beancount_rendering import render_stage_document_as_beancount
+from beanbeaver.receipt.receipt_structuring import (
     build_parsed_receipt_stage,
     receipt_from_stage_document,
-    render_stage_document_as_beancount,
 )
 from beanbeaver.runtime.item_category_rules import load_item_category_rule_layers
 

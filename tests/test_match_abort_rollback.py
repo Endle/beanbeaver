@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from beanbeaver.application.receipts.match import _AppliedMatchUndo, _rollback_applied_matches
+from beanbeaver.ledger_access import ReceiptMatchFileSnapshot
 
 
 def _write(path: Path, content: str) -> None:
@@ -25,11 +26,13 @@ def test_rollback_restores_statement_and_receipt_when_enriched_was_new(tmp_path:
     undo = _AppliedMatchUndo(
         approved_receipt_path=approved,
         matched_receipt_path=matched,
-        statement_path=statement,
-        statement_original="ORIGINAL-STATEMENT\n",
-        enriched_path=enriched,
-        enriched_existed=False,
-        enriched_original=None,
+        ledger_snapshot=ReceiptMatchFileSnapshot(
+            statement_path=statement,
+            statement_original="ORIGINAL-STATEMENT\n",
+            enriched_path=enriched,
+            enriched_existed=False,
+            enriched_original=None,
+        ),
     )
 
     reverted, warnings = _rollback_applied_matches([undo])
@@ -56,11 +59,13 @@ def test_rollback_handles_receipt_name_collision_and_restores_old_enriched(tmp_p
     undo = _AppliedMatchUndo(
         approved_receipt_path=approved,
         matched_receipt_path=matched,
-        statement_path=statement,
-        statement_original="ORIGINAL-STATEMENT\n",
-        enriched_path=enriched,
-        enriched_existed=True,
-        enriched_original="ORIGINAL-ENRICHED\n",
+        ledger_snapshot=ReceiptMatchFileSnapshot(
+            statement_path=statement,
+            statement_original="ORIGINAL-STATEMENT\n",
+            enriched_path=enriched,
+            enriched_existed=True,
+            enriched_original="ORIGINAL-ENRICHED\n",
+        ),
     )
 
     reverted, warnings = _rollback_applied_matches([undo])
