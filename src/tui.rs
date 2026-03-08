@@ -28,15 +28,19 @@ type AppResult<T> = Result<T, Box<dyn Error>>;
 const SERVE_HOST: &str = "0.0.0.0";
 const SERVE_HEALTH_HOST: &str = "127.0.0.1";
 const SERVE_PORT: u16 = 8080;
+const FAVA_HOST: &str = "127.0.0.1";
+const FAVA_PORT: u16 = 5000;
 const OCR_CONTAINER_NAME: &str = "beanbeaver-ocr";
 const MAX_RUNTIME_LOG_LINES: usize = 400;
 const SERVE_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+const FAVA_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const OCR_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Page {
     Receipts,
     Serve,
+    Fava,
     Ocr,
 }
 
@@ -45,7 +49,8 @@ impl Page {
         match self {
             Page::Receipts => 0,
             Page::Serve => 1,
-            Page::Ocr => 2,
+            Page::Fava => 2,
+            Page::Ocr => 3,
         }
     }
 }
@@ -248,6 +253,14 @@ struct ServePageState {
     last_exit_code: Option<i32>,
 }
 
+struct FavaPageState {
+    process: Option<ManagedProcess>,
+    log_lines: Arc<Mutex<VecDeque<String>>>,
+    health_ok: bool,
+    health_message: String,
+    last_exit_code: Option<i32>,
+}
+
 struct OcrPageState {
     summary_lines: Vec<String>,
     log_lines: Vec<String>,
@@ -294,6 +307,27 @@ impl OcrPageState {
             summary_lines: vec!["Refreshing Podman container state...".to_string()],
             log_lines: vec!["No container logs loaded yet.".to_string()],
         }
+    }
+}
+
+impl FavaPageState {
+    fn new() -> Self {
+        let log_lines = Arc::new(Mutex::new(VecDeque::new()));
+        replace_log_lines(
+            &log_lines,
+            vec!["Use `s` to start and `x` to stop the TUI-managed Fava instance.".to_string()],
+        );
+        Self {
+            process: None,
+            log_lines,
+            health_ok: false,
+            health_message: "Health not checked yet".to_string(),
+            last_exit_code: None,
+        }
+    }
+
+    fn snapshot_logs(&self) -> Vec<String> {
+        snapshot_log_lines(&self.log_lines)
     }
 }
 
@@ -379,8 +413,10 @@ struct App {
     config_state: Option<ConfigState>,
     match_state: Option<MatchState>,
     serve_state: ServePageState,
+    fava_state: FavaPageState,
     ocr_state: OcrPageState,
     last_serve_refresh: Option<Instant>,
+    last_fava_refresh: Option<Instant>,
     last_ocr_refresh: Option<Instant>,
     should_quit: bool,
 }
@@ -419,8 +455,10 @@ impl App {
             config_state: None,
             match_state: None,
             serve_state: ServePageState::new(),
+            fava_state: FavaPageState::new(),
             ocr_state: OcrPageState::new(),
             last_serve_refresh: None,
+            last_fava_refresh: None,
             last_ocr_refresh: None,
             should_quit: false,
         }
@@ -435,13 +473,16 @@ impl App {
     fn page_help(page: Page) -> &'static str {
         match page {
             Page::Receipts => {
-                "1 receipts | 2 serve | 3 OCR | Tab switch queues | h/l pane focus | s toggle details/status | j/k move or scroll | e edit | m TUI match | M CLI match | arrows pan | r reload | a approve | c config | q quit"
+                "1 receipts | 2 serve | 3 fava | 4 OCR | Tab switch queues | h/l pane focus | s toggle details/status | j/k move or scroll | e edit | m TUI match | M CLI match | arrows pan | r reload | a approve | c config | q quit"
             }
             Page::Serve => {
-                "1 receipts | 2 serve | 3 OCR | s start `bb serve` | x stop `bb serve` | R restart | r refresh health | q quit"
+                "1 receipts | 2 serve | 3 fava | 4 OCR | s start `bb serve` | x stop `bb serve` | R restart | r refresh health | q quit"
+            }
+            Page::Fava => {
+                "1 receipts | 2 serve | 3 fava | 4 OCR | s start Fava | x stop Fava | R restart | r refresh health | q quit"
             }
             Page::Ocr => {
-                "1 receipts | 2 serve | 3 OCR | s start container | x stop container | R restart container | r refresh podman status/logs | q quit"
+                "1 receipts | 2 serve | 3 fava | 4 OCR | s start container | x stop container | R restart container | r refresh podman status/logs | q quit"
             }
         }
     }
@@ -826,6 +867,11 @@ impl App {
                 self.set_status("Refreshed `bb serve` status and health");
                 Ok(())
             }
+            Page::Fava => {
+                self.refresh_runtime_pages(true)?;
+                self.set_status("Refreshed Fava status and health");
+                Ok(())
+            }
             Page::Ocr => {
                 self.refresh_runtime_pages(true)?;
                 self.set_status(format!(
@@ -839,6 +885,7 @@ impl App {
 
     fn refresh_runtime_pages(&mut self, force: bool) -> AppResult<()> {
         self.poll_serve_process()?;
+        self.poll_fava_process()?;
         let now = Instant::now();
 
         if force
@@ -848,6 +895,15 @@ impl App {
         {
             self.refresh_serve_health();
             self.last_serve_refresh = Some(now);
+        }
+
+        if force
+            || self
+                .last_fava_refresh
+                .is_none_or(|last| now.duration_since(last) >= FAVA_REFRESH_INTERVAL)
+        {
+            self.refresh_fava_health();
+            self.last_fava_refresh = Some(now);
         }
 
         if force
@@ -864,7 +920,7 @@ impl App {
     }
 
     fn refresh_serve_health(&mut self) {
-        match check_local_health(SERVE_PORT) {
+        match check_local_health(SERVE_PORT, "/health", &[200]) {
             Ok(message) => {
                 self.serve_state.health_ok = true;
                 self.serve_state.health_message = message;
@@ -872,6 +928,19 @@ impl App {
             Err(error) => {
                 self.serve_state.health_ok = false;
                 self.serve_state.health_message = error;
+            }
+        }
+    }
+
+    fn refresh_fava_health(&mut self) {
+        match check_local_health(FAVA_PORT, "/", &[200, 302, 303, 307, 308]) {
+            Ok(message) => {
+                self.fava_state.health_ok = true;
+                self.fava_state.health_message = message;
+            }
+            Err(error) => {
+                self.fava_state.health_ok = false;
+                self.fava_state.health_message = error;
             }
         }
     }
@@ -960,6 +1029,26 @@ impl App {
         Ok(())
     }
 
+    fn poll_fava_process(&mut self) -> AppResult<()> {
+        let exit_status = match self.fava_state.process.as_mut() {
+            Some(process) => process.child.try_wait()?,
+            None => None,
+        };
+
+        if let Some(status) = exit_status {
+            let exit_code = exit_status_code(status);
+            push_bounded_log_line(
+                &self.fava_state.log_lines,
+                format!("Process exited with code {exit_code}."),
+            );
+            self.fava_state.process = None;
+            self.fava_state.last_exit_code = Some(exit_code);
+            self.refresh_fava_health();
+        }
+
+        Ok(())
+    }
+
     fn restart_serve_process(&mut self) -> AppResult<()> {
         self.poll_serve_process()?;
         if self.serve_state.process.is_some() {
@@ -1017,6 +1106,68 @@ impl App {
         Ok(())
     }
 
+    fn restart_fava_process(&mut self) -> AppResult<()> {
+        self.poll_fava_process()?;
+        if self.fava_state.process.is_some() {
+            self.stop_fava_process()?;
+        }
+        self.start_fava_process()
+    }
+
+    fn start_fava_process(&mut self) -> AppResult<()> {
+        if self.fava_state.process.is_some() {
+            self.set_status("A TUI-managed Fava process is already running");
+            return Ok(());
+        }
+        if self.config.resolved_main_beancount_path.is_empty() {
+            return Err("Resolved ledger path is empty; configure the project root first".into());
+        }
+        let ledger_path = Path::new(&self.config.resolved_main_beancount_path);
+        if !ledger_path.exists() {
+            return Err(format!("Ledger file not found: {}", ledger_path.display()).into());
+        }
+
+        let command = fava_command(&self.config.resolved_main_beancount_path);
+        let (program, program_args) = command
+            .split_first()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Empty Fava command"))?;
+        let command_line = command.join(" ");
+
+        replace_log_lines(
+            &self.fava_state.log_lines,
+            vec![format!("Starting managed process: {command_line}")],
+        );
+
+        let mut child = Command::new(program)
+            .args(program_args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        if let Some(stdout) = child.stdout.take() {
+            spawn_log_reader(stdout, "stdout", self.fava_state.log_lines.clone());
+        }
+        if let Some(stderr) = child.stderr.take() {
+            spawn_log_reader(stderr, "stderr", self.fava_state.log_lines.clone());
+        }
+
+        let pid = child.id();
+        self.fava_state.process = Some(ManagedProcess {
+            child,
+            command: command_line.clone(),
+        });
+        self.fava_state.last_exit_code = None;
+        push_bounded_log_line(
+            &self.fava_state.log_lines,
+            format!("Managed Fava started with PID {pid}."),
+        );
+        self.refresh_fava_health();
+        self.set_status(format!(
+            "Started managed Fava on http://{FAVA_HOST}:{FAVA_PORT}"
+        ));
+        Ok(())
+    }
+
     fn stop_serve_process(&mut self) -> AppResult<()> {
         let Some(mut process) = self.serve_state.process.take() else {
             self.set_status("No TUI-managed `bb serve` process is running");
@@ -1043,9 +1194,36 @@ impl App {
         Ok(())
     }
 
+    fn stop_fava_process(&mut self) -> AppResult<()> {
+        let Some(mut process) = self.fava_state.process.take() else {
+            self.set_status("No TUI-managed Fava process is running");
+            return Ok(());
+        };
+
+        let exit_code = match process.child.try_wait()? {
+            Some(status) => exit_status_code(status),
+            None => {
+                process.child.kill()?;
+                exit_status_code(process.child.wait()?)
+            }
+        };
+
+        push_bounded_log_line(
+            &self.fava_state.log_lines,
+            format!("Managed process stopped with code {exit_code}."),
+        );
+        self.fava_state.last_exit_code = Some(exit_code);
+        self.refresh_fava_health();
+        self.set_status(format!("Stopped TUI-managed Fava (exit code {exit_code})"));
+        Ok(())
+    }
+
     fn shutdown(&mut self) -> AppResult<()> {
         if self.serve_state.process.is_some() {
             self.stop_serve_process()?;
+        }
+        if self.fava_state.process.is_some() {
+            self.stop_fava_process()?;
         }
         Ok(())
     }
@@ -1070,6 +1248,32 @@ fn backend_command() -> Vec<String> {
         "python".to_string(),
         "-m".to_string(),
         "beanbeaver.cli.main".to_string(),
+    ]
+}
+
+fn fava_command(ledger_path: &str) -> Vec<String> {
+    let pixi_fava = Path::new(".pixi")
+        .join("envs")
+        .join("default")
+        .join("bin")
+        .join("fava");
+    if pixi_fava.exists() {
+        return vec![
+            pixi_fava.to_string_lossy().into_owned(),
+            ledger_path.to_string(),
+            "--host".to_string(),
+            FAVA_HOST.to_string(),
+            "--port".to_string(),
+            FAVA_PORT.to_string(),
+        ];
+    }
+    vec![
+        "fava".to_string(),
+        ledger_path.to_string(),
+        "--host".to_string(),
+        FAVA_HOST.to_string(),
+        "--port".to_string(),
+        FAVA_PORT.to_string(),
     ]
 }
 
@@ -1293,7 +1497,7 @@ fn spawn_log_reader<R: Read + Send + 'static>(
     });
 }
 
-fn check_local_health(port: u16) -> Result<String, String> {
+fn check_local_health(port: u16, path: &str, success_codes: &[u16]) -> Result<String, String> {
     let mut stream = TcpStream::connect((SERVE_HEALTH_HOST, port))
         .map_err(|error| format!("Health probe failed: {error}"))?;
     stream
@@ -1305,7 +1509,7 @@ fn check_local_health(port: u16) -> Result<String, String> {
     stream
         .write_all(
             format!(
-                "GET /health HTTP/1.1\r\nHost: {SERVE_HEALTH_HOST}:{port}\r\nConnection: close\r\n\r\n"
+                "GET {path} HTTP/1.1\r\nHost: {SERVE_HEALTH_HOST}:{port}\r\nConnection: close\r\n\r\n"
             )
             .as_bytes(),
         )
@@ -1317,9 +1521,12 @@ fn check_local_health(port: u16) -> Result<String, String> {
         .map_err(|error| format!("Health probe read failed: {error}"))?;
 
     let status_line = response.lines().next().unwrap_or("No HTTP response");
-    if status_line.contains("200") {
+    let status_ok = success_codes
+        .iter()
+        .any(|code| status_line.contains(&code.to_string()));
+    if status_ok {
         Ok(format!(
-            "Healthy: http://{SERVE_HEALTH_HOST}:{port}/health returned {status_line}"
+            "Healthy: http://{SERVE_HEALTH_HOST}:{port}{path} returned {status_line}"
         ))
     } else {
         Err(format!("Health probe returned {status_line}"))
@@ -1677,11 +1884,11 @@ fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
         ])
         .split(frame.area());
 
-    let tabs = Tabs::new(["Receipts [1]", "Serve [2]", "OCR [3]"])
+    let tabs = Tabs::new(["Receipts [1]", "Serve [2]", "Fava [3]", "OCR [4]"])
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Pages (press 1/2/3)"),
+                .title("Pages (press 1/2/3/4)"),
         )
         .select(app.active_page.tab_index())
         .highlight_style(
@@ -1694,6 +1901,7 @@ fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
     match app.active_page {
         Page::Receipts => render_receipts_page(frame, app, chunks[1]),
         Page::Serve => render_serve_page(frame, app, chunks[1]),
+        Page::Fava => render_fava_page(frame, app, chunks[1]),
         Page::Ocr => render_ocr_page(frame, app, chunks[1]),
     }
 
@@ -1846,6 +2054,59 @@ fn render_serve_page(frame: &mut ratatui::Frame<'_>, app: &App, area: ratatui::l
             .collect::<Vec<_>>(),
     ))
     .block(Block::default().borders(Borders::ALL).title("Serve Logs"))
+    .wrap(Wrap { trim: false });
+    frame.render_widget(logs, sections[1]);
+}
+
+fn render_fava_page(frame: &mut ratatui::Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(9), Constraint::Min(8)])
+        .split(area);
+
+    let process_status = match app.fava_state.process.as_ref() {
+        Some(process) => format!("Running (managed by this TUI, PID {})", process.child.id()),
+        None if app.fava_state.health_ok => {
+            "No managed process, but a healthy listener is responding".to_string()
+        }
+        None => "Stopped".to_string(),
+    };
+    let command = app
+        .fava_state
+        .process
+        .as_ref()
+        .map(|process| process.command.clone())
+        .unwrap_or_else(|| fava_command(&app.config.resolved_main_beancount_path).join(" "));
+    let last_exit = app
+        .fava_state
+        .last_exit_code
+        .map(|code| code.to_string())
+        .unwrap_or_else(|| "n/a".to_string());
+    let ledger_path = if app.config.resolved_main_beancount_path.is_empty() {
+        "<unconfigured>".to_string()
+    } else {
+        app.config.resolved_main_beancount_path.clone()
+    };
+    let summary = Paragraph::new(format!(
+        "Status: {process_status}\nHealth: {}\nURL: http://{FAVA_HOST}:{FAVA_PORT}\nLedger: {ledger_path}\nCommand: {command}\nLast managed exit code: {last_exit}\nLifecycle: TUI-managed Fava is terminated when `bb-tui` exits.",
+        app.fava_state.health_message,
+    ))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Fava (`s` start, `x` stop, `R` restart)"),
+    )
+    .wrap(Wrap { trim: true });
+    frame.render_widget(summary, sections[0]);
+
+    let logs = Paragraph::new(Text::from(
+        app.fava_state
+            .snapshot_logs()
+            .into_iter()
+            .map(Line::from)
+            .collect::<Vec<_>>(),
+    ))
+    .block(Block::default().borders(Borders::ALL).title("Fava Logs"))
     .wrap(Wrap { trim: false });
     frame.render_widget(logs, sections[1]);
 }
@@ -2277,6 +2538,12 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
                 }
             }
             (KeyCode::Char('3'), _) => {
+                app.switch_page(Page::Fava);
+                if let Err(error) = app.refresh_runtime_pages(true) {
+                    app.set_error(error.to_string());
+                }
+            }
+            (KeyCode::Char('4'), _) => {
                 app.switch_page(Page::Ocr);
                 if let Err(error) = app.refresh_runtime_pages(true) {
                     app.set_error(error.to_string());
@@ -2401,6 +2668,24 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
                     }
                     (KeyCode::Char('R'), KeyModifiers::SHIFT) => {
                         if let Err(error) = app.restart_serve_process() {
+                            app.set_error(error.to_string());
+                        }
+                    }
+                    _ => {}
+                },
+                Page::Fava => match (key.code, key.modifiers) {
+                    (KeyCode::Char('s'), KeyModifiers::NONE) => {
+                        if let Err(error) = app.start_fava_process() {
+                            app.set_error(error.to_string());
+                        }
+                    }
+                    (KeyCode::Char('x'), KeyModifiers::NONE) => {
+                        if let Err(error) = app.stop_fava_process() {
+                            app.set_error(error.to_string());
+                        }
+                    }
+                    (KeyCode::Char('R'), KeyModifiers::SHIFT) => {
+                        if let Err(error) = app.restart_fava_process() {
                             app.set_error(error.to_string());
                         }
                     }
