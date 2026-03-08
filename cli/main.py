@@ -110,6 +110,8 @@ Notes:
 
     api_subparsers.add_parser("list-scanned", help="List scanned receipts as JSON")
     api_subparsers.add_parser("list-approved", help="List approved receipts as JSON")
+    api_subparsers.add_parser("get-config", help="Get TUI/backend config as JSON")
+    api_subparsers.add_parser("set-config", help="Persist TUI/backend config from stdin JSON")
 
     show_receipt_parser = api_subparsers.add_parser("show-receipt", help="Show one staged receipt document as JSON")
     show_receipt_parser.add_argument("path", help="Path to a staged receipt JSON file")
@@ -208,8 +210,10 @@ Notes:
         from beanbeaver.cli.api import (
             cmd_api_approve_scanned,
             cmd_api_approve_scanned_with_review,
+            cmd_api_get_config,
             cmd_api_list_approved,
             cmd_api_list_scanned,
+            cmd_api_set_config,
             cmd_api_show_receipt,
         )
 
@@ -223,6 +227,10 @@ Notes:
             return _run_legacy_command(cmd_api_approve_scanned, args)
         if args.api_command == "approve-scanned-with-review":
             return _run_legacy_command(cmd_api_approve_scanned_with_review, args)
+        if args.api_command == "get-config":
+            return _run_legacy_command(cmd_api_get_config, args)
+        if args.api_command == "set-config":
+            return _run_legacy_command(cmd_api_set_config, args)
         parser.print_help()
         return 1
 

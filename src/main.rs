@@ -86,6 +86,13 @@ struct ApproveReceiptResponse {
     approved_path: String,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+struct ConfigResponse {
+    config_path: String,
+    main_beancount_path: String,
+    resolved_main_beancount_path: String,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EditField {
     Merchant,
@@ -124,6 +131,18 @@ struct EditState {
     date: String,
     total: String,
     active_field: EditField,
+}
+
+struct ConfigState {
+    main_beancount_path: String,
+}
+
+impl ConfigState {
+    fn from_response(config: &ConfigResponse) -> Self {
+        Self {
+            main_beancount_path: config.main_beancount_path.clone(),
+        }
+    }
 }
 
 impl EditState {
@@ -165,6 +184,8 @@ struct App {
     detail_path: Option<String>,
     status: String,
     edit_state: Option<EditState>,
+    config: ConfigResponse,
+    config_state: Option<ConfigState>,
     should_quit: bool,
 }
 
@@ -182,9 +203,15 @@ impl App {
             approved_state,
             detail_lines: vec!["Loading receipts...".to_string()],
             detail_path: None,
-            status: "q quit | Tab switch queues | j/k move | r reload | a approve scanned"
+            status: "q quit | Tab switch queues | j/k move | r reload | a approve scanned | c config"
                 .to_string(),
             edit_state: None,
+            config: ConfigResponse {
+                config_path: String::new(),
+                main_beancount_path: String::new(),
+                resolved_main_beancount_path: String::new(),
+            },
+            config_state: None,
             should_quit: false,
         }
     }
@@ -247,6 +274,7 @@ impl App {
     }
 
     fn refresh(&mut self) -> AppResult<()> {
+        self.config = backend_get_config()?;
         self.scanned = backend_list_receipts(Queue::Scanned)?;
         self.approved = backend_list_receipts(Queue::Approved)?;
         self.sync_selection(Queue::Scanned);
@@ -323,6 +351,27 @@ impl App {
         self.status = format!(
             "Approved {} -> {}",
             result.source_path, result.approved_path
+        );
+        Ok(())
+    }
+
+    fn begin_config_edit(&mut self) {
+        self.config_state = Some(ConfigState::from_response(&self.config));
+        self.status =
+            "Edit main.beancount path, Enter to save, Esc to cancel, Backspace delete".to_string();
+    }
+
+    fn apply_config(&mut self) -> AppResult<()> {
+        let Some(config_state) = self.config_state.as_ref() else {
+            self.status = "Missing config state".to_string();
+            return Ok(());
+        };
+        let config = backend_set_config(&config_state.main_beancount_path)?;
+        self.config = config;
+        self.config_state = None;
+        self.status = format!(
+            "Configured main.beancount -> {}",
+            self.config.resolved_main_beancount_path
         );
         Ok(())
     }
@@ -416,6 +465,22 @@ fn backend_approve_scanned_with_review(
         return Err(format!("unexpected approve status: {}", response.status).into());
     }
     Ok(response)
+}
+
+fn backend_get_config() -> AppResult<ConfigResponse> {
+    let stdout = run_backend(&["api", "get-config"])?;
+    Ok(serde_json::from_str(&stdout)?)
+}
+
+fn backend_set_config(main_beancount_path: &str) -> AppResult<ConfigResponse> {
+    let payload = serde_json::json!({
+        "main_beancount_path": main_beancount_path,
+    });
+    let stdout = run_backend_with_input(
+        &["api", "set-config"],
+        Some(&serde_json::to_string(&payload)?),
+    )?;
+    Ok(serde_json::from_str(&stdout)?)
 }
 
 fn render_detail_lines(detail: &ShowReceiptResponse) -> Vec<String> {
@@ -520,6 +585,9 @@ fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
     if let Some(edit_state) = &app.edit_state {
         render_edit_modal(frame, edit_state);
     }
+    if let Some(config_state) = &app.config_state {
+        render_config_modal(frame, &app.config, config_state);
+    }
 }
 
 fn render_edit_modal(frame: &mut ratatui::Frame<'_>, edit_state: &EditState) {
@@ -566,6 +634,59 @@ fn render_edit_modal(frame: &mut ratatui::Frame<'_>, edit_state: &EditState) {
     let help = Paragraph::new("Enter save+approve | Esc cancel | Backspace delete | Tab move")
         .wrap(Wrap { trim: true });
     frame.render_widget(help, rows[3]);
+}
+
+fn render_config_modal(
+    frame: &mut ratatui::Frame<'_>,
+    config: &ConfigResponse,
+    config_state: &ConfigState,
+) {
+    let popup = centered_rect(80, 10, frame.area());
+    frame.render_widget(
+        Block::default().style(Style::default().bg(Color::Black)),
+        popup,
+    );
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(2),
+            Constraint::Min(1),
+        ])
+        .split(popup);
+
+    frame.render_widget(
+        Block::default().borders(Borders::ALL).title("Configuration"),
+        popup,
+    );
+
+    let input = Paragraph::new(format!(
+        "main.beancount path: {}",
+        config_state.main_beancount_path
+    ))
+    .block(Block::default().borders(Borders::BOTTOM))
+    .style(
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    );
+    frame.render_widget(input, rows[0]);
+
+    let resolved = Paragraph::new(format!(
+        "Current resolved path: {}",
+        config.resolved_main_beancount_path
+    ))
+    .wrap(Wrap { trim: true });
+    frame.render_widget(resolved, rows[1]);
+
+    let help = Paragraph::new(format!(
+        "Enter save | Esc cancel | Backspace delete | Config file: {}",
+        config.config_path
+    ))
+    .wrap(Wrap { trim: true });
+    frame.render_widget(help, rows[2]);
 }
 
 fn centered_rect(
@@ -653,6 +774,28 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
             continue;
         }
 
+        if let Some(config_state) = app.config_state.as_mut() {
+            match key.code {
+                KeyCode::Esc => {
+                    app.config_state = None;
+                    app.status = "Configuration cancelled".to_string();
+                }
+                KeyCode::Enter => {
+                    if let Err(error) = app.apply_config() {
+                        app.status = error.to_string();
+                    }
+                }
+                KeyCode::Backspace => {
+                    config_state.main_beancount_path.pop();
+                }
+                KeyCode::Char(ch) => {
+                    config_state.main_beancount_path.push(ch);
+                }
+                _ => {}
+            }
+            continue;
+        }
+
         match key.code {
             KeyCode::Char('q') => app.should_quit = true,
             KeyCode::Tab => {
@@ -684,6 +827,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
                 }
             }
             KeyCode::Char('e') => app.begin_edit_selected_scanned(),
+            KeyCode::Char('c') => app.begin_config_edit(),
             KeyCode::Char('1') | KeyCode::Char('2') => {
                 let next = if key.code == KeyCode::Char('1') { 0 } else { 1 };
                 app.active_queue = Queue::from_tab(next);

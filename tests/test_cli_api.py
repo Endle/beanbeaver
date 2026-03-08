@@ -180,3 +180,54 @@ def test_api_approve_scanned_with_review_applies_receipt_overrides(
         "date": "2026-03-05",
         "total": "11.25",
     }
+
+
+def test_api_get_config_returns_resolved_main_beancount(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    paths = _configure_temp_root(tmp_path, monkeypatch)
+    configured = tmp_path / "ledger" / "primary.beancount"
+    configured.parent.mkdir()
+    configured.write_text("", encoding="utf-8")
+    paths.config.mkdir(parents=True, exist_ok=True)
+    (paths.config / "tui.json").write_text(
+        json.dumps({"main_beancount_path": "ledger/primary.beancount"}),
+        encoding="utf-8",
+    )
+    runtime_paths._paths = None
+
+    exit_code = unified_cli.main(["api", "get-config"])
+
+    captured = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert captured["main_beancount_path"] == "ledger/primary.beancount"
+    assert captured["resolved_main_beancount_path"] == str(configured.resolve())
+
+
+def test_api_set_config_persists_main_beancount_path(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    paths = _configure_temp_root(tmp_path, monkeypatch)
+    configured = tmp_path / "ledger" / "override.beancount"
+    configured.parent.mkdir()
+    configured.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(json.dumps({"main_beancount_path": "ledger/override.beancount"})),
+    )
+    runtime_paths._paths = None
+
+    exit_code = unified_cli.main(["api", "set-config"])
+
+    captured = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert captured["status"] == "saved"
+    assert captured["main_beancount_path"] == "ledger/override.beancount"
+    assert captured["resolved_main_beancount_path"] == str(configured.resolve())
+    assert json.loads((paths.config / "tui.json").read_text(encoding="utf-8")) == {
+        "main_beancount_path": "ledger/override.beancount"
+    }

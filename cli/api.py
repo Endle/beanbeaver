@@ -116,3 +116,42 @@ def cmd_api_approve_scanned_with_review(args: argparse.Namespace) -> None:
             "approved_path": str(result.approved_path),
         }
     )
+
+
+def cmd_api_get_config(args: argparse.Namespace) -> None:
+    """Return TUI/backend configuration as JSON."""
+    from beanbeaver.runtime import get_paths
+    from beanbeaver.runtime.tui_config import load_tui_config
+
+    config = load_tui_config()
+    _print_json(
+        {
+            "config_path": str(get_paths().config / "tui.json"),
+            "main_beancount_path": config.get("main_beancount_path", ""),
+            "resolved_main_beancount_path": str(get_paths().main_beancount),
+        }
+    )
+
+
+def cmd_api_set_config(args: argparse.Namespace) -> None:
+    """Persist TUI/backend configuration from stdin JSON."""
+    from beanbeaver.runtime import get_paths
+    from beanbeaver.runtime.tui_config import set_main_beancount_path
+
+    payload = json.load(sys.stdin)
+    if not isinstance(payload, dict):
+        raise ValueError("Config payload must be a JSON object")
+
+    main_beancount_path = payload.get("main_beancount_path", "")
+    if not isinstance(main_beancount_path, str):
+        raise ValueError("Config field 'main_beancount_path' must be a string")
+
+    config_path = set_main_beancount_path(main_beancount_path)
+    _print_json(
+        {
+            "status": "saved",
+            "config_path": str(config_path),
+            "main_beancount_path": main_beancount_path.strip(),
+            "resolved_main_beancount_path": str(get_paths().main_beancount),
+        }
+    )

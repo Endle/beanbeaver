@@ -7,6 +7,7 @@ eliminating scattered path definitions across modules.
 from __future__ import annotations
 
 import os
+import json
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -67,6 +68,43 @@ def _default_downloads_path() -> Path:
         if candidate.exists():
             return candidate.resolve()
     return candidates[0].expanduser().resolve()
+
+
+def _project_tui_config_path(root: Path) -> Path:
+    """Return the per-project TUI config file path."""
+    return root / "config" / "tui.json"
+
+
+def _load_project_tui_config(root: Path) -> dict[str, object]:
+    """Load per-project TUI config if present, otherwise return an empty mapping."""
+    config_path = _project_tui_config_path(root)
+    if not config_path.exists():
+        return {}
+
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    if not isinstance(data, dict):
+        return {}
+    return data
+
+
+def _resolve_configured_main_beancount(root: Path) -> Path | None:
+    """Resolve configured ledger override from env or per-project TUI config."""
+    env_override = os.environ.get("BEANBEAVER_MAIN_BEANCOUNT", "").strip()
+    if env_override:
+        return Path(env_override).expanduser().resolve()
+
+    config_value = _load_project_tui_config(root).get("main_beancount_path")
+    if not isinstance(config_value, str) or not config_value.strip():
+        return None
+
+    configured = Path(config_value).expanduser()
+    if not configured.is_absolute():
+        configured = root / configured
+    return configured.resolve()
 
 
 def _get_project_root() -> Path:
@@ -188,6 +226,9 @@ class ProjectPaths:
     @property
     def main_beancount(self) -> Path:
         """Main beancount entry file."""
+        configured = _resolve_configured_main_beancount(self.root)
+        if configured is not None:
+            return configured
         return self.root / "main.beancount"
 
     @property
