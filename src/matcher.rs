@@ -4,14 +4,14 @@ use std::collections::HashSet;
 const SCALE: i64 = 10_000;
 
 #[derive(Clone, Debug)]
-struct MatchConfig {
+pub(crate) struct MatchConfig {
     date_tolerance_days: i32,
     amount_tolerance_scaled: i64,
     amount_tolerance_percent_scaled: i64,
 }
 
 #[derive(Clone, Debug)]
-struct ReceiptInput {
+pub(crate) struct ReceiptInput {
     date_ordinal: i32,
     total_scaled: i64,
     merchant: String,
@@ -19,10 +19,30 @@ struct ReceiptInput {
 }
 
 #[derive(Clone, Debug)]
-struct TransactionInput {
+pub(crate) struct TransactionInput {
     date_ordinal: i32,
     payee: Option<String>,
     posting_amounts_scaled: Vec<Option<i64>>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct MerchantFamilyInput {
+    canonical: String,
+    aliases: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct TransactionQueryInput {
+    date_ordinal: i32,
+    amount_scaled: i64,
+    payee: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct MatchResult {
+    index: usize,
+    confidence: f64,
+    details: String,
 }
 
 #[derive(Clone, Debug)]
@@ -30,6 +50,80 @@ struct MerchantFamily {
     canonical_label: String,
     canonical_normalized: String,
     aliases_normalized: Vec<String>,
+}
+
+impl MatchConfig {
+    pub(crate) fn new(
+        date_tolerance_days: i32,
+        amount_tolerance_scaled: i64,
+        amount_tolerance_percent_scaled: i64,
+    ) -> Self {
+        Self {
+            date_tolerance_days,
+            amount_tolerance_scaled,
+            amount_tolerance_percent_scaled,
+        }
+    }
+}
+
+impl ReceiptInput {
+    pub(crate) fn new(
+        date_ordinal: i32,
+        total_scaled: i64,
+        merchant: String,
+        date_is_placeholder: bool,
+    ) -> Self {
+        Self {
+            date_ordinal,
+            total_scaled,
+            merchant,
+            date_is_placeholder,
+        }
+    }
+}
+
+impl TransactionInput {
+    pub(crate) fn new(
+        date_ordinal: i32,
+        payee: Option<String>,
+        posting_amounts_scaled: Vec<Option<i64>>,
+    ) -> Self {
+        Self {
+            date_ordinal,
+            payee,
+            posting_amounts_scaled,
+        }
+    }
+}
+
+impl MerchantFamilyInput {
+    pub(crate) fn new(canonical: String, aliases: Vec<String>) -> Self {
+        Self { canonical, aliases }
+    }
+}
+
+impl TransactionQueryInput {
+    pub(crate) fn new(date_ordinal: i32, amount_scaled: i64, payee: String) -> Self {
+        Self {
+            date_ordinal,
+            amount_scaled,
+            payee,
+        }
+    }
+}
+
+impl MatchResult {
+    fn new(index: usize, confidence: f64, details: String) -> Self {
+        Self {
+            index,
+            confidence,
+            details,
+        }
+    }
+
+    pub(crate) fn into_tuple(self) -> (usize, f64, String) {
+        (self.index, self.confidence, self.details)
+    }
 }
 
 fn fixed_mul(a: i64, b: i64) -> i64 {
@@ -145,21 +239,21 @@ fn alpha_words(value: &str) -> HashSet<String> {
         .collect()
 }
 
-fn build_merchant_families(raw_families: &[(String, Vec<String>)]) -> Vec<MerchantFamily> {
+fn build_merchant_families(raw_families: &[MerchantFamilyInput]) -> Vec<MerchantFamily> {
     raw_families
         .iter()
-        .filter_map(|(canonical, aliases)| {
-            let canonical_normalized = normalize_merchant(canonical);
+        .filter_map(|family| {
+            let canonical_normalized = normalize_merchant(&family.canonical);
             if canonical_normalized.is_empty() {
                 return None;
             }
-            let aliases_normalized = std::iter::once(canonical.clone())
-                .chain(aliases.iter().cloned())
+            let aliases_normalized = std::iter::once(family.canonical.clone())
+                .chain(family.aliases.iter().cloned())
                 .map(|alias| normalize_merchant(&alias))
                 .filter(|alias| !alias.is_empty())
                 .collect();
             Some(MerchantFamily {
-                canonical_label: canonical.clone(),
+                canonical_label: family.canonical.clone(),
                 canonical_normalized,
                 aliases_normalized,
             })
@@ -395,96 +489,68 @@ fn compare_matches(left: &(usize, f64, String), right: &(usize, f64, String)) ->
 pub(crate) fn merchant_similarity(
     receipt_merchant: &str,
     txn_payee: &str,
-    merchant_families: Vec<(String, Vec<String>)>,
+    merchant_families: Vec<MerchantFamilyInput>,
 ) -> f64 {
     let families = build_merchant_families(&merchant_families);
     merchant_similarity_impl(receipt_merchant, txn_payee, &families).0
 }
 
 pub(crate) fn match_receipt_to_transactions(
-    receipt_date_ordinal: i32,
-    receipt_total_scaled: i64,
-    receipt_merchant: String,
-    receipt_date_is_placeholder: bool,
-    date_tolerance_days: i32,
-    amount_tolerance_scaled: i64,
-    amount_tolerance_percent_scaled: i64,
-    transactions: Vec<(i32, Option<String>, Vec<Option<i64>>)>,
-    merchant_families: Vec<(String, Vec<String>)>,
-) -> Vec<(usize, f64, String)> {
-    let receipt = ReceiptInput {
-        date_ordinal: receipt_date_ordinal,
-        total_scaled: receipt_total_scaled,
-        merchant: receipt_merchant,
-        date_is_placeholder: receipt_date_is_placeholder,
-    };
-    let config = MatchConfig {
-        date_tolerance_days,
-        amount_tolerance_scaled,
-        amount_tolerance_percent_scaled,
-    };
+    receipt: ReceiptInput,
+    config: MatchConfig,
+    transactions: Vec<TransactionInput>,
+    merchant_families: Vec<MerchantFamilyInput>,
+) -> Vec<MatchResult> {
     let families = build_merchant_families(&merchant_families);
 
-    let mut matches: Vec<(usize, f64, String)> = transactions
+    let mut matches: Vec<MatchResult> = transactions
         .into_iter()
         .enumerate()
-        .filter_map(|(index, (date_ordinal, payee, posting_amounts_scaled))| {
-            let txn = TransactionInput {
-                date_ordinal,
-                payee,
-                posting_amounts_scaled,
-            };
+        .filter_map(|(index, txn)| {
             match_receipt_to_transaction_impl(&receipt, &txn, &config, &families)
-                .map(|(confidence, details)| (index, confidence, details))
+                .map(|(confidence, details)| MatchResult::new(index, confidence, details))
         })
         .collect();
 
-    matches.sort_by(compare_matches);
+    matches.sort_by(|left, right| {
+        compare_matches(
+            &(left.index, left.confidence, left.details.clone()),
+            &(right.index, right.confidence, right.details.clone()),
+        )
+    });
     matches
 }
 
 pub(crate) fn match_transaction_to_receipts(
-    txn_date_ordinal: i32,
-    txn_amount_scaled: i64,
-    txn_payee: String,
-    date_tolerance_days: i32,
-    amount_tolerance_scaled: i64,
-    amount_tolerance_percent_scaled: i64,
-    candidates: Vec<(i32, i64, String, bool)>,
-    merchant_families: Vec<(String, Vec<String>)>,
-) -> Vec<(usize, f64, String)> {
-    let config = MatchConfig {
-        date_tolerance_days,
-        amount_tolerance_scaled,
-        amount_tolerance_percent_scaled,
-    };
+    transaction: TransactionQueryInput,
+    config: MatchConfig,
+    candidates: Vec<ReceiptInput>,
+    merchant_families: Vec<MerchantFamilyInput>,
+) -> Vec<MatchResult> {
     let families = build_merchant_families(&merchant_families);
 
-    let mut matches: Vec<(usize, f64, String)> = candidates
+    let mut matches: Vec<MatchResult> = candidates
         .into_iter()
         .enumerate()
-        .filter_map(
-            |(index, (date_ordinal, total_scaled, merchant, date_is_placeholder))| {
-                let receipt = ReceiptInput {
-                    date_ordinal,
-                    total_scaled,
-                    merchant,
-                    date_is_placeholder,
-                };
+        .filter_map(|(index, receipt)| {
                 match_transaction_to_receipt_impl(
-                    txn_date_ordinal,
-                    txn_amount_scaled,
-                    &txn_payee,
+                    transaction.date_ordinal,
+                    transaction.amount_scaled,
+                    &transaction.payee,
                     &receipt,
                     &config,
                     &families,
                 )
-                .map(|(confidence, details)| (index, confidence, details))
-            },
-        )
+                .map(|(confidence, details)| MatchResult::new(index, confidence, details))
+            })
         .collect();
 
-    matches.sort_by(compare_matches);
+    matches.sort_by(|left, right| {
+        compare_matches(
+            &(left.index, left.confidence, left.details.clone()),
+            &(right.index, right.confidence, right.details.clone()),
+        )
+    });
     matches
 }
 
@@ -501,7 +567,7 @@ mod tests {
     }
 
     fn merchant_families() -> Vec<MerchantFamily> {
-        build_merchant_families(&[(
+        build_merchant_families(&[MerchantFamilyInput::new(
             "REAL CANADIAN SUPERSTORE".to_string(),
             vec!["REAL CANADIAN".to_string(), "RCSS".to_string()],
         )])
