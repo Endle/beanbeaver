@@ -43,7 +43,7 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest pillow httpx beancount
+          python -m pip install -e ".[test]"
 
       - name: Check out private tests
         uses: actions/checkout@v4
@@ -72,12 +72,9 @@ jobs:
 
       - name: Run hidden regression suite
         shell: bash
-        env:
-          PUBLIC_REPO_ROOT: ${{ github.workspace }}
         run: |
           set -euo pipefail
           PRIVATE_ROOT="${RUNNER_TEMP}/beanbeaver-private-tests"
-          export PYTHONPATH="$(dirname "${PUBLIC_REPO_ROOT}")"
           pytest -q --maxfail=1 "${PRIVATE_ROOT}" --e2e-mode cached
 
       - name: Scrub private test checkout

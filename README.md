@@ -20,15 +20,26 @@ You can use either mode on its own, but using both brings the synergy of semi-au
 
 ### Install
 
-In your root directory of the beancount directory
+Recommended: Pixi
 
-```
-git submodule add https://github.com/Endle/beanbeaver.git vendor/beanbeaver
-cp vendor/beanbeaver/flake.nix .
-nix develop
+```bash
+pixi install
+pixi run bb --help
 ```
 
-For now it requires `nix`. If anyone needs it, I can remove the dependency to nix.
+Standard Python editable install:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -e ".[test]"
+bb --help
+```
+
+For contributors who want the Rust/PyO3 toolchain ready as well:
+
+```bash
+python -m pip install -e ".[dev,test]"
+```
 
 
 ### Import Statement
@@ -37,7 +48,7 @@ For now it requires `nix`. If anyone needs it, I can remove the dependency to ni
 ```bash
 bb import  # auto-detects type (prompts if ambiguous)
 ```
-It would scan `~/Downloads` and match the bank
+It scans your default Downloads folder and matches the bank.
 
 ### Parse receipt
 
@@ -47,7 +58,7 @@ It would scan `~/Downloads` and match the bank
 We need to run [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) in container: <https://github.com/Endle/beanbeaver-ocr>
 ```
 docker run --name beanbeaver-ocr -p 8001:8000 ghcr.io/endle/beanbeaver-ocr:latest
-# Or podman
+# Or podman on Linux
 podman run --replace --name beanbeaver-ocr --network=slirp4netns -p 8001:8000 ghcr.io/endle/beanbeaver-ocr:latest
 ```
 
@@ -99,4 +110,15 @@ It will match beancount records (from credit card statements) with receipts (in 
 - `receipts/approved/` means the draft has been reviewed and edited by a human.
 - `bb edit` requires an interactive TTY.
 
+## Development
 
+Recommended local commands:
+
+```bash
+pixi run lint
+pixi run test
+pixi run test-e2e-cached
+```
+
+Core CI now targets Linux, macOS, and Windows for lint and non-E2E tests.
+Container-backed OCR flows remain Linux-first in practice.

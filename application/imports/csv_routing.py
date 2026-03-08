@@ -13,7 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from beanbeaver.application.imports.shared import select_interactive_item, select_interactive_option
+from beanbeaver.application.imports.shared import (
+    downloads_display_path,
+    select_interactive_item,
+    select_interactive_option,
+)
 from beanbeaver.runtime import get_logger, get_paths
 
 logger = get_logger(__name__)
@@ -240,7 +244,11 @@ def detect_download_route(import_type: ImportType | None = None, downloads_dir: 
         render=lambda route: f"{route.label} [{'stage2' if route.stage == 2 else 'stage1'}:{route.rule_id}]",
         heading="Select file to import:",
         prompt="Enter choice (number): ",
-        non_tty_error="Multiple matching CSV files found in ~/Downloads. Run interactively to choose one, or pass an explicit file. Candidates",
+        non_tty_error=(
+            "Multiple matching CSV files found in "
+            f"{downloads_display_path(downloads_dir)}. "
+            "Run interactively to choose one, or pass an explicit file. Candidates"
+        ),
         invalid_choice_error="Invalid choice.",
     )
 

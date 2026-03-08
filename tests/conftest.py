@@ -13,7 +13,7 @@ def pytest_addoption(parser: Parser) -> None:
         default="cached",
         choices=["cached", "live", "both"],
         help=(
-            "Receipt E2E mode for vendor/beanbeaver/tests/test_e2e_receipts.py: "
+            "Receipt E2E mode for tests/test_e2e_receipts.py: "
             "cached (.ocr.json), live (.jpg -> OCR service), or both."
         ),
     )

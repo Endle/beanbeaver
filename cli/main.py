@@ -4,6 +4,7 @@ import argparse
 from collections.abc import Callable, Sequence
 
 from beanbeaver.application.imports.csv_routing import detect_download_route
+from beanbeaver.application.imports.shared import downloads_display_path
 
 
 def _coerce_exit_code(code: object) -> int:
@@ -119,7 +120,7 @@ Notes:
                 return 1
 
             if route is None:
-                print("No matching CSV files found in ~/Downloads.")
+                print(f"No matching CSV files found in {downloads_display_path()}.")
                 print("Expected patterns: credit card or chequing CSVs. Provide a file path or name.")
                 return 1
             args.import_type = route.import_type

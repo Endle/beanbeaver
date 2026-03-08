@@ -5,7 +5,7 @@ New test cases shall be scrutinized that they don't contain PII (personally iden
 ## Add Receipt E2E Test (Brief)
 
 1. Choose a case name (stem), for example `walmart_20260218_redact`.
-2. Put required files in `vendor/beanbeaver/tests/receipts_e2e/`:
+2. Put required files in `tests/receipts_e2e/`:
    - `<stem>.expected.json`
    - `<stem>.ocr.json`
    - `<stem>.jpg`
@@ -38,8 +38,8 @@ Run tests:
 
 ```bash
 # Cached replay (.ocr.json -> parse)
-pytest vendor/beanbeaver/tests/test_e2e_receipts.py -v --beanbeaver-e2e-mode cached -k "<stem-or-merchant>"
+pytest tests/test_e2e_receipts.py -v --beanbeaver-e2e-mode cached -k "<stem-or-merchant>"
 
 # Live OCR (.jpg -> OCR service -> parse)
-pytest vendor/beanbeaver/tests/test_e2e_receipts.py -v --beanbeaver-e2e-mode live -k "<stem-or-merchant>"
+pytest tests/test_e2e_receipts.py -v --beanbeaver-e2e-mode live -k "<stem-or-merchant>"
 ```
