@@ -6,7 +6,7 @@ from typing import Any
 
 from beanbeaver.domain.receipt import ReceiptItem, ReceiptWarning
 
-from ..item_categories import ItemCategoryRuleLayers, classify_item_key
+from ..item_categories import ItemCategoryRuleLayers, categorize_item
 from .common import (
     FOOTER_ADDRESS_PATTERNS,
     ITEM_X_THRESHOLD,
@@ -398,7 +398,7 @@ def _extract_items_with_bbox(
                     ReceiptItem(
                         description=description,
                         price=price,
-                        category=classify_item_key(description, rule_layers=item_category_rule_layers),
+                        category=categorize_item(description, rule_layers=item_category_rule_layers),
                     )
                 )
                 found_item = True
@@ -450,7 +450,7 @@ def _extract_items_with_bbox(
                         ReceiptItem(
                             description=description,
                             price=price,
-                            category=classify_item_key(description, rule_layers=item_category_rule_layers),
+                            category=categorize_item(description, rule_layers=item_category_rule_layers),
                         )
                     )
                     found_item = True

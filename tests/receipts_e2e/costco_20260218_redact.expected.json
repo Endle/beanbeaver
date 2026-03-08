@@ -6,12 +6,12 @@
     {
       "description": "COKE ZERO",
       "price": "17.19",
-      "category": "grocery_drink_cocacola"
+      "category": "Expenses:Food:Grocery:Drink:CocaCola"
     },
     {
       "description": "2% FINE-FILT",
       "price": "6.69",
-      "category": "grocery_dairy"
+      "category": "Expenses:Food:Grocery:Dairy"
     },
     {
       "description": "DOORDASH2X50",
