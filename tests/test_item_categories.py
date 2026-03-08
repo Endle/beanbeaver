@@ -43,7 +43,49 @@ def test_semantic_classification_includes_explicit_tags() -> None:
 
     assert classification == {
         "category": "grocery_meat",
-        "tags": ["grocery", "meat"],
+        "tags": ["grocery", "meat", "chicken"],
+        "confidence": 1.0,
+        "source": "rule_engine",
+    }
+
+
+def test_fine_filt_includes_milk_tag() -> None:
+    classification = classify_item_semantic(
+        "435259 FINE-FILT",
+        load_receipt_structuring_rule_layers(),
+    )
+
+    assert classification == {
+        "category": "grocery_dairy",
+        "tags": ["grocery", "dairy", "milk"],
+        "confidence": 1.0,
+        "source": "rule_engine",
+    }
+
+
+def test_lcbo_card_emits_alcohol_and_giftcard_tags_without_category() -> None:
+    classification = classify_item_semantic(
+        "810 LCBO CARD",
+        load_receipt_structuring_rule_layers(),
+    )
+
+    assert classification == {
+        "category": None,
+        "tags": ["alcohol", "giftcard"],
+        "confidence": 1.0,
+        "source": "rule_engine",
+    }
+
+
+def test_monster_includes_energy_drink_tag() -> None:
+    classification = classify_item_semantic(
+        "2773717 MONSTER VRTY",
+        load_receipt_structuring_rule_layers(),
+    )
+
+    assert classification == {
+        "category": "grocery_drink",
+        "tags": ["grocery", "drink", "energy_drink"],
         "confidence": 1.0,
         "source": "rule_engine",
     }

@@ -18,6 +18,13 @@ priority = 0
 exact_only = false
 
 [[rules]]
+id = "semantic_tag_0100"
+keywords = ["CHICKEN", "ROTISSERIE CHICKEN"]
+tags = ["chicken"]
+priority = 0
+exact_only = false
+
+[[rules]]
 id = "legacy_0002"
 keywords = ["SALMON", "TUNA", "COD", "TILAPIA", "HALIBUT", "TROUT", "MACKEREL", "SARDINE", "ANCHOVY", "FILLET", "FISH"]
 category = "grocery_seafood_fish"
@@ -238,6 +245,13 @@ id = "legacy_0033"
 keywords = ["XL EGGS", "KS ORG 2%", "CHOC.MILK", "CHOC MILK", "FINE-FILT"]
 category = "grocery_dairy"
 tags = ["grocery", "dairy"]
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "semantic_tag_0101"
+keywords = ["MILK", "CHOCOLATE MILK", "CHOC MILK", "CHOC MLK", "CHOC.MILK", "FINE-FILT", "KS ORG 2%"]
+tags = ["milk"]
 priority = 0
 exact_only = false
 
@@ -536,4 +550,18 @@ keywords = ["LA PIAN"]
 category = "grocery_snacks"
 tags = ["grocery", "snacks"]
 priority = 40
+exact_only = false
+
+[[rules]]
+id = "semantic_tag_0102"
+keywords = ["LCBO CARD"]
+tags = ["alcohol", "gift_card"]
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "semantic_tag_0103"
+keywords = ["MONSTER"]
+tags = ["energy_drink"]
+priority = 0
 exact_only = false
