@@ -6,12 +6,12 @@ import argparse
 import shutil
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from beanbeaver.domain.match import (
     itemized_receipt_total,
@@ -30,6 +30,7 @@ from beanbeaver.runtime import get_logger, get_paths
 logger = get_logger(__name__)
 
 type ReceiptSummary = tuple[Path, str | None, date | None, Decimal | None]
+type ResolveEditorCmd = Callable[[], list[str]]
 
 
 @dataclass(frozen=True)
@@ -182,6 +183,62 @@ def _select_receipts_for_match(
         print("Invalid selection. Enter a number, 'a', or 'q'.")
 
 
+def _prompt_failed_match_recovery() -> Literal["edit", "skip"]:
+    """Ask the user how to recover from a failed match attempt."""
+    print("  Match application failed. Choose next step:")
+    print("    1. Re-edit approved receipt")
+    print("    2. Skip this receipt")
+    while True:
+        choice = input("  Select [2]: ").strip().lower()
+        if choice in {"", "2", "s", "skip"}:
+            return "skip"
+        if choice in {"1", "e", "edit"}:
+            return "edit"
+        print("  Invalid choice. Enter 1 or 2.")
+
+
+def _re_edit_receipt_after_failed_match(
+    path: Path,
+    *,
+    resolve_editor_cmd: ResolveEditorCmd | None,
+) -> Path | None:
+    """Open the approved receipt in the editor and return its refreshed stage path."""
+    from beanbeaver.application.receipts.review import (
+        ReEditApprovedReceiptRequest,
+        run_re_edit_approved_receipt,
+    )
+
+    if resolve_editor_cmd is None:
+        print("  Re-edit is unavailable in this entrypoint. Skipping this receipt.")
+        return None
+
+    result = run_re_edit_approved_receipt(
+        ReEditApprovedReceiptRequest(
+            target_path=path,
+            resolve_editor_cmd=resolve_editor_cmd,
+        )
+    )
+    if result.status == "editor_not_found":
+        editor_cmd = result.editor_cmd or []
+        print(f"  Editor not found: {' '.join(editor_cmd)}")
+        return None
+    if result.status == "editor_failed":
+        print(f"  Editor exited with code {result.editor_returncode}.")
+        return None
+    if result.status == "edited_file_missing":
+        print("  Edited file no longer exists. Leaving receipt unchanged.")
+        return None
+    if result.status == "normalize_failed":
+        print(f"  Re-edit saved, but could not normalize filename: {result.normalize_error}")
+        return None
+    if result.updated_path is None:
+        print("  Approved receipt update failed.")
+        return None
+
+    print(f"  Updated approved receipt: {result.updated_path}")
+    return result.updated_path
+
+
 def cmd_match(args: argparse.Namespace) -> None:
     """Match all approved receipts against ledger."""
     from beanbeaver.receipt.beancount_rendering import format_enriched_transaction
@@ -245,88 +302,93 @@ def cmd_match(args: argparse.Namespace) -> None:
     stopped_early = False
     abort_requested = False
     applied_undo_log: list[_AppliedMatchUndo] = []
+    resolve_editor_cmd = getattr(args, "resolve_editor_cmd", None)
 
-    for path, merchant, receipt_date, amount in selected_receipts:
-        date_str = receipt_date.isoformat() if receipt_date else "UNKNOWN"
-        print(f"\n{path.name}")
-        amount_str = f"${amount:.2f}" if amount is not None else "$UNKNOWN"
-        print(f"  {merchant or 'UNKNOWN'} | {date_str} | {amount_str}")
-
-        receipt = parse_receipt_from_stage_json(path)
-        if amount is None:
-            print("  No total found in the latest stage - keeping in approved")
-            skipped_count += 1
-            continue
-        matches = match_receipt_to_transactions(receipt, transactions)
-        available_matches = [m for m in matches if match_key(m) not in used_matches]
-
-        if not available_matches and matches:
-            print("  All candidates were already used in this run.")
-            while True:
-                reuse_choice = (
-                    input("  [u] Show used candidates | [s] Skip | [x] Save-and-exit | [a] Abort session: ")
-                    .strip()
-                    .lower()
-                )
-                if reuse_choice in {"s", "skip"}:
-                    print("  Skipped")
-                    skipped_count += 1
-                    break
-                if reuse_choice in {"x", "q", "quit"}:
-                    print("Stopping matching session.")
-                    stopped_early = True
-                    break
-                if reuse_choice in {"a", "abort"}:
-                    print("Aborting matching session and reverting this run...")
-                    abort_requested = True
-                    stopped_early = True
-                    break
-                if reuse_choice in {"u", "use"}:
-                    available_matches = matches
-                    break
-                print("  Invalid choice. Enter u, s, x, or a.")
-            if stopped_early:
-                break
-            if not available_matches:
-                continue
-
-        if not matches:
-            print("  No matches found - keeping in approved")
-            skipped_count += 1
-            continue
-
-        print(f"  Found {len(matches)} match(es), {len(available_matches)} available:")
-        display_matches = available_matches[:5]
-        for i, match in enumerate(display_matches, 1):
-            already_used = " (already used)" if match_key(match) in used_matches else ""
-            formatted = format_match_for_display(match).strip().replace(chr(10), chr(10) + "        ")
-            print(f"    [{i}] {formatted}{already_used}")
-
-        valid_choices = [str(i) for i in range(1, len(display_matches) + 1)] + ["s", "d", "x", "a", "q"]
-        print("    [s] Skip | [d] Delete receipt | [x] Save-and-exit | [a] Abort session")
-
+    for selected in selected_receipts:
+        path = selected[0]
         while True:
-            choice = input("  Select: ").strip().lower()
-            if choice in valid_choices:
-                break
-            print(f"    Invalid. Enter one of: {', '.join(valid_choices)}")
+            receipt = parse_receipt_from_stage_json(path)
+            merchant = receipt.merchant
+            receipt_date = None if receipt.date_is_placeholder else receipt.date
+            amount = receipt.total
 
-        if choice == "d":
-            delete_receipt(path)
-            print("  Deleted")
-        elif choice == "s":
-            print("  Skipped")
-            skipped_count += 1
-        elif choice in {"x", "q"}:
-            print("Stopping matching session.")
-            stopped_early = True
-            break
-        elif choice == "a":
-            print("Aborting matching session and reverting this run...")
-            abort_requested = True
-            stopped_early = True
-            break
-        else:
+            date_str = receipt_date.isoformat() if receipt_date else "UNKNOWN"
+            print(f"\n{path.name}")
+            amount_str = f"${amount:.2f}"
+            print(f"  {merchant or 'UNKNOWN'} | {date_str} | {amount_str}")
+
+            matches = match_receipt_to_transactions(receipt, transactions)
+            available_matches = [m for m in matches if match_key(m) not in used_matches]
+
+            if not available_matches and matches:
+                print("  All candidates were already used in this run.")
+                while True:
+                    reuse_choice = (
+                        input("  [u] Show used candidates | [s] Skip | [x] Save-and-exit | [a] Abort session: ")
+                        .strip()
+                        .lower()
+                    )
+                    if reuse_choice in {"s", "skip"}:
+                        print("  Skipped")
+                        skipped_count += 1
+                        break
+                    if reuse_choice in {"x", "q", "quit"}:
+                        print("Stopping matching session.")
+                        stopped_early = True
+                        break
+                    if reuse_choice in {"a", "abort"}:
+                        print("Aborting matching session and reverting this run...")
+                        abort_requested = True
+                        stopped_early = True
+                        break
+                    if reuse_choice in {"u", "use"}:
+                        available_matches = matches
+                        break
+                    print("  Invalid choice. Enter u, s, x, or a.")
+                if stopped_early:
+                    break
+                if not available_matches:
+                    break
+
+            if not matches:
+                print("  No matches found - keeping in approved")
+                skipped_count += 1
+                break
+
+            print(f"  Found {len(matches)} match(es), {len(available_matches)} available:")
+            display_matches = available_matches[:5]
+            for i, match in enumerate(display_matches, 1):
+                already_used = " (already used)" if match_key(match) in used_matches else ""
+                formatted = format_match_for_display(match).strip().replace(chr(10), chr(10) + "        ")
+                print(f"    [{i}] {formatted}{already_used}")
+
+            valid_choices = [str(i) for i in range(1, len(display_matches) + 1)] + ["s", "d", "x", "a", "q"]
+            print("    [s] Skip | [d] Delete receipt | [x] Save-and-exit | [a] Abort session")
+
+            while True:
+                choice = input("  Select: ").strip().lower()
+                if choice in valid_choices:
+                    break
+                print(f"    Invalid. Enter one of: {', '.join(valid_choices)}")
+
+            if choice == "d":
+                delete_receipt(path)
+                print("  Deleted")
+                break
+            if choice == "s":
+                print("  Skipped")
+                skipped_count += 1
+                break
+            if choice in {"x", "q"}:
+                print("Stopping matching session.")
+                stopped_early = True
+                break
+            if choice == "a":
+                print("Aborting matching session and reverting this run...")
+                abort_requested = True
+                stopped_early = True
+                break
+
             selected_idx = int(choice) - 1
             selected_match = display_matches[selected_idx]
             key = match_key(selected_match)
@@ -335,13 +397,13 @@ def cmd_match(args: argparse.Namespace) -> None:
                 if confirm not in {"y", "yes"}:
                     print("  Skipped")
                     skipped_count += 1
-                    continue
+                    break
 
             matched_file = Path(selected_match.file_path)
             if str(matched_file) == "unknown" or not matched_file.exists():
                 print(f"  Match target file missing: {selected_match.file_path}")
                 skipped_count += 1
-                continue
+                break
 
             expected_total = transaction_charge_amount(selected_match)
             itemized_total = itemized_receipt_total(receipt)
@@ -351,15 +413,27 @@ def cmd_match(args: argparse.Namespace) -> None:
                     print(
                         "  Failed to apply match: itemized receipt total "
                         f"(${itemized_total:.2f}) exceeds card transaction (${expected_total:.2f}) "
-                        f"by ${abs(delta):.2f}. Re-edit receipt first."
+                        f"by ${abs(delta):.2f}."
                     )
-                    skipped_count += 1
+                    recovery = _prompt_failed_match_recovery()
+                    if recovery == "skip":
+                        print("  Skipped")
+                        skipped_count += 1
+                        break
+                    updated_path = _re_edit_receipt_after_failed_match(
+                        path,
+                        resolve_editor_cmd=resolve_editor_cmd,
+                    )
+                    if updated_path is not None:
+                        path = updated_path
+                    print("  Recomputing matches after re-edit...")
                     continue
 
             enriched = format_enriched_transaction(receipt, selected_match)
             enriched_dir = matched_file.parent / "_enriched"
             enriched_dir.mkdir(parents=True, exist_ok=True)
-            enriched_path = enriched_dir / f"{path.stem}-enriched.beancount"
+            receipt_name = path.parent.name
+            enriched_path = enriched_dir / f"{receipt_name}-enriched.beancount"
             include_rel = enriched_path.relative_to(matched_file.parent).as_posix()
             ledger_snapshot = snapshot_receipt_match_files(
                 statement_path=matched_file,
@@ -372,7 +446,7 @@ def cmd_match(args: argparse.Namespace) -> None:
                     statement_path=matched_file,
                     line_number=selected_match.line_number,
                     include_rel_path=include_rel,
-                    receipt_name=path.name,
+                    receipt_name=receipt_name,
                     enriched_path=enriched_path,
                     enriched_content=enriched,
                 )
@@ -395,11 +469,27 @@ def cmd_match(args: argparse.Namespace) -> None:
                 if reloaded.errors:
                     print("  Warning: ledger reload has errors; stopping session.")
                     stopped_early = True
-                    break
-                transactions = reloaded.transactions
+                else:
+                    transactions = reloaded.transactions
+                break
             except Exception as exc:
                 print(f"  Failed to apply match: {exc}")
-                skipped_count += 1
+                recovery = _prompt_failed_match_recovery()
+                if recovery == "skip":
+                    print("  Skipped")
+                    skipped_count += 1
+                    break
+                updated_path = _re_edit_receipt_after_failed_match(
+                    path,
+                    resolve_editor_cmd=resolve_editor_cmd,
+                )
+                if updated_path is not None:
+                    path = updated_path
+                print("  Recomputing matches after re-edit...")
+                continue
+
+        if stopped_early:
+            break
 
     if abort_requested:
         reverted_count, rollback_warnings = _rollback_applied_matches(applied_undo_log)
