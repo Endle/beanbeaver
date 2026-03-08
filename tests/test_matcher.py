@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import date
 from decimal import Decimal
 from unittest.mock import MagicMock
@@ -12,6 +13,7 @@ from beanbeaver.receipt.matcher import (
     _merchant_similarity,
     _try_match,
     match_receipt_to_transactions,
+    rust_backend_loaded,
 )
 
 
@@ -170,3 +172,10 @@ class TestTryMatch:
         assert "date:" in result.match_details
         assert "amount:" in result.match_details
         assert "merchant:" in result.match_details
+
+
+def test_rust_backend_loads_when_required() -> None:
+    if os.environ.get("BEANBEAVER_REQUIRE_RUST_MATCHER") != "1":
+        return
+
+    assert rust_backend_loaded()

@@ -29,3 +29,36 @@ jobs:
 
       - name: Run tests (excluding e2e)
         run: python -m pytest tests --ignore=tests/test_e2e_receipts.py
+
+  native-matcher:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install native test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test,dev]"
+
+      - name: Build native matcher extension
+        run: maturin develop
+
+      - name: Assert native matcher backend is loaded
+        env:
+          BEANBEAVER_REQUIRE_RUST_MATCHER: "1"
+        run: python -c "from beanbeaver.receipt.matcher import rust_backend_loaded; assert rust_backend_loaded()"
+
+      - name: Run matcher tests with native backend
+        env:
+          BEANBEAVER_REQUIRE_RUST_MATCHER: "1"
+        run: python -m pytest tests/test_matcher.py

@@ -78,23 +78,38 @@ def _load_rust_matcher() -> ModuleType | None:
             continue
 
     project_root = Path(__file__).resolve().parents[1]
-    for candidate in (
-        project_root / "target" / "maturin" / "lib_rust_matcher.so",
-        project_root / "target" / "debug" / "lib_rust_matcher.so",
-    ):
-        if not candidate.exists():
+    candidate_patterns = (
+        project_root / "target" / "maturin",
+        project_root / "target" / "debug",
+    )
+    for directory in candidate_patterns:
+        if not directory.exists():
             continue
-        spec = importlib.util.spec_from_file_location("beanbeaver._rust_matcher", candidate)
-        if spec is None or spec.loader is None:
-            continue
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
+        for pattern in (
+            "_rust_matcher*.so",
+            "lib_rust_matcher*.so",
+            "_rust_matcher*.pyd",
+            "lib_rust_matcher*.pyd",
+            "_rust_matcher*.dylib",
+            "lib_rust_matcher*.dylib",
+        ):
+            for candidate in sorted(directory.glob(pattern)):
+                spec = importlib.util.spec_from_file_location("beanbeaver._rust_matcher", candidate)
+                if spec is None or spec.loader is None:
+                    continue
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                return module
 
     return None
 
 
 _rust_matcher = _load_rust_matcher()
+
+
+def rust_backend_loaded() -> bool:
+    """Return whether the native matcher backend is active."""
+    return _rust_matcher is not None
 
 
 def _config_or_default(config: MatchConfig | None) -> MatchConfig:
