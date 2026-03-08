@@ -133,15 +133,6 @@ struct ApproveReceiptResponse {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-struct ReEditApprovedResponse {
-    status: String,
-    #[serde(rename = "source_path")]
-    _source_path: String,
-    updated_path: Option<String>,
-    normalize_error: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
 struct ConfigResponse {
     config_path: String,
     project_root: String,
@@ -186,7 +177,6 @@ struct ApplyMatchResponse {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EditMode {
     ApproveScanned,
-    UpdateApproved,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -715,12 +705,12 @@ impl App {
             self.set_status("No receipt selected");
             return;
         };
+        if self.active_queue == Queue::Approved {
+            self.set_status("Approved receipts are re-edited in the external editor");
+            return;
+        }
         self.edit_state = Some(EditState::from_summary(receipt));
-        self.edit_mode = Some(if self.active_queue == Queue::Scanned {
-            EditMode::ApproveScanned
-        } else {
-            EditMode::UpdateApproved
-        });
+        self.edit_mode = Some(EditMode::ApproveScanned);
         self.set_status(
             "Edit review fields, Tab/Shift-Tab or Up/Down to move, Enter to save, Esc to cancel",
         );
@@ -752,18 +742,6 @@ impl App {
                     "Approved {} -> {}",
                     result.source_path, result.approved_path
                 ));
-            }
-            EditMode::UpdateApproved => {
-                let result = backend_re_edit_approved_with_review(&path, &payload)?;
-                self.edit_state = None;
-                self.edit_mode = None;
-                self.refresh()?;
-                self.set_status(match result.updated_path {
-                    Some(updated_path) => format!("Updated approved receipt: {updated_path}"),
-                    None => result.normalize_error.unwrap_or_else(|| {
-                        format!("Approved receipt update failed: {}", result.status)
-                    }),
-                });
             }
         }
         Ok(())
@@ -1356,17 +1334,6 @@ fn backend_approve_scanned_with_review(
         return Err(format!("unexpected approve status: {}", response.status).into());
     }
     Ok(response)
-}
-
-fn backend_re_edit_approved_with_review(
-    path: &str,
-    payload: &str,
-) -> AppResult<ReEditApprovedResponse> {
-    let stdout = run_backend_with_input(
-        &["api", "re-edit-approved-with-review", path],
-        Some(payload),
-    )?;
-    Ok(serde_json::from_str(&stdout)?)
 }
 
 fn backend_get_config() -> AppResult<ConfigResponse> {
@@ -2616,7 +2583,38 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
                             app.set_error(error.to_string());
                         }
                     }
-                    (KeyCode::Char('e'), _) => app.begin_edit_selected(),
+                    (KeyCode::Char('e'), _) => {
+                        if app.active_queue == Queue::Approved {
+                            let Some(path) =
+                                app.selected_receipt().map(|receipt| receipt.path.clone())
+                            else {
+                                app.set_status("No approved receipt selected");
+                                continue;
+                            };
+                            suspend_terminal(terminal)?;
+                            let reedit_result = run_backend_interactive(&["re-edit", &path]);
+                            resume_terminal(terminal)?;
+                            match reedit_result {
+                                Ok(0) => {
+                                    if let Err(error) = app.refresh() {
+                                        app.set_error(error.to_string());
+                                        continue;
+                                    }
+                                    app.set_status(format!("Returned from external editor for approved receipt: {path}"));
+                                }
+                                Ok(exit_code) => {
+                                    app.set_error(format!(
+                                        "`bb re-edit` exited with code {exit_code}."
+                                    ));
+                                }
+                                Err(error) => {
+                                    app.set_error(format!("Failed to run `bb re-edit`: {error}"));
+                                }
+                            }
+                        } else {
+                            app.begin_edit_selected();
+                        }
+                    }
                     (KeyCode::Char('m'), KeyModifiers::NONE) => {
                         if let Err(error) = app.begin_match_selected_approved() {
                             app.set_error(error.to_string());

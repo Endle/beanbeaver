@@ -94,7 +94,13 @@ Notes:
 
     # edit (interactive editor for scanned receipts)
     subparsers.add_parser("edit", help="Edit a scanned receipt (interactive)")
-    subparsers.add_parser("re-edit", help="Re-edit an approved receipt (interactive)")
+    reedit_parser = subparsers.add_parser("re-edit", help="Re-edit an approved receipt (interactive)")
+    reedit_parser.add_argument(
+        "path",
+        nargs="?",
+        default=None,
+        help="Path to an approved staged receipt JSON file (skip interactive selection if provided)",
+    )
 
     # match approved receipts against ledger
     match_parser = subparsers.add_parser("match", help="Match approved receipts against ledger")

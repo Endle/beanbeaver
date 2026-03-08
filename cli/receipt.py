@@ -211,33 +211,40 @@ def cmd_re_edit(args: argparse.Namespace) -> None:
         print("Error: bb re-edit requires an interactive TTY.")
         sys.exit(1)
 
-    receipts = list_approved_receipts()
-    if not receipts:
-        print("No approved receipts found in receipts/json/approved/")
-        return
+    if args.path is not None:
+        target = Path(args.path).expanduser().resolve()
+        if not target.exists():
+            print(f"Approved receipt not found: {target}")
+            sys.exit(1)
+    else:
+        receipts = list_approved_receipts()
+        if not receipts:
+            print("No approved receipts found in receipts/json/approved/")
+            return
 
-    print("\nApproved receipts:")
-    for i, (path, merchant, receipt_date, amount) in enumerate(receipts, 1):
-        date_str = receipt_date.isoformat() if receipt_date else "UNKNOWN"
-        amount_str = f"${amount:>7.2f}" if amount is not None else "$UNKNOWN"
-        merchant_str = merchant or "UNKNOWN"
-        print(f"{i}. {date_str}  {amount_str}  {merchant_str:<30}  {path.parent.name}/{path.name}")
-    print("q. Quit")
+        print("\nApproved receipts:")
+        for i, (path, merchant, receipt_date, amount) in enumerate(receipts, 1):
+            date_str = receipt_date.isoformat() if receipt_date else "UNKNOWN"
+            amount_str = f"${amount:>7.2f}" if amount is not None else "$UNKNOWN"
+            merchant_str = merchant or "UNKNOWN"
+            print(f"{i}. {date_str}  {amount_str}  {merchant_str:<30}  {path.parent.name}/{path.name}")
+        print("q. Quit")
 
-    choice = input("Select a receipt to re-edit: ").strip().lower()
-    if choice in {"q", "quit", ""}:
-        print("Cancelled.")
-        return
+        choice = input("Select a receipt to re-edit: ").strip().lower()
+        if choice in {"q", "quit", ""}:
+            print("Cancelled.")
+            return
 
-    try:
-        idx = int(choice)
-        if idx < 1 or idx > len(receipts):
-            raise ValueError
-    except ValueError:
-        print("Invalid choice.")
-        return
+        try:
+            idx = int(choice)
+            if idx < 1 or idx > len(receipts):
+                raise ValueError
+        except ValueError:
+            print("Invalid choice.")
+            return
 
-    target = receipts[idx - 1][0]
+        target = receipts[idx - 1][0]
+
     result = run_re_edit_approved_receipt(
         ReEditApprovedReceiptRequest(
             target_path=target,
@@ -247,20 +254,20 @@ def cmd_re_edit(args: argparse.Namespace) -> None:
     if result.status == "editor_not_found":
         editor_cmd = result.editor_cmd or []
         print(f"Editor not found: {' '.join(editor_cmd)}")
-        return
+        sys.exit(1)
     if result.status == "editor_failed":
         print(f"Editor exited with code {result.editor_returncode}. Approved file left unchanged.")
-        return
+        sys.exit(1)
     if result.status == "edited_file_missing":
         print("Edited file no longer exists. Leaving as-is.")
-        return
+        sys.exit(1)
     if result.status == "normalize_failed":
         print(f"Re-edit saved, but could not normalize filename: {result.normalize_error}")
-        return
+        sys.exit(1)
 
     if result.updated_path is None:
         print("Approved receipt update failed.")
-        return
+        sys.exit(1)
 
     print(f"Updated approved receipt: {result.updated_path}")
 
