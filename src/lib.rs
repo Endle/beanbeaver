@@ -148,7 +148,8 @@ fn merchant_similarity_impl(receipt_merchant: &str, txn_payee: &str) -> f64 {
         return 0.0;
     }
 
-    if normalized_txn.contains(&normalized_receipt) || normalized_receipt.contains(&normalized_txn) {
+    if normalized_txn.contains(&normalized_receipt) || normalized_receipt.contains(&normalized_txn)
+    {
         return 0.9;
     }
 
@@ -196,7 +197,8 @@ fn match_receipt_to_transaction_impl(
             confidence += 0.4;
             details.push("date: exact match".to_string());
         } else {
-            confidence += 0.4 * (1.0 - (date_diff as f64) / ((config.date_tolerance_days + 1) as f64));
+            confidence +=
+                0.4 * (1.0 - (date_diff as f64) / ((config.date_tolerance_days + 1) as f64));
             details.push(format!("date: {date_diff} day(s) off"));
         }
     }
@@ -223,7 +225,8 @@ fn match_receipt_to_transaction_impl(
         ));
     }
 
-    let merchant_score = merchant_similarity_impl(&receipt.merchant, txn.payee.as_deref().unwrap_or(""));
+    let merchant_score =
+        merchant_similarity_impl(&receipt.merchant, txn.payee.as_deref().unwrap_or(""));
     if merchant_score < 0.3 {
         return None;
     }
@@ -262,7 +265,8 @@ fn match_transaction_to_receipt_impl(
             confidence += 0.4;
             details.push("date: exact match".to_string());
         } else {
-            confidence += 0.4 * (1.0 - (date_diff as f64) / ((config.date_tolerance_days + 1) as f64));
+            confidence +=
+                0.4 * (1.0 - (date_diff as f64) / ((config.date_tolerance_days + 1) as f64));
             details.push(format!("date: {date_diff} day(s) off"));
         }
     }
@@ -366,22 +370,24 @@ fn match_transaction_to_receipts(
     let mut matches: Vec<(usize, f64, String)> = candidates
         .into_iter()
         .enumerate()
-        .filter_map(|(index, (date_ordinal, total_scaled, merchant, date_is_placeholder))| {
-            let receipt = ReceiptInput {
-                date_ordinal,
-                total_scaled,
-                merchant,
-                date_is_placeholder,
-            };
-            match_transaction_to_receipt_impl(
-                txn_date_ordinal,
-                txn_amount_scaled,
-                &txn_payee,
-                &receipt,
-                &config,
-            )
-            .map(|(confidence, details)| (index, confidence, details))
-        })
+        .filter_map(
+            |(index, (date_ordinal, total_scaled, merchant, date_is_placeholder))| {
+                let receipt = ReceiptInput {
+                    date_ordinal,
+                    total_scaled,
+                    merchant,
+                    date_is_placeholder,
+                };
+                match_transaction_to_receipt_impl(
+                    txn_date_ordinal,
+                    txn_amount_scaled,
+                    &txn_payee,
+                    &receipt,
+                    &config,
+                )
+                .map(|(confidence, details)| (index, confidence, details))
+            },
+        )
         .collect();
 
     matches.sort_by(|left, right| compare_matches(left, right));

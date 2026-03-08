@@ -1,9 +1,13 @@
+use std::collections::VecDeque;
 use std::env;
 use std::error::Error;
-use std::io::{self, Stdout, Write};
+use std::io::{self, BufRead, BufReader, Read, Stdout, Write};
+use std::net::TcpStream;
 use std::path::Path;
-use std::process::Command;
-use std::time::Duration;
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
@@ -20,6 +24,31 @@ use serde::Deserialize;
 use serde_json::Value;
 
 type AppResult<T> = Result<T, Box<dyn Error>>;
+
+const SERVE_HOST: &str = "0.0.0.0";
+const SERVE_HEALTH_HOST: &str = "127.0.0.1";
+const SERVE_PORT: u16 = 8080;
+const OCR_CONTAINER_NAME: &str = "beanbeaver-ocr";
+const MAX_RUNTIME_LOG_LINES: usize = 400;
+const SERVE_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+const OCR_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Page {
+    Receipts,
+    Serve,
+    Ocr,
+}
+
+impl Page {
+    fn tab_index(self) -> usize {
+        match self {
+            Page::Receipts => 0,
+            Page::Serve => 1,
+            Page::Ocr => 2,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Queue {
@@ -46,14 +75,6 @@ impl Queue {
         match self {
             Queue::Scanned => 0,
             Queue::Approved => 1,
-        }
-    }
-
-    fn from_tab(index: usize) -> Self {
-        if index == 0 {
-            Queue::Scanned
-        } else {
-            Queue::Approved
         }
     }
 }
@@ -207,6 +228,24 @@ struct MatchState {
     warning: Option<String>,
 }
 
+struct ManagedProcess {
+    child: Child,
+    command: String,
+}
+
+struct ServePageState {
+    process: Option<ManagedProcess>,
+    log_lines: Arc<Mutex<VecDeque<String>>>,
+    health_ok: bool,
+    health_message: String,
+    last_exit_code: Option<i32>,
+}
+
+struct OcrPageState {
+    summary_lines: Vec<String>,
+    log_lines: Vec<String>,
+}
+
 impl ConfigState {
     fn from_response(config: &ConfigResponse) -> Self {
         Self {
@@ -215,6 +254,36 @@ impl ConfigState {
             } else {
                 config.project_root.clone()
             },
+        }
+    }
+}
+
+impl ServePageState {
+    fn new() -> Self {
+        let log_lines = Arc::new(Mutex::new(VecDeque::new()));
+        replace_log_lines(
+            &log_lines,
+            vec!["Use `x` to start or stop a TUI-managed `bb serve` instance.".to_string()],
+        );
+        Self {
+            process: None,
+            log_lines,
+            health_ok: false,
+            health_message: "Health not checked yet".to_string(),
+            last_exit_code: None,
+        }
+    }
+
+    fn snapshot_logs(&self) -> Vec<String> {
+        snapshot_log_lines(&self.log_lines)
+    }
+}
+
+impl OcrPageState {
+    fn new() -> Self {
+        Self {
+            summary_lines: vec!["Refreshing Podman container state...".to_string()],
+            log_lines: vec!["No container logs loaded yet.".to_string()],
         }
     }
 }
@@ -281,6 +350,7 @@ impl EditState {
 }
 
 struct App {
+    active_page: Page,
     active_queue: Queue,
     focus: PaneFocus,
     right_pane: RightPane,
@@ -299,6 +369,10 @@ struct App {
     config: ConfigResponse,
     config_state: Option<ConfigState>,
     match_state: Option<MatchState>,
+    serve_state: ServePageState,
+    ocr_state: OcrPageState,
+    last_serve_refresh: Option<Instant>,
+    last_ocr_refresh: Option<Instant>,
     should_quit: bool,
 }
 
@@ -309,6 +383,7 @@ impl App {
         let mut approved_state = ListState::default();
         approved_state.select(Some(0));
         Self {
+            active_page: Page::Receipts,
             active_queue: Queue::Scanned,
             focus: PaneFocus::List,
             right_pane: RightPane::Details,
@@ -321,9 +396,7 @@ impl App {
             detail_path: None,
             detail_scroll_y: 0,
             detail_scroll_x: 0,
-            status:
-                "q quit | Tab switch queues | h/l pane focus | s toggle details/status | j/k move or scroll | e edit | m TUI match | M CLI match | arrows pan right pane | r reload | a approve | c config"
-                    .to_string(),
+            status: Self::page_help(Page::Receipts).to_string(),
             edit_state: None,
             edit_mode: None,
             config: ConfigResponse {
@@ -336,6 +409,10 @@ impl App {
             },
             config_state: None,
             match_state: None,
+            serve_state: ServePageState::new(),
+            ocr_state: OcrPageState::new(),
+            last_serve_refresh: None,
+            last_ocr_refresh: None,
             should_quit: false,
         }
         .with_initial_status()
@@ -344,6 +421,20 @@ impl App {
     fn with_initial_status(mut self) -> Self {
         self.push_status_log(self.status.clone());
         self
+    }
+
+    fn page_help(page: Page) -> &'static str {
+        match page {
+            Page::Receipts => {
+                "1 receipts | 2 serve | 3 OCR | Tab switch queues | h/l pane focus | s toggle details/status | j/k move or scroll | e edit | m TUI match | M CLI match | arrows pan | r reload | a approve | c config | q quit"
+            }
+            Page::Serve => {
+                "1 receipts | 2 serve | 3 OCR | x start/stop `bb serve` | R restart | r refresh health | q quit"
+            }
+            Page::Ocr => {
+                "1 receipts | 2 serve | 3 OCR | r refresh podman status/logs | q quit"
+            }
+        }
     }
 
     fn receipts(&self, queue: Queue) -> &[ReceiptSummary] {
@@ -404,6 +495,14 @@ impl App {
         self.focus = PaneFocus::List;
     }
 
+    fn switch_page(&mut self, page: Page) {
+        if self.active_page == page {
+            return;
+        }
+        self.active_page = page;
+        self.set_status(Self::page_help(page));
+    }
+
     fn set_status(&mut self, message: impl Into<String>) {
         let message = message.into();
         self.status = message.clone();
@@ -411,9 +510,13 @@ impl App {
     }
 
     fn set_error(&mut self, message: impl Into<String>) {
-        self.right_pane = RightPane::StatusLog;
+        if self.active_page == Page::Receipts {
+            self.right_pane = RightPane::StatusLog;
+        }
         self.set_status(message);
-        self.scroll_detail_to_bottom();
+        if self.active_page == Page::Receipts {
+            self.scroll_detail_to_bottom();
+        }
     }
 
     fn push_status_log(&mut self, message: String) {
@@ -461,6 +564,7 @@ impl App {
         self.config = backend_get_config()?;
         self.reload_receipts()?;
         self.load_detail()?;
+        self.refresh_runtime_pages(true)?;
         self.set_status(format!(
             "Loaded {} scanned / {} approved receipt(s)",
             self.scanned.len(),
@@ -704,6 +808,187 @@ impl App {
         ));
         Ok(())
     }
+
+    fn refresh_current_page(&mut self) -> AppResult<()> {
+        match self.active_page {
+            Page::Receipts => self.refresh(),
+            Page::Serve => {
+                self.refresh_runtime_pages(true)?;
+                self.set_status("Refreshed `bb serve` status and health");
+                Ok(())
+            }
+            Page::Ocr => {
+                self.refresh_runtime_pages(true)?;
+                self.set_status(format!(
+                    "Refreshed Podman container `{}` status and logs",
+                    OCR_CONTAINER_NAME
+                ));
+                Ok(())
+            }
+        }
+    }
+
+    fn refresh_runtime_pages(&mut self, force: bool) -> AppResult<()> {
+        self.poll_serve_process()?;
+        let now = Instant::now();
+
+        if force
+            || self
+                .last_serve_refresh
+                .is_none_or(|last| now.duration_since(last) >= SERVE_REFRESH_INTERVAL)
+        {
+            self.refresh_serve_health();
+            self.last_serve_refresh = Some(now);
+        }
+
+        if force
+            || (self.active_page == Page::Ocr
+                && self
+                    .last_ocr_refresh
+                    .is_none_or(|last| now.duration_since(last) >= OCR_REFRESH_INTERVAL))
+        {
+            self.refresh_ocr_page();
+            self.last_ocr_refresh = Some(now);
+        }
+
+        Ok(())
+    }
+
+    fn refresh_serve_health(&mut self) {
+        match check_local_health(SERVE_PORT) {
+            Ok(message) => {
+                self.serve_state.health_ok = true;
+                self.serve_state.health_message = message;
+            }
+            Err(error) => {
+                self.serve_state.health_ok = false;
+                self.serve_state.health_message = error;
+            }
+        }
+    }
+
+    fn refresh_ocr_page(&mut self) {
+        self.ocr_state = query_ocr_page_state();
+    }
+
+    fn poll_serve_process(&mut self) -> AppResult<()> {
+        let exit_status = match self.serve_state.process.as_mut() {
+            Some(process) => process.child.try_wait()?,
+            None => None,
+        };
+
+        if let Some(status) = exit_status {
+            let exit_code = exit_status_code(status);
+            push_bounded_log_line(
+                &self.serve_state.log_lines,
+                format!("Process exited with code {exit_code}."),
+            );
+            self.serve_state.process = None;
+            self.serve_state.last_exit_code = Some(exit_code);
+            self.refresh_serve_health();
+        }
+
+        Ok(())
+    }
+
+    fn toggle_serve_process(&mut self) -> AppResult<()> {
+        self.poll_serve_process()?;
+        if self.serve_state.process.is_some() {
+            self.stop_serve_process()
+        } else {
+            self.start_serve_process()
+        }
+    }
+
+    fn restart_serve_process(&mut self) -> AppResult<()> {
+        self.poll_serve_process()?;
+        if self.serve_state.process.is_some() {
+            self.stop_serve_process()?;
+        }
+        self.start_serve_process()
+    }
+
+    fn start_serve_process(&mut self) -> AppResult<()> {
+        if self.serve_state.process.is_some() {
+            self.set_status("A TUI-managed `bb serve` process is already running");
+            return Ok(());
+        }
+
+        let backend = backend_command();
+        let (program, program_args) = backend
+            .split_first()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Empty backend command"))?;
+        let serve_args = ["serve", "--host", SERVE_HOST, "--port", "8080"];
+        let command_line = render_command_line(&backend, &serve_args);
+
+        replace_log_lines(
+            &self.serve_state.log_lines,
+            vec![format!("Starting managed process: {command_line}")],
+        );
+
+        let mut child = Command::new(program)
+            .args(program_args)
+            .args(serve_args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        if let Some(stdout) = child.stdout.take() {
+            spawn_log_reader(stdout, "stdout", self.serve_state.log_lines.clone());
+        }
+        if let Some(stderr) = child.stderr.take() {
+            spawn_log_reader(stderr, "stderr", self.serve_state.log_lines.clone());
+        }
+
+        let pid = child.id();
+        self.serve_state.process = Some(ManagedProcess {
+            child,
+            command: command_line.clone(),
+        });
+        self.serve_state.last_exit_code = None;
+        push_bounded_log_line(
+            &self.serve_state.log_lines,
+            format!("Managed `bb serve` started with PID {pid}."),
+        );
+        self.refresh_serve_health();
+        self.set_status(format!(
+            "Started managed `bb serve` on http://{SERVE_HEALTH_HOST}:{SERVE_PORT}"
+        ));
+        Ok(())
+    }
+
+    fn stop_serve_process(&mut self) -> AppResult<()> {
+        let Some(mut process) = self.serve_state.process.take() else {
+            self.set_status("No TUI-managed `bb serve` process is running");
+            return Ok(());
+        };
+
+        let exit_code = match process.child.try_wait()? {
+            Some(status) => exit_status_code(status),
+            None => {
+                process.child.kill()?;
+                exit_status_code(process.child.wait()?)
+            }
+        };
+
+        push_bounded_log_line(
+            &self.serve_state.log_lines,
+            format!("Managed process stopped with code {exit_code}."),
+        );
+        self.serve_state.last_exit_code = Some(exit_code);
+        self.refresh_serve_health();
+        self.set_status(format!(
+            "Stopped TUI-managed `bb serve` (exit code {exit_code})"
+        ));
+        Ok(())
+    }
+
+    fn shutdown(&mut self) -> AppResult<()> {
+        if self.serve_state.process.is_some() {
+            self.stop_serve_process()?;
+        }
+        Ok(())
+    }
 }
 
 fn backend_command() -> Vec<String> {
@@ -880,6 +1165,356 @@ fn run_backend_interactive(args: &[&str]) -> AppResult<i32> {
     Ok(status.code().unwrap_or(1))
 }
 
+fn exit_status_code(status: ExitStatus) -> i32 {
+    status.code().unwrap_or(1)
+}
+
+fn render_command_line(base: &[String], extra: &[&str]) -> String {
+    base.iter()
+        .map(String::as_str)
+        .chain(extra.iter().copied())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn replace_log_lines(buffer: &Arc<Mutex<VecDeque<String>>>, lines: Vec<String>) {
+    let mut guard = buffer
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.clear();
+    for line in lines {
+        guard.push_back(line);
+    }
+    if guard.is_empty() {
+        guard.push_back("No logs yet.".to_string());
+    }
+}
+
+fn push_bounded_log_line(buffer: &Arc<Mutex<VecDeque<String>>>, line: impl Into<String>) {
+    let mut guard = buffer
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.push_back(line.into());
+    while guard.len() > MAX_RUNTIME_LOG_LINES {
+        guard.pop_front();
+    }
+}
+
+fn snapshot_log_lines(buffer: &Arc<Mutex<VecDeque<String>>>) -> Vec<String> {
+    let guard = buffer
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if guard.is_empty() {
+        vec!["No logs yet.".to_string()]
+    } else {
+        guard.iter().cloned().collect()
+    }
+}
+
+fn spawn_log_reader<R: Read + Send + 'static>(
+    reader: R,
+    stream_name: &'static str,
+    buffer: Arc<Mutex<VecDeque<String>>>,
+) {
+    thread::spawn(move || {
+        let reader = BufReader::new(reader);
+        for line_result in reader.lines() {
+            match line_result {
+                Ok(line) => push_bounded_log_line(&buffer, format!("[{stream_name}] {line}")),
+                Err(error) => {
+                    push_bounded_log_line(
+                        &buffer,
+                        format!("[{stream_name}] log reader error: {error}"),
+                    );
+                    break;
+                }
+            }
+        }
+    });
+}
+
+fn check_local_health(port: u16) -> Result<String, String> {
+    let mut stream = TcpStream::connect((SERVE_HEALTH_HOST, port))
+        .map_err(|error| format!("Health probe failed: {error}"))?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .map_err(|error| format!("Failed to set read timeout: {error}"))?;
+    stream
+        .set_write_timeout(Some(Duration::from_millis(500)))
+        .map_err(|error| format!("Failed to set write timeout: {error}"))?;
+    stream
+        .write_all(
+            format!(
+                "GET /health HTTP/1.1\r\nHost: {SERVE_HEALTH_HOST}:{port}\r\nConnection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .map_err(|error| format!("Health probe request failed: {error}"))?;
+
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|error| format!("Health probe read failed: {error}"))?;
+
+    let status_line = response.lines().next().unwrap_or("No HTTP response");
+    if status_line.contains("200") {
+        Ok(format!(
+            "Healthy: http://{SERVE_HEALTH_HOST}:{port}/health returned {status_line}"
+        ))
+    } else {
+        Err(format!("Health probe returned {status_line}"))
+    }
+}
+
+fn query_ocr_page_state() -> OcrPageState {
+    let exists_output = match Command::new("podman")
+        .args(["container", "exists", OCR_CONTAINER_NAME])
+        .output()
+    {
+        Ok(output) => output,
+        Err(error) => {
+            return OcrPageState {
+                summary_lines: vec![
+                    "Podman unavailable".to_string(),
+                    format!("Error: {error}"),
+                    format!("Container: {OCR_CONTAINER_NAME}"),
+                ],
+                log_lines: vec![
+                    "Install Podman or ensure `podman` is available on PATH.".to_string()
+                ],
+            };
+        }
+    };
+
+    match exists_output.status.code().unwrap_or(1) {
+        0 => {}
+        1 => {
+            return OcrPageState {
+                summary_lines: vec![
+                    "Podman available".to_string(),
+                    format!("Container `{OCR_CONTAINER_NAME}` not found."),
+                    "Suggested command:".to_string(),
+                    "podman run --replace --name beanbeaver-ocr --network=slirp4netns -p 8001:8000 ghcr.io/endle/beanbeaver-ocr:latest".to_string(),
+                ],
+                log_lines: vec!["No logs because the container does not exist.".to_string()],
+            };
+        }
+        _ => {
+            let stderr = String::from_utf8_lossy(&exists_output.stderr)
+                .trim()
+                .to_string();
+            let stdout = String::from_utf8_lossy(&exists_output.stdout)
+                .trim()
+                .to_string();
+            return OcrPageState {
+                summary_lines: vec![
+                    "Podman failed".to_string(),
+                    format!("`podman container exists {OCR_CONTAINER_NAME}` returned a non-zero status."),
+                    format!("stdout: {}", if stdout.is_empty() { "<empty>" } else { &stdout }),
+                    format!("stderr: {}", if stderr.is_empty() { "<empty>" } else { &stderr }),
+                ],
+                log_lines: vec!["Unable to inspect container logs.".to_string()],
+            };
+        }
+    }
+
+    let inspect_output = match Command::new("podman")
+        .args(["inspect", OCR_CONTAINER_NAME])
+        .output()
+    {
+        Ok(output) => output,
+        Err(error) => {
+            return OcrPageState {
+                summary_lines: vec![
+                    "Podman inspect failed".to_string(),
+                    format!("Error: {error}"),
+                ],
+                log_lines: vec!["Unable to inspect container logs.".to_string()],
+            };
+        }
+    };
+
+    if !inspect_output.status.success() {
+        let stderr = String::from_utf8_lossy(&inspect_output.stderr)
+            .trim()
+            .to_string();
+        return OcrPageState {
+            summary_lines: vec![
+                "Podman inspect failed".to_string(),
+                format!(
+                    "stderr: {}",
+                    if stderr.is_empty() {
+                        "<empty>"
+                    } else {
+                        &stderr
+                    }
+                ),
+            ],
+            log_lines: vec!["Unable to inspect container logs.".to_string()],
+        };
+    }
+
+    let summary_lines = match podman_summary_lines(&String::from_utf8_lossy(&inspect_output.stdout))
+    {
+        Ok(lines) => lines,
+        Err(error) => vec![
+            "Failed to parse `podman inspect` output".to_string(),
+            format!("Error: {error}"),
+        ],
+    };
+
+    let logs_output = match Command::new("podman")
+        .args(["logs", "--tail", "80", OCR_CONTAINER_NAME])
+        .output()
+    {
+        Ok(output) => output,
+        Err(error) => {
+            return OcrPageState {
+                summary_lines,
+                log_lines: vec![format!("Failed to fetch container logs: {error}")],
+            };
+        }
+    };
+
+    let log_lines = if logs_output.status.success() {
+        let stdout = String::from_utf8_lossy(&logs_output.stdout);
+        let mut lines: Vec<String> = stdout.lines().map(ToOwned::to_owned).collect();
+        if lines.is_empty() {
+            lines.push("No logs emitted yet.".to_string());
+        }
+        lines
+    } else {
+        let stderr = String::from_utf8_lossy(&logs_output.stderr)
+            .trim()
+            .to_string();
+        vec![format!(
+            "Failed to fetch `podman logs`: {}",
+            if stderr.is_empty() {
+                "<empty>"
+            } else {
+                &stderr
+            }
+        )]
+    };
+
+    OcrPageState {
+        summary_lines,
+        log_lines,
+    }
+}
+
+fn podman_summary_lines(raw_json: &str) -> AppResult<Vec<String>> {
+    let payload: Value = serde_json::from_str(raw_json)?;
+    let entry = payload
+        .as_array()
+        .and_then(|items| items.first())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Missing inspect payload"))?;
+
+    let name = entry
+        .get("Name")
+        .and_then(Value::as_str)
+        .unwrap_or(OCR_CONTAINER_NAME)
+        .trim_start_matches('/');
+    let status = entry
+        .pointer("/State/Status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let running = entry
+        .pointer("/State/Running")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let exit_code = entry
+        .pointer("/State/ExitCode")
+        .and_then(Value::as_i64)
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let image = entry
+        .get("ImageName")
+        .and_then(Value::as_str)
+        .or_else(|| entry.get("Image").and_then(Value::as_str))
+        .unwrap_or("unknown");
+    let created = entry
+        .get("Created")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let started_at = entry
+        .pointer("/State/StartedAt")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let finished_at = entry
+        .pointer("/State/FinishedAt")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let command = {
+        let mut parts = Vec::new();
+        if let Some(path) = entry.get("Path").and_then(Value::as_str) {
+            parts.push(path.to_string());
+        }
+        if let Some(args) = entry.get("Args").and_then(Value::as_array) {
+            parts.extend(args.iter().filter_map(Value::as_str).map(ToOwned::to_owned));
+        }
+        if parts.is_empty() {
+            "unknown".to_string()
+        } else {
+            parts.join(" ")
+        }
+    };
+    let ports = entry
+        .pointer("/NetworkSettings/Ports")
+        .map(format_podman_ports)
+        .unwrap_or_else(|| "unknown".to_string());
+
+    Ok(vec![
+        format!("Container: {name}"),
+        format!(
+            "Status: {} ({})",
+            status,
+            if running { "running" } else { "not running" }
+        ),
+        format!("Exit code: {exit_code}"),
+        format!("Image: {image}"),
+        format!("Ports: {ports}"),
+        format!("Command: {command}"),
+        format!("Created: {created}"),
+        format!("Started: {started_at}"),
+        format!("Finished: {finished_at}"),
+    ])
+}
+
+fn format_podman_ports(ports_value: &Value) -> String {
+    let Some(ports) = ports_value.as_object() else {
+        return "unknown".to_string();
+    };
+    if ports.is_empty() {
+        return "none".to_string();
+    }
+
+    let mut rendered = Vec::new();
+    for (container_port, bindings_value) in ports {
+        match bindings_value {
+            Value::Null => rendered.push(format!("{container_port} (not published)")),
+            Value::Array(bindings) if bindings.is_empty() => {
+                rendered.push(format!("{container_port} (not published)"));
+            }
+            Value::Array(bindings) => {
+                for binding in bindings {
+                    let host_ip = binding
+                        .get("HostIp")
+                        .and_then(Value::as_str)
+                        .unwrap_or("0.0.0.0");
+                    let host_port = binding
+                        .get("HostPort")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown");
+                    rendered.push(format!("{host_ip}:{host_port} -> {container_port}"));
+                }
+            }
+            _ => rendered.push(format!("{container_port} (unknown binding)")),
+        }
+    }
+    rendered.join(", ")
+}
+
 fn render_detail_lines(detail: &ShowReceiptResponse) -> Vec<String> {
     let mut lines = vec![
         format!(
@@ -917,6 +1552,48 @@ fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
         ])
         .split(frame.area());
 
+    let tabs = Tabs::new(["Receipts", "Serve", "OCR"])
+        .block(Block::default().borders(Borders::ALL).title("Pages"))
+        .select(app.active_page.tab_index())
+        .highlight_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        );
+    frame.render_widget(tabs, chunks[0]);
+
+    match app.active_page {
+        Page::Receipts => render_receipts_page(frame, app, chunks[1]),
+        Page::Serve => render_serve_page(frame, app, chunks[1]),
+        Page::Ocr => render_ocr_page(frame, app, chunks[1]),
+    }
+
+    let footer = Paragraph::new(app.status.clone())
+        .block(Block::default().borders(Borders::ALL).title("Status"))
+        .wrap(Wrap { trim: true });
+    frame.render_widget(footer, chunks[2]);
+
+    if let Some(edit_state) = &app.edit_state {
+        render_edit_modal(frame, edit_state);
+    }
+    if let Some(config_state) = &app.config_state {
+        render_config_modal(frame, &app.config, config_state);
+    }
+    if let Some(match_state) = &mut app.match_state {
+        render_match_modal(frame, match_state);
+    }
+}
+
+fn render_receipts_page(
+    frame: &mut ratatui::Frame<'_>,
+    app: &mut App,
+    area: ratatui::layout::Rect,
+) {
+    let page_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(8)])
+        .split(area);
+
     let tabs = Tabs::new(["Scanned", "Approved"])
         .block(Block::default().borders(Borders::ALL).title("Queues"))
         .select(app.active_queue.tab_index())
@@ -925,12 +1602,12 @@ fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         );
-    frame.render_widget(tabs, chunks[0]);
+    frame.render_widget(tabs, page_chunks[0]);
 
     let body = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
-        .split(chunks[1]);
+        .split(page_chunks[1]);
 
     let items: Vec<ListItem> = app
         .receipts(app.active_queue)
@@ -989,21 +1666,94 @@ fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
     .scroll((app.detail_scroll_y, app.detail_scroll_x))
     .wrap(Wrap { trim: false });
     frame.render_widget(detail, body[1]);
+}
 
-    let footer = Paragraph::new(app.status.clone())
-        .block(Block::default().borders(Borders::ALL).title("Status"))
-        .wrap(Wrap { trim: true });
-    frame.render_widget(footer, chunks[2]);
+fn render_serve_page(frame: &mut ratatui::Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(9), Constraint::Min(8)])
+        .split(area);
 
-    if let Some(edit_state) = &app.edit_state {
-        render_edit_modal(frame, edit_state);
-    }
-    if let Some(config_state) = &app.config_state {
-        render_config_modal(frame, &app.config, config_state);
-    }
-    if let Some(match_state) = &mut app.match_state {
-        render_match_modal(frame, match_state);
-    }
+    let process_status = match app.serve_state.process.as_ref() {
+        Some(process) => format!("Running (managed by this TUI, PID {})", process.child.id()),
+        None if app.serve_state.health_ok => {
+            "No managed process, but a healthy listener is responding".to_string()
+        }
+        None => "Stopped".to_string(),
+    };
+    let command = app
+        .serve_state
+        .process
+        .as_ref()
+        .map(|process| process.command.clone())
+        .unwrap_or_else(|| {
+            render_command_line(
+                &backend_command(),
+                &["serve", "--host", SERVE_HOST, "--port", "8080"],
+            )
+        });
+    let last_exit = app
+        .serve_state
+        .last_exit_code
+        .map(|code| code.to_string())
+        .unwrap_or_else(|| "n/a".to_string());
+    let summary = Paragraph::new(format!(
+        "Status: {process_status}\nHealth: {}\nEndpoints: http://{SERVE_HEALTH_HOST}:{SERVE_PORT}/upload | /beanbeaver | /bb\nCommand: {command}\nLast managed exit code: {last_exit}\nLifecycle: TUI-managed `bb serve` is terminated when `bb-tui` exits.",
+        app.serve_state.health_message,
+    ))
+    .block(Block::default().borders(Borders::ALL).title("`bb serve`"))
+    .wrap(Wrap { trim: true });
+    frame.render_widget(summary, sections[0]);
+
+    let logs = Paragraph::new(Text::from(
+        app.serve_state
+            .snapshot_logs()
+            .into_iter()
+            .map(Line::from)
+            .collect::<Vec<_>>(),
+    ))
+    .block(Block::default().borders(Borders::ALL).title("Serve Logs"))
+    .wrap(Wrap { trim: false });
+    frame.render_widget(logs, sections[1]);
+}
+
+fn render_ocr_page(frame: &mut ratatui::Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(11), Constraint::Min(8)])
+        .split(area);
+
+    let summary = Paragraph::new(Text::from(
+        app.ocr_state
+            .summary_lines
+            .iter()
+            .cloned()
+            .map(Line::from)
+            .collect::<Vec<_>>(),
+    ))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Podman Container"),
+    )
+    .wrap(Wrap { trim: true });
+    frame.render_widget(summary, sections[0]);
+
+    let logs = Paragraph::new(Text::from(
+        app.ocr_state
+            .log_lines
+            .iter()
+            .cloned()
+            .map(Line::from)
+            .collect::<Vec<_>>(),
+    ))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(format!("`podman logs --tail 80 {OCR_CONTAINER_NAME}`")),
+    )
+    .wrap(Wrap { trim: false });
+    frame.render_widget(logs, sections[1]);
 }
 
 fn render_edit_modal(frame: &mut ratatui::Frame<'_>, edit_state: &EditState) {
@@ -1279,6 +2029,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
         }
 
         if !event::poll(Duration::from_millis(200))? {
+            app.refresh_runtime_pages(false)?;
             continue;
         }
 
@@ -1380,116 +2131,149 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
 
         match (key.code, key.modifiers) {
             (KeyCode::Char('q'), _) => app.should_quit = true,
-            (KeyCode::Tab, _) => {
-                app.switch_queue();
-                if let Err(error) = app.load_detail() {
+            (KeyCode::Char('1'), _) => {
+                app.switch_page(Page::Receipts);
+                if let Err(error) = app.refresh_runtime_pages(true) {
                     app.set_error(error.to_string());
                 }
             }
-            (KeyCode::Char('s'), KeyModifiers::NONE) => {
-                app.toggle_right_pane();
-            }
-            (KeyCode::Char('l'), KeyModifiers::NONE) => {
-                app.focus_detail();
-            }
-            (KeyCode::Char('h'), KeyModifiers::NONE) => {
-                app.focus_list();
-            }
-            (KeyCode::Down, _) | (KeyCode::Char('j'), KeyModifiers::NONE) => {
-                if app.focus == PaneFocus::List {
-                    app.move_selection(1);
-                    if let Err(error) = app.load_detail() {
-                        app.set_error(error.to_string());
-                    }
-                } else {
-                    app.scroll_detail_vertical(1);
+            (KeyCode::Char('2'), _) => {
+                app.switch_page(Page::Serve);
+                if let Err(error) = app.refresh_runtime_pages(true) {
+                    app.set_error(error.to_string());
                 }
             }
-            (KeyCode::Up, _) | (KeyCode::Char('k'), KeyModifiers::NONE) => {
-                if app.focus == PaneFocus::List {
-                    app.move_selection(-1);
-                    if let Err(error) = app.load_detail() {
-                        app.set_error(error.to_string());
-                    }
-                } else {
-                    app.scroll_detail_vertical(-1);
+            (KeyCode::Char('3'), _) => {
+                app.switch_page(Page::Ocr);
+                if let Err(error) = app.refresh_runtime_pages(true) {
+                    app.set_error(error.to_string());
                 }
-            }
-            (KeyCode::PageDown, _)
-            | (KeyCode::Char('d'), KeyModifiers::CONTROL)
-            | (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
-                app.scroll_detail_vertical(12);
-            }
-            (KeyCode::PageUp, _) | (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
-                app.scroll_detail_vertical(-12);
-            }
-            (KeyCode::Char('g'), KeyModifiers::NONE) => {
-                app.scroll_detail_to_top();
-            }
-            (KeyCode::Char('G'), KeyModifiers::SHIFT) => {
-                app.scroll_detail_to_bottom();
-            }
-            (KeyCode::Right, _) => {
-                app.scroll_detail_horizontal(4);
-            }
-            (KeyCode::Left, _) => {
-                app.scroll_detail_horizontal(-4);
             }
             (KeyCode::Char('r'), _) => {
-                if let Err(error) = app.refresh() {
+                if let Err(error) = app.refresh_current_page() {
                     app.set_error(error.to_string());
                 }
             }
-            (KeyCode::Char('a'), _) => {
-                if let Err(error) = app.approve_selected_scanned() {
-                    app.set_error(error.to_string());
-                }
-            }
-            (KeyCode::Char('e'), _) => app.begin_edit_selected(),
-            (KeyCode::Char('m'), KeyModifiers::NONE) => {
-                if let Err(error) = app.begin_match_selected_approved() {
-                    app.set_error(error.to_string());
-                }
-            }
-            (KeyCode::Char('M'), KeyModifiers::SHIFT) => {
-                match app.can_match_selected_approved() {
-                    Ok(true) => {}
-                    Ok(false) => continue,
-                    Err(error) => {
+            _ => match app.active_page {
+                Page::Receipts => match (key.code, key.modifiers) {
+                    (KeyCode::Tab, _) => {
+                        app.switch_queue();
+                        if let Err(error) = app.load_detail() {
+                            app.set_error(error.to_string());
+                        }
+                    }
+                    (KeyCode::Char('s'), KeyModifiers::NONE) => {
+                        app.toggle_right_pane();
+                    }
+                    (KeyCode::Char('l'), KeyModifiers::NONE) => {
+                        app.focus_detail();
+                    }
+                    (KeyCode::Char('h'), KeyModifiers::NONE) => {
+                        app.focus_list();
+                    }
+                    (KeyCode::Down, _) | (KeyCode::Char('j'), KeyModifiers::NONE) => {
+                        if app.focus == PaneFocus::List {
+                            app.move_selection(1);
+                            if let Err(error) = app.load_detail() {
+                                app.set_error(error.to_string());
+                            }
+                        } else {
+                            app.scroll_detail_vertical(1);
+                        }
+                    }
+                    (KeyCode::Up, _) | (KeyCode::Char('k'), KeyModifiers::NONE) => {
+                        if app.focus == PaneFocus::List {
+                            app.move_selection(-1);
+                            if let Err(error) = app.load_detail() {
+                                app.set_error(error.to_string());
+                            }
+                        } else {
+                            app.scroll_detail_vertical(-1);
+                        }
+                    }
+                    (KeyCode::PageDown, _)
+                    | (KeyCode::Char('d'), KeyModifiers::CONTROL)
+                    | (KeyCode::Char('f'), KeyModifiers::CONTROL) => {
+                        app.scroll_detail_vertical(12);
+                    }
+                    (KeyCode::PageUp, _) | (KeyCode::Char('u'), KeyModifiers::CONTROL) => {
+                        app.scroll_detail_vertical(-12);
+                    }
+                    (KeyCode::Char('g'), KeyModifiers::NONE) => {
+                        app.scroll_detail_to_top();
+                    }
+                    (KeyCode::Char('G'), KeyModifiers::SHIFT) => {
+                        app.scroll_detail_to_bottom();
+                    }
+                    (KeyCode::Right, _) => {
+                        app.scroll_detail_horizontal(4);
+                    }
+                    (KeyCode::Left, _) => {
+                        app.scroll_detail_horizontal(-4);
+                    }
+                    (KeyCode::Char('a'), _) => {
+                        if let Err(error) = app.approve_selected_scanned() {
+                            app.set_error(error.to_string());
+                        }
+                    }
+                    (KeyCode::Char('e'), _) => app.begin_edit_selected(),
+                    (KeyCode::Char('m'), KeyModifiers::NONE) => {
+                        if let Err(error) = app.begin_match_selected_approved() {
+                            app.set_error(error.to_string());
+                        }
+                    }
+                    (KeyCode::Char('M'), KeyModifiers::SHIFT) => {
+                        match app.can_match_selected_approved() {
+                            Ok(true) => {}
+                            Ok(false) => continue,
+                            Err(error) => {
+                                app.set_error(error.to_string());
+                                continue;
+                            }
+                        }
+                        suspend_terminal(terminal)?;
+                        let match_result = run_backend_interactive(&["match"]);
+                        println!();
+                        match match_result {
+                            Ok(exit_code) => {
+                                println!("`bb match` exited with code {exit_code}.");
+                            }
+                            Err(error) => {
+                                println!("Failed to run `bb match`: {error}");
+                            }
+                        }
+                        print!("Press Enter to return to bb-tui...");
+                        io::stdout().flush()?;
+                        let mut input = String::new();
+                        io::stdin().read_line(&mut input)?;
+                        resume_terminal(terminal)?;
+                        if let Err(error) = app.refresh() {
+                            app.set_error(error.to_string());
+                            continue;
+                        }
+                    }
+                    (KeyCode::Char('c'), _) => app.begin_config_edit(),
+                    _ => {}
+                },
+                Page::Serve => match (key.code, key.modifiers) {
+                    (KeyCode::Char('x'), KeyModifiers::NONE) => {
+                        if let Err(error) = app.toggle_serve_process() {
+                            app.set_error(error.to_string());
+                        }
+                    }
+                    (KeyCode::Char('R'), KeyModifiers::SHIFT) => {
+                        if let Err(error) = app.restart_serve_process() {
+                            app.set_error(error.to_string());
+                        }
+                    }
+                    _ => {}
+                },
+                Page::Ocr => {
+                    if let Err(error) = app.refresh_runtime_pages(false) {
                         app.set_error(error.to_string());
-                        continue;
                     }
                 }
-                suspend_terminal(terminal)?;
-                let match_result = run_backend_interactive(&["match"]);
-                println!();
-                match match_result {
-                    Ok(exit_code) => {
-                        println!("`bb match` exited with code {exit_code}.");
-                    }
-                    Err(error) => {
-                        println!("Failed to run `bb match`: {error}");
-                    }
-                }
-                print!("Press Enter to return to bb-tui...");
-                io::stdout().flush()?;
-                let mut input = String::new();
-                io::stdin().read_line(&mut input)?;
-                resume_terminal(terminal)?;
-                if let Err(error) = app.refresh() {
-                    app.set_error(error.to_string());
-                    continue;
-                }
-            }
-            (KeyCode::Char('c'), _) => app.begin_config_edit(),
-            (KeyCode::Char('1'), _) | (KeyCode::Char('2'), _) => {
-                let next = if key.code == KeyCode::Char('1') { 0 } else { 1 };
-                app.active_queue = Queue::from_tab(next);
-                if let Err(error) = app.load_detail() {
-                    app.set_error(error.to_string());
-                }
-            }
-            _ => {}
+            },
         }
     }
 }
@@ -1499,7 +2283,10 @@ fn main() -> AppResult<()> {
     let result = (|| -> AppResult<()> {
         let mut app = App::new();
         app.refresh()?;
-        run_app(&mut terminal, &mut app)
+        app.refresh_runtime_pages(true)?;
+        let run_result = run_app(&mut terminal, &mut app);
+        let shutdown_result = app.shutdown();
+        run_result.and(shutdown_result)
     })();
     restore_terminal(terminal)?;
     result
