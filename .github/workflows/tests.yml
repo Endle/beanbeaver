@@ -54,6 +54,8 @@ jobs:
 
       - name: Install native test dependencies
         run: |
+          export VENV_PYTHON=$GITHUB_WORKSPACE/.venv/bin/python
+          echo "$VENV_PYTHON"
           "$VENV_PYTHON" -m pip install --upgrade pip
           "$VENV_PYTHON" -m pip install -e ".[test,dev]"
       - name: Build native matcher extension
