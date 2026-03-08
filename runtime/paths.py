@@ -3,7 +3,6 @@
 This module provides a single source of truth for all project paths,
 eliminating scattered path definitions across modules.
 """
-
 from __future__ import annotations
 
 import os
