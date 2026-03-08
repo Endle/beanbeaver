@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 from beanbeaver.domain.receipt import Receipt, ReceiptItem
 from beanbeaver.receipt.matcher import (
     MatchConfig,
+    MerchantFamily,
     _merchant_similarity,
     _try_match,
     match_receipt_to_transactions,
@@ -49,6 +50,15 @@ def make_transaction(
     txn.postings = [posting]
 
     return txn
+
+
+def merchant_families() -> tuple[MerchantFamily, ...]:
+    return (
+        MerchantFamily(
+            canonical="REAL CANADIAN SUPERSTORE",
+            aliases=("REAL CANADIAN", "RCSS"),
+        ),
+    )
 
 
 class TestMatchReceiptToTransactions:
@@ -148,7 +158,11 @@ class TestMerchantSimilarity:
         assert score > 0.8
 
     def test_family_alias_match(self) -> None:
-        score = _merchant_similarity("REAL CANADIAN", "RCSS 1077 TORONTO ON")
+        score = _merchant_similarity(
+            "REAL CANADIAN",
+            "RCSS 1077 TORONTO ON",
+            merchant_families=merchant_families(),
+        )
         assert score > 0.8
 
 
@@ -190,7 +204,7 @@ class TestTryMatch:
         )
 
         config = MatchConfig()
-        result = _try_match(receipt, txn, config)
+        result = _try_match(receipt, txn, config, merchant_families=merchant_families())
 
         assert result is not None
         assert "family match" in result.match_details
