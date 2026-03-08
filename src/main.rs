@@ -133,6 +133,16 @@ struct MatchCandidatesResponse {
     candidates: Vec<MatchCandidateSummary>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+struct ApplyMatchResponse {
+    status: String,
+    message: Option<String>,
+    #[serde(rename = "matched_receipt_path")]
+    _matched_receipt_path: Option<String>,
+    #[serde(rename = "enriched_path")]
+    _enriched_path: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EditMode {
     ApproveScanned,
@@ -569,7 +579,7 @@ impl App {
         let response = backend_apply_match(&path, &candidate.file_path, candidate.line_number)?;
         self.match_state = None;
         self.refresh()?;
-        self.status = response;
+        self.status = response.message.unwrap_or_else(|| "Match applied".to_string());
         Ok(())
     }
 
@@ -712,7 +722,7 @@ fn backend_match_candidates(path: &str) -> AppResult<MatchCandidatesResponse> {
     Ok(serde_json::from_str(&stdout)?)
 }
 
-fn backend_apply_match(path: &str, file_path: &str, line_number: i32) -> AppResult<String> {
+fn backend_apply_match(path: &str, file_path: &str, line_number: i32) -> AppResult<ApplyMatchResponse> {
     let payload = serde_json::json!({
         "file_path": file_path,
         "line_number": line_number,
@@ -721,12 +731,15 @@ fn backend_apply_match(path: &str, file_path: &str, line_number: i32) -> AppResu
         &["api", "apply-match", path],
         Some(&serde_json::to_string(&payload)?),
     )?;
-    let response: Value = serde_json::from_str(&stdout)?;
-    Ok(response
-        .get("message")
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| "Match applied".to_string()))
+    let response: ApplyMatchResponse = serde_json::from_str(&stdout)?;
+    match response.status.as_str() {
+        "applied" | "already_applied" => Ok(response),
+        _ => Err(response
+            .message
+            .clone()
+            .unwrap_or_else(|| format!("Match failed: {}", response.status))
+            .into()),
+    }
 }
 
 fn run_backend_interactive(args: &[&str]) -> AppResult<i32> {

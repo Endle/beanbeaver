@@ -32,6 +32,11 @@ logger = get_logger(__name__)
 type ReceiptSummary = tuple[Path, str | None, date | None, Decimal | None]
 
 
+def _receipt_chain_name(stage_path: Path) -> str:
+    """Return a stable human-readable name for one receipt chain."""
+    return stage_path.parent.name
+
+
 @dataclass(frozen=True)
 class MatchCandidate:
     """One candidate ledger transaction for an approved receipt."""
@@ -265,10 +270,11 @@ def apply_match_for_receipt(
                 ),
             )
 
+    receipt_name = _receipt_chain_name(approved_receipt_path)
     enriched = format_enriched_transaction(receipt, selected_match)
     enriched_dir = matched_file.parent / "_enriched"
     enriched_dir.mkdir(parents=True, exist_ok=True)
-    enriched_path = enriched_dir / f"{approved_receipt_path.stem}-enriched.beancount"
+    enriched_path = enriched_dir / f"{receipt_name}.beancount"
     include_rel = enriched_path.relative_to(matched_file.parent).as_posix()
 
     status = apply_receipt_match(
@@ -276,7 +282,7 @@ def apply_match_for_receipt(
         statement_path=matched_file,
         line_number=selected_match.line_number,
         include_rel_path=include_rel,
-        receipt_name=approved_receipt_path.name,
+        receipt_name=receipt_name,
         enriched_path=enriched_path,
         enriched_content=enriched,
     )
@@ -545,10 +551,11 @@ def cmd_match(args: argparse.Namespace) -> None:
                     skipped_count += 1
                     continue
 
+            receipt_name = _receipt_chain_name(path)
             enriched = format_enriched_transaction(receipt, selected_match)
             enriched_dir = matched_file.parent / "_enriched"
             enriched_dir.mkdir(parents=True, exist_ok=True)
-            enriched_path = enriched_dir / f"{path.stem}-enriched.beancount"
+            enriched_path = enriched_dir / f"{receipt_name}.beancount"
             include_rel = enriched_path.relative_to(matched_file.parent).as_posix()
             ledger_snapshot = snapshot_receipt_match_files(
                 statement_path=matched_file,
@@ -561,7 +568,7 @@ def cmd_match(args: argparse.Namespace) -> None:
                     statement_path=matched_file,
                     line_number=selected_match.line_number,
                     include_rel_path=include_rel,
-                    receipt_name=path.name,
+                    receipt_name=receipt_name,
                     enriched_path=enriched_path,
                     enriched_content=enriched,
                 )

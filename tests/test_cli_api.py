@@ -314,6 +314,9 @@ include "records/2026/carda_0101_0131.beancount"
     assert applied["status"] in {"applied", "already_applied"}
     assert Path(applied["matched_receipt_path"]).exists()
     assert Path(applied["enriched_path"]).exists()
+    assert applied["enriched_path"].endswith("2026-03-04_market_10_00_feed.beancount")
+    updated_statement = statement_path.read_text(encoding="utf-8")
+    assert 'include "_enriched/2026-03-04_market_10_00_feed.beancount"' in updated_statement
 
 
 def test_api_get_config_returns_resolved_project_root(
