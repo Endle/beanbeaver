@@ -17,7 +17,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from beanbeaver.receipt.ocr_extraction import resize_image_bytes, transform_paddleocr_result
 from beanbeaver.receipt.receipt_structuring import parse_receipt
 from beanbeaver.runtime import get_logger, get_paths, load_known_merchant_keywords, load_receipt_structuring_rule_layers
-from beanbeaver.runtime.receipt_pipeline import create_debug_overlay, save_ocr_json
+from beanbeaver.runtime.receipt_pipeline import create_debug_overlay, save_ocr_json, save_stage1_ocr_json
 from beanbeaver.runtime.receipt_storage import save_scanned_receipt
 
 logger = get_logger(__name__)
@@ -155,7 +155,9 @@ async def upload_receipt(request: Request) -> JSONResponse:
                 ocr_result = transform_paddleocr_result(raw_ocr_result)
 
                 ocr_json_path = save_ocr_json(raw_ocr_result, filepath)
+                stage1_json_path = save_stage1_ocr_json(ocr_result, filepath)
                 logger.debug(f"Saved OCR JSON to {ocr_json_path}")
+                logger.debug(f"Saved Step 1 OCR JSON to {stage1_json_path}")
 
                 try:
                     debug_image_path = create_debug_overlay(filepath, raw_ocr_result)
