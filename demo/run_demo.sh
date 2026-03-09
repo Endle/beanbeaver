@@ -20,14 +20,28 @@ git init
 git add .
 git commit -a -m "set demo ledger"
 
-# 2) Set up beanbeaver
+# 2) Copy the current beanbeaver worktree into the demo directory.
 command -v pixi >/dev/null || {
   echo "pixi is required to run this demo." >&2
   exit 1
 }
 
-git -c protocol.file.allow=always submodule add "${SOURCE_REPO_ROOT}" "${CLONE_PATH}"
-git commit -m "Add beanbeaver"
+mkdir -p "${CLONE_PATH}"
+(
+  cd "${SOURCE_REPO_ROOT}"
+  tar \
+    --exclude=.git \
+    --exclude=.pixi \
+    --exclude=target \
+    --exclude='__pycache__' \
+    --exclude=.pytest_cache \
+    --exclude=.mypy_cache \
+    --exclude=.ruff_cache \
+    -cf - .
+) | (
+  cd "${CLONE_PATH}"
+  tar -xf -
+)
 
 # 3) In the beanbeaver Pixi environment, run bb --help.
 pixi run --manifest-path "${CLONE_PATH}/pixi.toml" bb --help

@@ -1,4 +1,5 @@
 mod matcher;
+mod python_ledger_access;
 mod python_receipt_spatial;
 mod python_spatial;
 mod receipt_spatial;
@@ -161,6 +162,7 @@ fn _rust_matcher(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(merchant_similarity, module)?)?;
     module.add_function(wrap_pyfunction!(match_receipt_to_transactions, module)?)?;
     module.add_function(wrap_pyfunction!(match_transaction_to_receipts, module)?)?;
+    python_ledger_access::register(module)?;
     python_spatial::register(module)?;
     python_receipt_spatial::register(module)?;
     Ok(())

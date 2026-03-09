@@ -22,29 +22,36 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Create virtualenv
+        shell: bash
         run: |
           python -m venv .venv
           echo "VIRTUAL_ENV=$GITHUB_WORKSPACE/.venv" >> "$GITHUB_ENV"
-          echo "VENV_PYTHON=$GITHUB_WORKSPACE/.venv/bin/python" >> "$GITHUB_ENV"
-          echo "VENV_MATURIN=$GITHUB_WORKSPACE/.venv/bin/maturin" >> "$GITHUB_ENV"
-          echo "PYTHONPATH=$(dirname "$GITHUB_WORKSPACE")" >> "$GITHUB_ENV"
+          PARENT_DIR="$(python -c 'from pathlib import Path; import os; print(Path(os.environ["GITHUB_WORKSPACE"]).parent)')"
+          echo "PYTHONPATH=$PARENT_DIR" >> "$GITHUB_ENV"
+          if [ -x "$GITHUB_WORKSPACE/.venv/bin/python" ]; then
+            echo "VENV_PYTHON=$GITHUB_WORKSPACE/.venv/bin/python" >> "$GITHUB_ENV"
+            echo "VENV_MATURIN=$GITHUB_WORKSPACE/.venv/bin/maturin" >> "$GITHUB_ENV"
+          else
+            echo "VENV_PYTHON=$GITHUB_WORKSPACE/.venv/Scripts/python.exe" >> "$GITHUB_ENV"
+            echo "VENV_MATURIN=$GITHUB_WORKSPACE/.venv/Scripts/maturin.exe" >> "$GITHUB_ENV"
+          fi
 
-      - name: Install native test dependencies
+      - name: Install test dependencies
+        shell: bash
         run: |
           "$VENV_PYTHON" -m pip install --upgrade pip
-          "$VENV_PYTHON" -m pip install ".[test,dev]"
-
-      - name: Build native matcher extension
-        run: |
+          "$VENV_PYTHON" -m pip install -e ".[test,dev]"
           "$VENV_MATURIN" develop
 
       - name: Assert native matcher backend is loaded
+        shell: bash
         env:
           BEANBEAVER_REQUIRE_RUST_MATCHER: "1"
         run: |
           "$VENV_PYTHON" -c "from beanbeaver.receipt.matcher import rust_backend_loaded; assert rust_backend_loaded()"
 
       - name: Run e2e tests in cached mode
+        shell: bash
         env:
           BEANBEAVER_REQUIRE_RUST_MATCHER: "1"
         run: |

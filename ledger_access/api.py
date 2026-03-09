@@ -8,8 +8,6 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
-from beancount.core import data
-
 from beanbeaver.ledger_access.reader import get_ledger_reader
 from beanbeaver.ledger_access.writer import ReceiptMatchSnapshot, get_ledger_writer
 
@@ -55,44 +53,42 @@ class LedgerTransactionList:
 ReceiptMatchFileSnapshot = ReceiptMatchSnapshot
 
 
-def _map_posting(posting: data.Posting) -> LedgerPosting:
-    units = posting.units
-    mapped_units = None
-    if units is not None and units.number is not None and units.currency is not None:
-        mapped_units = LedgerAmount(number=units.number, currency=units.currency)
-    return LedgerPosting(account=posting.account, units=mapped_units)
-
-
-def _map_transaction(txn: data.Transaction) -> LedgerTransaction:
-    meta = txn.meta or {}
-    file_path = str(meta.get("filename", "unknown"))
-    raw_lineno = meta.get("lineno", 0)
-    try:
-        line_number = int(raw_lineno)
-    except (TypeError, ValueError):
-        line_number = 0
-    return LedgerTransaction(
-        date=txn.date,
-        payee=txn.payee,
-        narration=txn.narration,
-        postings=tuple(_map_posting(posting) for posting in txn.postings),
-        file_path=file_path,
-        line_number=line_number,
-    )
-
-
 def list_transactions(
     *,
     ledger_path: Path | str | None = None,
 ) -> LedgerTransactionList:
     """Return all ledger transactions using DTOs, without Beancount objects."""
-    loaded = get_ledger_reader().load(ledger_path=ledger_path)
-    transactions = [_map_transaction(entry) for entry in loaded.entries if isinstance(entry, data.Transaction)]
+    reader = get_ledger_reader()
+    path, transactions_payload, errors, options = reader.list_transactions_payload(ledger_path=ledger_path)
+    transactions = [
+        LedgerTransaction(
+            date=dt.date.fromordinal(int(txn["date_ordinal"])),
+            payee=txn["payee"],
+            narration=txn["narration"],
+            postings=tuple(
+                LedgerPosting(
+                    account=str(posting["account"]),
+                    units=(
+                        LedgerAmount(
+                            number=Decimal(str(posting["number_str"])),
+                            currency=str(posting["currency"]),
+                        )
+                        if posting["number_str"] is not None and posting["currency"] is not None
+                        else None
+                    ),
+                )
+                for posting in txn["postings"]
+            ),
+            file_path=str(txn["file_path"]),
+            line_number=int(txn["line_number"]),
+        )
+        for txn in transactions_payload
+    ]
     return LedgerTransactionList(
-        path=loaded.path,
+        path=path,
         transactions=transactions,
-        errors=[str(err) for err in loaded.errors],
-        options={str(k): v for k, v in loaded.options.items()},
+        errors=list(errors),
+        options={str(k): v for k, v in options.items()},
     )
 
 
