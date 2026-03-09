@@ -10,7 +10,6 @@ from pathlib import Path
 
 from beanbeaver.ledger_access.reader import get_ledger_reader
 from beanbeaver.ledger_access.writer import ReceiptMatchSnapshot, get_ledger_writer
-from beancount.core import data
 
 
 @dataclass(frozen=True)

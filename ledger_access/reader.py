@@ -9,6 +9,7 @@ from typing import Any
 
 from beanbeaver.ledger_access._native import _native_backend
 from beanbeaver.ledger_access._paths import default_main_beancount_path
+
 DEFAULT_MAIN_BEANCOUNT_PATH = default_main_beancount_path()
 
 
