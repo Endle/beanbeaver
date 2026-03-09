@@ -43,7 +43,16 @@ jobs:
           "$VENV_PYTHON" -m pip install -e ".[test,dev]"
           "$VENV_MATURIN" develop
 
+      - name: Assert native matcher backend is loaded
+        shell: bash
+        env:
+          BEANBEAVER_REQUIRE_RUST_MATCHER: "1"
+        run: |
+          "$VENV_PYTHON" -c "from beanbeaver.receipt.matcher import rust_backend_loaded; assert rust_backend_loaded()"
+
       - name: Run e2e tests in cached mode
         shell: bash
+        env:
+          BEANBEAVER_REQUIRE_RUST_MATCHER: "1"
         run: |
           "$VENV_PYTHON" -m pytest tests/test_e2e_receipts.py --beanbeaver-e2e-mode cached
