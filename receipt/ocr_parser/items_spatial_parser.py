@@ -27,8 +27,10 @@ from .common import (
     _is_section_header_text,
     _line_has_trailing_price,
     _looks_like_onsale_marker,
+    _looks_like_receipt_metadata_line,
     _looks_like_quantity_expression,
     _looks_like_summary_line,
+    _parse_quantity_modifier,
     _strip_leading_receipt_codes,
 )
 
@@ -65,6 +67,7 @@ def _load_rust_matcher() -> ModuleType | None:
 
 
 _rust_matcher = _load_rust_matcher()
+_SPATIAL_FLOAT_EPSILON = 1e-6
 
 
 def _select_spatial_item_line_py(
@@ -86,7 +89,7 @@ def _select_spatial_item_line_py(
         if (
             candidate["is_used"]
             or not candidate["is_valid_item_line"]
-            or distance > Y_TOLERANCE
+            or distance > Y_TOLERANCE + _SPATIAL_FLOAT_EPSILON
             or not candidate["has_trailing_price"]
             or candidate["looks_like_quantity_expression"]
         ):
@@ -99,7 +102,10 @@ def _select_spatial_item_line_py(
         for index, candidate in enumerate(candidates):
             if candidate["is_used"] or not candidate["is_valid_item_line"]:
                 continue
-            if candidate["line_y"] < price_y or candidate["line_y"] - price_y > MAX_ITEM_DISTANCE:
+            if (
+                candidate["line_y"] < price_y
+                or candidate["line_y"] - price_y > MAX_ITEM_DISTANCE + _SPATIAL_FLOAT_EPSILON
+            ):
                 continue
             update(index, abs(candidate["line_y"] - price_y))
         if closest is not None:
@@ -108,7 +114,10 @@ def _select_spatial_item_line_py(
     for index, candidate in enumerate(candidates):
         if candidate["is_used"] or not candidate["is_valid_item_line"]:
             continue
-        if candidate["line_y"] > price_y or price_y - candidate["line_y"] > MAX_ITEM_DISTANCE:
+        if (
+            candidate["line_y"] > price_y
+            or price_y - candidate["line_y"] > MAX_ITEM_DISTANCE + _SPATIAL_FLOAT_EPSILON
+        ):
             continue
         if price_line_has_onsale and candidate["line_y"] < price_y and candidate["has_trailing_price"]:
             continue
@@ -119,7 +128,10 @@ def _select_spatial_item_line_py(
     for index, candidate in enumerate(candidates):
         if candidate["is_used"] or not candidate["is_valid_item_line"]:
             continue
-        if candidate["line_y"] <= price_y or candidate["line_y"] > price_y + Y_TOLERANCE * 2:
+        if (
+            candidate["line_y"] <= price_y
+            or candidate["line_y"] > price_y + Y_TOLERANCE * 2 + _SPATIAL_FLOAT_EPSILON
+        ):
             continue
         update(index, abs(candidate["line_y"] - price_y))
 
@@ -263,12 +275,14 @@ def _extract_items_with_bbox(
             source_line_y, source_full_text, source_left_text = source_line_ctx
         if closest_line_to_price:
             line_y, full_text, left_text, _ = closest_line_to_price
-            full_upper = source_full_text.upper() if source_full_text else full_text.upper()
+            context_full_text = source_full_text if source_full_text else full_text
+            context_left_text = source_left_text if source_left_text else left_text
+            full_upper = context_full_text.upper()
             price_line_has_onsale = _looks_like_onsale_marker(full_upper)
-            left_is_header = _is_section_header_text(left_text) and not _is_priced_generic_item_label(
-                left_text, full_text
+            left_is_header = _is_section_header_text(context_left_text) and not _is_priced_generic_item_label(
+                context_left_text, context_full_text
             )
-            if left_is_header or _is_section_header_text(full_text) or not left_text:
+            if left_is_header or _is_section_header_text(context_full_text) or not context_left_text:
                 prefer_below = True
             # ONSALE marker rows usually carry sale price for adjacent item text.
             if price_line_has_onsale:
@@ -283,6 +297,8 @@ def _extract_items_with_bbox(
             if not left_text:
                 return False
             if _looks_like_summary_line(left_text) or _looks_like_summary_line(full_text):
+                return False
+            if _looks_like_receipt_metadata_line(left_text) or _looks_like_receipt_metadata_line(full_text):
                 return False
             if _is_section_header_text(left_text) or _is_section_header_text(full_text):
                 return False
@@ -366,9 +382,13 @@ def _extract_items_with_bbox(
                     continue
                 if nearest_below is None or candidate_y < nearest_below[0]:
                     nearest_below = (candidate_y, candidate_full_text, candidate_left_text, candidate_left_x)
-            if nearest_above:
-                # Prefer direct descriptive context above ONSALE markers when available;
-                # these rows often carry the sale price for the preceding item.
+            if nearest_above and nearest_below:
+                above_distance = anchor_y - nearest_above[0]
+                below_distance = nearest_below[0] - anchor_y
+                # ONSALE rows can describe either the preceding or following item.
+                # Prefer the closer candidate and break ties upward.
+                onsale_target_line = nearest_above if above_distance <= below_distance else nearest_below
+            elif nearest_above:
                 onsale_target_line = nearest_above
             elif nearest_below:
                 onsale_target_line = nearest_below
@@ -431,6 +451,8 @@ def _extract_items_with_bbox(
                 return False
             if FOOTER_ADDRESS_PATTERNS.search(full_text):
                 return False
+            if _looks_like_receipt_metadata_line(left_text) or _looks_like_receipt_metadata_line(full_text):
+                return False
             # Skip promotional/sale lines like "(#)<ON SALE)", "(KAE)<ON SALE)"
             if _looks_like_onsale_marker(left_text):
                 return False
@@ -453,12 +475,78 @@ def _extract_items_with_bbox(
             for line_y, full_text, left_text, _ in all_lines
         ]
 
-        if onsale_target_line and onsale_target_line[0] not in used_item_y_positions:
+        # Anchor matching on the OCR line that produced the price when available.
+        # The raw price-word center can drift into the neighboring row and steal
+        # the next priced item in dense grocery layouts.
+        selection_anchor_y = source_line_y if source_line_y is not None else price_y
+        source_line_is_quantity_expression = _looks_like_quantity_expression(source_left_text)
+        quantity_same_row_target = None
+        if source_line_is_quantity_expression:
+            source_modifier = _parse_quantity_modifier(source_left_text)
+            target_direction = None
+            if source_modifier is not None:
+                pattern_type = source_modifier.get("pattern_type")
+                if pattern_type in {"count_at_price", "weight_at_price", "multi_for_price"}:
+                    target_direction = "above"
+
+            nearest_unpriced_above = None
+            nearest_unpriced_below = None
+            for index, candidate in enumerate(line_selection_candidates):
+                if (
+                    candidate["is_used"]
+                    or not candidate["is_valid_item_line"]
+                    or candidate["has_trailing_price"]
+                ):
+                    continue
+                distance = abs(candidate["line_y"] - selection_anchor_y)
+                if distance > MAX_ITEM_DISTANCE + _SPATIAL_FLOAT_EPSILON:
+                    continue
+                if candidate["line_y"] < selection_anchor_y:
+                    if nearest_unpriced_above is None or distance < nearest_unpriced_above[1]:
+                        nearest_unpriced_above = (index, distance)
+                elif candidate["line_y"] > selection_anchor_y:
+                    if nearest_unpriced_below is None or distance < nearest_unpriced_below[1]:
+                        nearest_unpriced_below = (index, distance)
+
+            if nearest_unpriced_above and nearest_unpriced_below:
+                if target_direction == "above":
+                    quantity_same_row_target = nearest_unpriced_above
+                elif target_direction == "below":
+                    quantity_same_row_target = nearest_unpriced_below
+                elif nearest_unpriced_above[1] <= nearest_unpriced_below[1]:
+                    quantity_same_row_target = nearest_unpriced_above
+                else:
+                    quantity_same_row_target = nearest_unpriced_below
+            else:
+                quantity_same_row_target = nearest_unpriced_above or nearest_unpriced_below
+
+        if not prefer_below and source_line_is_quantity_expression:
+            nearest_same_row_above = None
+            nearest_same_row_below = None
+            for candidate in line_selection_candidates:
+                if candidate["is_used"] or not candidate["is_valid_item_line"]:
+                    continue
+                distance = abs(candidate["line_y"] - selection_anchor_y)
+                if distance > Y_TOLERANCE + _SPATIAL_FLOAT_EPSILON:
+                    continue
+                if candidate["line_y"] < selection_anchor_y:
+                    if nearest_same_row_above is None or distance < nearest_same_row_above:
+                        nearest_same_row_above = distance
+                elif candidate["line_y"] > selection_anchor_y:
+                    if nearest_same_row_below is None or distance < nearest_same_row_below:
+                        nearest_same_row_below = distance
+            if nearest_same_row_below is not None and nearest_same_row_above is None:
+                prefer_below = True
+
+        if quantity_same_row_target is not None:
+            selected_index, closest_distance = quantity_same_row_target
+            closest_line = all_lines[selected_index]
+        elif onsale_target_line and onsale_target_line[0] not in used_item_y_positions:
             closest_line = onsale_target_line
             closest_distance = abs(onsale_target_line[0] - price_y)
         else:
             selected_line = _select_spatial_item_line(
-                price_y,
+                selection_anchor_y,
                 line_selection_candidates,
                 prefer_below=prefer_below,
                 price_line_has_onsale=price_line_has_onsale,
@@ -467,7 +555,12 @@ def _extract_items_with_bbox(
                 selected_index, closest_distance = selected_line
                 closest_line = all_lines[selected_index]
 
-        if closest_line and closest_distance <= Y_TOLERANCE:
+        direct_match_tolerance = (
+            MAX_ITEM_DISTANCE + _SPATIAL_FLOAT_EPSILON
+            if source_line_is_quantity_expression or prefer_below
+            else Y_TOLERANCE + _SPATIAL_FLOAT_EPSILON
+        )
+        if closest_line and closest_distance <= direct_match_tolerance:
             line_y, _, left_text, _ = closest_line
             # Clean up the description
             description = _clean_description(left_text)
@@ -504,6 +597,8 @@ def _extract_items_with_bbox(
                     continue
                 if _looks_like_summary_line(left_text) or _looks_like_summary_line(full_text):
                     continue
+                if _looks_like_receipt_metadata_line(left_text) or _looks_like_receipt_metadata_line(full_text):
+                    continue
                 if re.match(r"^\d+\.\d+\s*kg", full_text, re.IGNORECASE):
                     continue
                 if re.match(r"^W\s*\$", full_text):
@@ -521,6 +616,8 @@ def _extract_items_with_bbox(
                     continue
                 alpha_count = sum(1 for c in left_text_for_ratio if c.isalpha())
                 if alpha_count < len(left_text_for_ratio) * 0.4:
+                    continue
+                if _looks_like_onsale_marker(left_text) or _looks_like_onsale_marker(full_text):
                     continue
 
                 description = _clean_description(left_text)
