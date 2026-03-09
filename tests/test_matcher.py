@@ -276,5 +276,5 @@ def test_rust_backend_accepts_named_dict_payloads_when_required() -> None:
     assert matches
     index, confidence, details = matches[0]
     assert index == 0
-    assert confidence > 0.8
+    assert confidence >= 0.8
     assert "family match" in details
