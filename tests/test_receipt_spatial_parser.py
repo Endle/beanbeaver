@@ -127,6 +127,114 @@ def test_extract_items_with_bbox_accepts_spaced_decimal_price_words() -> None:
     assert any(item.description == "LUNCH MEAT" and item.price == Decimal("3.50") for item in items)
 
 
+def test_extract_items_with_bbox_keeps_next_priced_row_from_stealing_quantity_total() -> None:
+    lines = [
+        {
+            "text": "(2)05707200195 LUNCH MEAT MRJ",
+            "words": [
+                _word("(2)05707200195 LUNCH MEAT", 0.06, 0.167, 0.59, 0.189),
+                _word("MRJ", 0.664, 0.172, 0.741, 0.191),
+            ],
+        },
+        {
+            "text": "2 @ $1.75 3. 50",
+            "words": [
+                _word("2 @ $1.75", 0.099, 0.188, 0.297, 0.207),
+                _word("3. 50", 0.856, 0.190, 0.955, 0.210),
+            ],
+        },
+        {
+            "text": "06700011056 SPRITE ZERO HMRJ 8.69",
+            "words": [
+                _word("06700011056 SPRITE ZERO", 0.099, 0.207, 0.508, 0.225),
+                _word("HMRJ", 0.663, 0.212, 0.760, 0.225),
+                _word("8.69", 0.858, 0.209, 0.950, 0.229),
+            ],
+        },
+        {
+            "text": "06780000102 VEG OIL MRJ 6. 99",
+            "words": [
+                _word("06780000102 VEG OIL", 0.099, 0.226, 0.459, 0.243),
+                _word("MRJ", 0.663, 0.229, 0.741, 0.246),
+                _word("6. 99", 0.856, 0.228, 0.951, 0.247),
+            ],
+        },
+        {
+            "text": "TOTAL 19.18",
+            "words": [
+                _word("TOTAL", 0.08, 0.520, 0.18, 0.540),
+                _word("19.18", 0.86, 0.520, 0.94, 0.540),
+            ],
+        },
+    ]
+
+    items = _extract_items_with_bbox(
+        pages=[{"lines": lines}],
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
+    )
+
+    pairs = [(item.description, item.price) for item in items]
+    assert ("LUNCH MEAT", Decimal("3.50")) in pairs
+    assert ("SPRITE ZERO", Decimal("8.69")) in pairs
+    assert ("VEG OIL", Decimal("6.99")) in pairs
+
+
+def test_extract_items_with_bbox_prefers_item_above_for_count_price_rows() -> None:
+    lines = [
+        {
+            "text": "#Hsu Fu Chi Crispy Shrimp",
+            "words": [_word("#Hsu Fu Chi Crispy Shrimp", 0.12, 0.215, 0.42, 0.226)],
+        },
+        {
+            "text": "2 @ $1.99 3.98",
+            "words": [
+                _word("2 @ $1.99", 0.08, 0.229, 0.17, 0.239),
+                _word("3.98", 0.89, 0.229, 0.95, 0.239),
+            ],
+        },
+        {
+            "text": "Potato Puffed Food Seawee",
+            "words": [_word("Potato Puffed Food Seawee", 0.20, 0.237, 0.46, 0.247)],
+        },
+        {
+            "text": "2 @ $1.99 3.98",
+            "words": [
+                _word("2 @ $1.99", 0.08, 0.252, 0.17, 0.263),
+                _word("3.98", 0.89, 0.252, 0.95, 0.263),
+            ],
+        },
+        {
+            "text": "Chen Ke Ming Original Th",
+            "words": [_word("Chen Ke Ming Original Th", 0.20, 0.268, 0.46, 0.279)],
+        },
+        {
+            "text": "(2 /for $7.00) 2 /for 7.00",
+            "words": [
+                _word("(2 /for $7.00)", 0.16, 0.283, 0.31, 0.294),
+                _word("2 /for", 0.54, 0.283, 0.62, 0.294),
+                _word("7.00", 0.89, 0.283, 0.95, 0.294),
+            ],
+        },
+        {
+            "text": "TOTAL 14.96",
+            "words": [
+                _word("TOTAL", 0.08, 0.520, 0.18, 0.540),
+                _word("14.96", 0.86, 0.520, 0.94, 0.540),
+            ],
+        },
+    ]
+
+    items = _extract_items_with_bbox(
+        pages=[{"lines": lines}],
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
+    )
+
+    pairs = [(item.description, item.price) for item in items]
+    assert ("Hsu Fu Chi Crispy Shrimp", Decimal("3.98")) in pairs
+    assert ("Potato Puffed Food Seawee", Decimal("3.98")) in pairs
+    assert ("Chen Ke Ming Original Th", Decimal("7.00")) in pairs
+
+
 def test_extract_items_with_bbox_prefers_item_above_onsale_price() -> None:
     # Reproduces C&C rows where an ON SALE line carries the price for the
     # preceding item, while the quantity line below belongs to the next item.
