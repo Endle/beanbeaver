@@ -1,10 +1,9 @@
 use std::collections::VecDeque;
-use std::env;
 use std::error::Error;
 use std::io::{self, BufRead, BufReader, Read, Stdout, Write};
 use std::net::TcpStream;
 use std::path::Path;
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, ExitStatus};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -24,6 +23,237 @@ use serde::Deserialize;
 use serde_json::Value;
 
 type AppResult<T> = Result<T, Box<dyn Error>>;
+
+mod process_util {
+    use super::{FAVA_HOST, FAVA_PORT, OCR_CONTAINER_NAME, SERVE_HOST};
+    use std::collections::VecDeque;
+    use std::ffi::OsStr;
+    use std::io::{self, Write};
+    use std::process::{Child, Command, ExitStatus, Output, Stdio};
+    use std::sync::{Arc, Mutex};
+
+    pub(super) struct SpawnedProcess {
+        pub child: Child,
+        pub command_line: String,
+    }
+
+    pub(super) fn backend_serve_command_line() -> String {
+        let base = backend_command();
+        render_command_line(&base, &["serve", "--host", SERVE_HOST, "--port", "8080"])
+    }
+
+    pub(super) fn fava_command_line(ledger_path: &str) -> String {
+        fava_command(ledger_path).join(" ")
+    }
+
+    pub(super) fn spawn_backend_serve(
+        log_lines: &Arc<Mutex<VecDeque<String>>>,
+    ) -> io::Result<SpawnedProcess> {
+        let base = backend_command();
+        let extra = ["serve", "--host", SERVE_HOST, "--port", "8080"];
+        let command_line = render_command_line(&base, &extra);
+        let child = spawn_logged_full_command(&base, &extra, log_lines)?;
+        Ok(SpawnedProcess { child, command_line })
+    }
+
+    pub(super) fn spawn_fava(ledger_path: &str, log_lines: &Arc<Mutex<VecDeque<String>>>) -> io::Result<SpawnedProcess> {
+        let command = fava_command(ledger_path);
+        let command_line = command.join(" ");
+        let child = spawn_logged_full_command(&command, &[], log_lines)?;
+        Ok(SpawnedProcess { child, command_line })
+    }
+
+    pub(super) fn run_backend_capture(
+        args: &[&str],
+        stdin_input: Option<&str>,
+    ) -> io::Result<(Output, String)> {
+        let base = backend_command();
+        let command_line = render_command_line(&base, args);
+        let output = run_capture_full_command(&base, args, stdin_input)?;
+        Ok((output, command_line))
+    }
+
+    pub(super) fn run_backend_interactive(args: &[&str]) -> io::Result<ExitStatus> {
+        let base = backend_command();
+        run_interactive_full_command(&base, args)
+    }
+
+    pub(super) fn podman_start_ocr() -> io::Result<Output> {
+        run_program_output("podman", ["start", OCR_CONTAINER_NAME])
+    }
+
+    pub(super) fn podman_stop_ocr() -> io::Result<Output> {
+        run_program_output("podman", ["stop", OCR_CONTAINER_NAME])
+    }
+
+    pub(super) fn podman_restart_ocr() -> io::Result<Output> {
+        run_program_output("podman", ["restart", OCR_CONTAINER_NAME])
+    }
+
+    pub(super) fn podman_container_exists() -> io::Result<Output> {
+        run_program_output("podman", ["container", "exists", OCR_CONTAINER_NAME])
+    }
+
+    pub(super) fn podman_inspect_running() -> io::Result<Output> {
+        run_program_output("podman", ["inspect", "--format", "{{.State.Running}}", OCR_CONTAINER_NAME])
+    }
+
+    pub(super) fn podman_inspect_ocr() -> io::Result<Output> {
+        run_program_output("podman", ["inspect", OCR_CONTAINER_NAME])
+    }
+
+    pub(super) fn podman_logs_ocr_tail() -> io::Result<Output> {
+        run_program_output("podman", ["logs", "--tail", "80", OCR_CONTAINER_NAME])
+    }
+
+    fn backend_command() -> Vec<String> {
+        if let Ok(raw) = std::env::var("BEANBEAVER_TUI_BACKEND") {
+            let parts: Vec<String> = raw.split_whitespace().map(ToOwned::to_owned).collect();
+            if !parts.is_empty() {
+                return parts;
+            }
+        }
+        let pixi_bb = std::path::Path::new(".pixi")
+            .join("envs")
+            .join("default")
+            .join("bin")
+            .join("bb");
+        if pixi_bb.exists() {
+            return vec![pixi_bb.to_string_lossy().into_owned()];
+        }
+        vec![
+            "python".to_string(),
+            "-m".to_string(),
+            "beanbeaver.cli.main".to_string(),
+        ]
+    }
+
+    fn fava_command(ledger_path: &str) -> Vec<String> {
+        let pixi_fava = std::path::Path::new(".pixi")
+            .join("envs")
+            .join("default")
+            .join("bin")
+            .join("fava");
+        if pixi_fava.exists() {
+            return vec![
+                pixi_fava.to_string_lossy().into_owned(),
+                ledger_path.to_string(),
+                "--host".to_string(),
+                FAVA_HOST.to_string(),
+                "--port".to_string(),
+                FAVA_PORT.to_string(),
+            ];
+        }
+        vec![
+            "fava".to_string(),
+            ledger_path.to_string(),
+            "--host".to_string(),
+            FAVA_HOST.to_string(),
+            "--port".to_string(),
+            FAVA_PORT.to_string(),
+        ]
+    }
+
+    fn render_command_line(base: &[String], extra: &[&str]) -> String {
+        base.iter()
+            .map(String::as_str)
+            .chain(extra.iter().copied())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn spawn_logged_full_command(
+        command: &[String],
+        extra_args: &[&str],
+        log_lines: &Arc<Mutex<VecDeque<String>>>,
+    ) -> io::Result<Child> {
+        let (program, program_args) = split_command(command)?;
+        spawn_logged_command(
+            program,
+            program_args
+                .iter()
+                .map(String::as_str)
+                .chain(extra_args.iter().copied()),
+            log_lines,
+        )
+    }
+
+    fn spawn_logged_command<I, S>(
+        program: &str,
+        args: I,
+        log_lines: &Arc<Mutex<VecDeque<String>>>,
+    ) -> io::Result<Child>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let mut child = Command::new(program)
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        if let Some(stdout) = child.stdout.take() {
+            super::spawn_log_reader(stdout, "stdout", Arc::clone(log_lines));
+        }
+        if let Some(stderr) = child.stderr.take() {
+            super::spawn_log_reader(stderr, "stderr", Arc::clone(log_lines));
+        }
+
+        Ok(child)
+    }
+
+    fn run_program_output<I, S>(program: &str, args: I) -> io::Result<Output>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        Command::new(program).args(args).output()
+    }
+
+    fn run_capture_full_command(
+        command: &[String],
+        extra_args: &[&str],
+        stdin_input: Option<&str>,
+    ) -> io::Result<Output> {
+        let (program, program_args) = split_command(command)?;
+        let mut command = Command::new(program);
+        command.args(program_args).args(extra_args.iter().copied());
+        if stdin_input.is_some() {
+            command.stdin(Stdio::piped());
+        }
+        let mut child = command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        if let Some(input) = stdin_input {
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin.write_all(input.as_bytes())?;
+            }
+        }
+
+        child.wait_with_output()
+    }
+
+    fn run_interactive_full_command(command: &[String], extra_args: &[&str]) -> io::Result<ExitStatus> {
+        let (program, program_args) = split_command(command)?;
+        Command::new(program)
+            .args(program_args)
+            .args(extra_args.iter().copied())
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+    }
+
+    fn split_command(command: &[String]) -> io::Result<(&str, &[String])> {
+        command
+            .split_first()
+            .map(|(program, args)| (program.as_str(), args))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Empty command"))
+    }
+}
 
 const SERVE_HOST: &str = "0.0.0.0";
 const SERVE_HEALTH_HOST: &str = "127.0.0.1";
@@ -941,7 +1171,7 @@ impl App {
                 ));
             }
             OcrContainerState::Stopped => {
-                run_podman_command(&["start", OCR_CONTAINER_NAME])?;
+                ensure_podman_success(process_util::podman_start_ocr()?, "podman start beanbeaver-ocr")?;
                 self.refresh_runtime_pages(true)?;
                 self.set_status(format!("Started Podman container `{OCR_CONTAINER_NAME}`"));
             }
@@ -957,7 +1187,7 @@ impl App {
     fn stop_ocr_container(&mut self) -> AppResult<()> {
         match podman_container_state()? {
             OcrContainerState::Running => {
-                run_podman_command(&["stop", OCR_CONTAINER_NAME])?;
+                ensure_podman_success(process_util::podman_stop_ocr()?, "podman stop beanbeaver-ocr")?;
                 self.refresh_runtime_pages(true)?;
                 self.set_status(format!("Stopped Podman container `{OCR_CONTAINER_NAME}`"));
             }
@@ -979,7 +1209,7 @@ impl App {
     fn restart_ocr_container(&mut self) -> AppResult<()> {
         match podman_container_state()? {
             OcrContainerState::Running | OcrContainerState::Stopped => {
-                run_podman_command(&["restart", OCR_CONTAINER_NAME])?;
+                ensure_podman_success(process_util::podman_restart_ocr()?, "podman restart beanbeaver-ocr")?;
                 self.refresh_runtime_pages(true)?;
                 self.set_status(format!("Restarted Podman container `{OCR_CONTAINER_NAME}`"));
             }
@@ -1046,36 +1276,20 @@ impl App {
             return Ok(());
         }
 
-        let backend = backend_command();
-        let (program, program_args) = backend
-            .split_first()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Empty backend command"))?;
-        let serve_args = ["serve", "--host", SERVE_HOST, "--port", "8080"];
-        let command_line = render_command_line(&backend, &serve_args);
+        let command_line = process_util::backend_serve_command_line();
 
         replace_log_lines(
             &self.serve_state.log_lines,
             vec![format!("Starting managed process: {command_line}")],
         );
 
-        let mut child = Command::new(program)
-            .args(program_args)
-            .args(serve_args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
-
-        if let Some(stdout) = child.stdout.take() {
-            spawn_log_reader(stdout, "stdout", self.serve_state.log_lines.clone());
-        }
-        if let Some(stderr) = child.stderr.take() {
-            spawn_log_reader(stderr, "stderr", self.serve_state.log_lines.clone());
-        }
+        let spawned = process_util::spawn_backend_serve(&self.serve_state.log_lines)?;
+        let child = spawned.child;
 
         let pid = child.id();
         self.serve_state.process = Some(ManagedProcess {
             child,
-            command: command_line.clone(),
+            command: spawned.command_line,
         });
         self.serve_state.last_exit_code = None;
         push_bounded_log_line(
@@ -1110,34 +1324,23 @@ impl App {
             return Err(format!("Ledger file not found: {}", ledger_path.display()).into());
         }
 
-        let command = fava_command(&self.config.resolved_main_beancount_path);
-        let (program, program_args) = command
-            .split_first()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Empty Fava command"))?;
-        let command_line = command.join(" ");
+        let command_line = process_util::fava_command_line(&self.config.resolved_main_beancount_path);
 
         replace_log_lines(
             &self.fava_state.log_lines,
             vec![format!("Starting managed process: {command_line}")],
         );
 
-        let mut child = Command::new(program)
-            .args(program_args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
-
-        if let Some(stdout) = child.stdout.take() {
-            spawn_log_reader(stdout, "stdout", self.fava_state.log_lines.clone());
-        }
-        if let Some(stderr) = child.stderr.take() {
-            spawn_log_reader(stderr, "stderr", self.fava_state.log_lines.clone());
-        }
+        let spawned = process_util::spawn_fava(
+            &self.config.resolved_main_beancount_path,
+            &self.fava_state.log_lines,
+        )?;
+        let child = spawned.child;
 
         let pid = child.id();
         self.fava_state.process = Some(ManagedProcess {
             child,
-            command: command_line.clone(),
+            command: spawned.command_line,
         });
         self.fava_state.last_exit_code = None;
         push_bounded_log_line(
@@ -1212,86 +1415,12 @@ impl App {
     }
 }
 
-fn backend_command() -> Vec<String> {
-    if let Ok(raw) = env::var("BEANBEAVER_TUI_BACKEND") {
-        let parts: Vec<String> = raw.split_whitespace().map(ToOwned::to_owned).collect();
-        if !parts.is_empty() {
-            return parts;
-        }
-    }
-    let pixi_bb = Path::new(".pixi")
-        .join("envs")
-        .join("default")
-        .join("bin")
-        .join("bb");
-    if pixi_bb.exists() {
-        return vec![pixi_bb.to_string_lossy().into_owned()];
-    }
-    vec![
-        "python".to_string(),
-        "-m".to_string(),
-        "beanbeaver.cli.main".to_string(),
-    ]
-}
-
-fn fava_command(ledger_path: &str) -> Vec<String> {
-    let pixi_fava = Path::new(".pixi")
-        .join("envs")
-        .join("default")
-        .join("bin")
-        .join("fava");
-    if pixi_fava.exists() {
-        return vec![
-            pixi_fava.to_string_lossy().into_owned(),
-            ledger_path.to_string(),
-            "--host".to_string(),
-            FAVA_HOST.to_string(),
-            "--port".to_string(),
-            FAVA_PORT.to_string(),
-        ];
-    }
-    vec![
-        "fava".to_string(),
-        ledger_path.to_string(),
-        "--host".to_string(),
-        FAVA_HOST.to_string(),
-        "--port".to_string(),
-        FAVA_PORT.to_string(),
-    ]
-}
-
 fn run_backend(args: &[&str]) -> AppResult<String> {
     run_backend_with_input(args, None)
 }
 
 fn run_backend_with_input(args: &[&str], stdin_input: Option<&str>) -> AppResult<String> {
-    let backend = backend_command();
-    let (program, program_args) = backend
-        .split_first()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Empty backend command"))?;
-    let mut command = Command::new(program);
-    command.args(program_args).args(args);
-    let rendered_command = backend
-        .iter()
-        .map(String::as_str)
-        .chain(args.iter().copied())
-        .collect::<Vec<_>>()
-        .join(" ");
-    if stdin_input.is_some() {
-        command.stdin(std::process::Stdio::piped());
-    }
-    let mut child = command
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()?;
-    if let Some(input) = stdin_input {
-        use std::io::Write;
-
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(input.as_bytes())?;
-        }
-    }
-    let output = child.wait_with_output()?;
+    let (output, rendered_command) = process_util::run_backend_capture(args, stdin_input)?;
 
     if output.status.success() {
         Ok(String::from_utf8(output.stdout)?)
@@ -1387,30 +1516,12 @@ fn backend_apply_match(
 }
 
 fn run_backend_interactive(args: &[&str]) -> AppResult<i32> {
-    let backend = backend_command();
-    let (program, program_args) = backend
-        .split_first()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Empty backend command"))?;
-    let status = Command::new(program)
-        .args(program_args)
-        .args(args)
-        .stdin(std::process::Stdio::inherit())
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
-        .status()?;
+    let status = process_util::run_backend_interactive(args)?;
     Ok(status.code().unwrap_or(1))
 }
 
 fn exit_status_code(status: ExitStatus) -> i32 {
     status.code().unwrap_or(1)
-}
-
-fn render_command_line(base: &[String], extra: &[&str]) -> String {
-    base.iter()
-        .map(String::as_str)
-        .chain(extra.iter().copied())
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 fn replace_log_lines(buffer: &Arc<Mutex<VecDeque<String>>>, lines: Vec<String>) {
@@ -1505,8 +1616,7 @@ fn check_local_health(port: u16, path: &str, success_codes: &[u16]) -> Result<St
     }
 }
 
-fn run_podman_command(args: &[&str]) -> AppResult<()> {
-    let output = Command::new("podman").args(args).output()?;
+fn ensure_podman_success(output: std::process::Output, rendered_command: &str) -> AppResult<()> {
     if output.status.success() {
         return Ok(());
     }
@@ -1514,8 +1624,7 @@ fn run_podman_command(args: &[&str]) -> AppResult<()> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     Err(format!(
-        "podman command failed: podman {}\nstdout:\n{}\nstderr:\n{}",
-        args.join(" "),
+        "podman command failed: {rendered_command}\nstdout:\n{}\nstderr:\n{}",
         stdout.trim(),
         stderr.trim()
     )
@@ -1523,9 +1632,7 @@ fn run_podman_command(args: &[&str]) -> AppResult<()> {
 }
 
 fn podman_container_state() -> AppResult<OcrContainerState> {
-    let exists_output = Command::new("podman")
-        .args(["container", "exists", OCR_CONTAINER_NAME])
-        .output()?;
+    let exists_output = process_util::podman_container_exists()?;
     match exists_output.status.code().unwrap_or(1) {
         0 => {}
         1 => return Ok(OcrContainerState::Missing),
@@ -1541,14 +1648,7 @@ fn podman_container_state() -> AppResult<OcrContainerState> {
         }
     }
 
-    let inspect_output = Command::new("podman")
-        .args([
-            "inspect",
-            "--format",
-            "{{.State.Running}}",
-            OCR_CONTAINER_NAME,
-        ])
-        .output()?;
+    let inspect_output = process_util::podman_inspect_running()?;
     if !inspect_output.status.success() {
         let stdout = String::from_utf8_lossy(&inspect_output.stdout);
         let stderr = String::from_utf8_lossy(&inspect_output.stderr);
@@ -1571,10 +1671,7 @@ fn podman_container_state() -> AppResult<OcrContainerState> {
 }
 
 fn query_ocr_page_state() -> OcrPageState {
-    let exists_output = match Command::new("podman")
-        .args(["container", "exists", OCR_CONTAINER_NAME])
-        .output()
-    {
+    let exists_output = match process_util::podman_container_exists() {
         Ok(output) => output,
         Err(error) => {
             return OcrPageState {
@@ -1622,10 +1719,7 @@ fn query_ocr_page_state() -> OcrPageState {
         }
     }
 
-    let inspect_output = match Command::new("podman")
-        .args(["inspect", OCR_CONTAINER_NAME])
-        .output()
-    {
+    let inspect_output = match process_util::podman_inspect_ocr() {
         Ok(output) => output,
         Err(error) => {
             return OcrPageState {
@@ -1667,10 +1761,7 @@ fn query_ocr_page_state() -> OcrPageState {
         ],
     };
 
-    let logs_output = match Command::new("podman")
-        .args(["logs", "--tail", "80", OCR_CONTAINER_NAME])
-        .output()
-    {
+    let logs_output = match process_util::podman_logs_ocr_tail() {
         Ok(output) => output,
         Err(error) => {
             return OcrPageState {
@@ -1995,12 +2086,7 @@ fn render_serve_page(frame: &mut ratatui::Frame<'_>, app: &App, area: ratatui::l
         .process
         .as_ref()
         .map(|process| process.command.clone())
-        .unwrap_or_else(|| {
-            render_command_line(
-                &backend_command(),
-                &["serve", "--host", SERVE_HOST, "--port", "8080"],
-            )
-        });
+        .unwrap_or_else(process_util::backend_serve_command_line);
     let last_exit = app
         .serve_state
         .last_exit_code
@@ -2048,7 +2134,7 @@ fn render_fava_page(frame: &mut ratatui::Frame<'_>, app: &App, area: ratatui::la
         .process
         .as_ref()
         .map(|process| process.command.clone())
-        .unwrap_or_else(|| fava_command(&app.config.resolved_main_beancount_path).join(" "));
+        .unwrap_or_else(|| process_util::fava_command_line(&app.config.resolved_main_beancount_path));
     let last_exit = app
         .fava_state
         .last_exit_code
