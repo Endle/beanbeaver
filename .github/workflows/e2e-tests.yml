@@ -18,10 +18,34 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install test dependencies
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Create virtualenv
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[test]"
+          python -m venv .venv
+          echo "VIRTUAL_ENV=$GITHUB_WORKSPACE/.venv" >> "$GITHUB_ENV"
+          echo "VENV_PYTHON=$GITHUB_WORKSPACE/.venv/bin/python" >> "$GITHUB_ENV"
+          echo "VENV_MATURIN=$GITHUB_WORKSPACE/.venv/bin/maturin" >> "$GITHUB_ENV"
+          echo "PYTHONPATH=$(dirname "$GITHUB_WORKSPACE")" >> "$GITHUB_ENV"
+
+      - name: Install native test dependencies
+        run: |
+          "$VENV_PYTHON" -m pip install --upgrade pip
+          "$VENV_PYTHON" -m pip install ".[test,dev]"
+
+      - name: Build native matcher extension
+        run: |
+          "$VENV_MATURIN" develop
+
+      - name: Assert native matcher backend is loaded
+        env:
+          BEANBEAVER_REQUIRE_RUST_MATCHER: "1"
+        run: |
+          "$VENV_PYTHON" -c "from beanbeaver.receipt.matcher import rust_backend_loaded; assert rust_backend_loaded()"
 
       - name: Run e2e tests in cached mode
-        run: python -m pytest tests/test_e2e_receipts.py --beanbeaver-e2e-mode cached
+        env:
+          BEANBEAVER_REQUIRE_RUST_MATCHER: "1"
+        run: |
+          "$VENV_PYTHON" -m pytest tests/test_e2e_receipts.py --beanbeaver-e2e-mode cached
