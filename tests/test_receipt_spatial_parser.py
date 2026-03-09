@@ -344,12 +344,8 @@ def test_extract_items_with_bbox_keeps_following_priced_row_from_stealing_multib
     assert ("Hot Kid Honey Flavour Bal", Decimal("4.59")) in pairs
     assert ("Udon Noodles With Tonkots", Decimal("3.99")) in pairs
     assert ("Lucky Pearl Shanghai Dry", Decimal("3.99")) in pairs
-    assert not any(
-        item.description == "Udon Noodles With Tonkots" and item.price == Decimal("4.59") for item in items
-    )
-    assert not any(
-        item.description == "Hot Kid Honey Flavour Bal" and item.price == Decimal("3.99") for item in items
-    )
+    assert not any(item.description == "Udon Noodles With Tonkots" and item.price == Decimal("4.59") for item in items)
+    assert not any(item.description == "Hot Kid Honey Flavour Bal" and item.price == Decimal("3.99") for item in items)
 
 
 def test_extract_items_with_bbox_accepts_following_item_for_tnt_department_price_rows() -> None:

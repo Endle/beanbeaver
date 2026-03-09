@@ -29,8 +29,8 @@ from .common import (
     _is_section_header_text,
     _line_has_trailing_price,
     _looks_like_onsale_marker,
-    _looks_like_receipt_metadata_line,
     _looks_like_quantity_expression,
+    _looks_like_receipt_metadata_line,
     _looks_like_summary_line,
     _parse_quantity_modifier,
     _strip_leading_receipt_codes,
@@ -133,10 +133,7 @@ def _select_spatial_item_line_py(
     for index, candidate in enumerate(candidates):
         if candidate["is_used"] or not candidate["is_valid_item_line"]:
             continue
-        if (
-            candidate["line_y"] > price_y
-            or price_y - candidate["line_y"] > MAX_ITEM_DISTANCE + _SPATIAL_FLOAT_EPSILON
-        ):
+        if candidate["line_y"] > price_y or price_y - candidate["line_y"] > MAX_ITEM_DISTANCE + _SPATIAL_FLOAT_EPSILON:
             continue
         if price_line_has_onsale and candidate["line_y"] < price_y and candidate["has_trailing_price"]:
             continue
@@ -147,10 +144,7 @@ def _select_spatial_item_line_py(
     for index, candidate in enumerate(candidates):
         if candidate["is_used"] or not candidate["is_valid_item_line"]:
             continue
-        if (
-            candidate["line_y"] <= price_y
-            or candidate["line_y"] > price_y + Y_TOLERANCE * 2 + _SPATIAL_FLOAT_EPSILON
-        ):
+        if candidate["line_y"] <= price_y or candidate["line_y"] > price_y + Y_TOLERANCE * 2 + _SPATIAL_FLOAT_EPSILON:
             continue
         update(index, abs(candidate["line_y"] - price_y))
 
@@ -511,11 +505,7 @@ def _extract_items_with_bbox(
             nearest_unpriced_above = None
             nearest_unpriced_below = None
             for index, candidate in enumerate(line_selection_candidates):
-                if (
-                    candidate["is_used"]
-                    or not candidate["is_valid_item_line"]
-                    or candidate["has_trailing_price"]
-                ):
+                if candidate["is_used"] or not candidate["is_valid_item_line"] or candidate["has_trailing_price"]:
                     continue
                 distance = abs(candidate["line_y"] - selection_anchor_y)
                 if distance > MAX_ITEM_DISTANCE + _SPATIAL_FLOAT_EPSILON:

@@ -156,9 +156,7 @@ def _config_payload(config: MatchConfig) -> dict[str, int]:
         "date_tolerance_days": config.date_tolerance_days,
         "amount_tolerance_scaled": _decimal_to_scaled(config.amount_tolerance),
         "amount_tolerance_percent_scaled": _decimal_to_scaled(config.amount_tolerance_percent),
-        "merchant_min_similarity_scaled": _decimal_to_scaled(
-            Decimal(str(config.merchant_min_similarity))
-        ),
+        "merchant_min_similarity_scaled": _decimal_to_scaled(Decimal(str(config.merchant_min_similarity))),
     }
 
 

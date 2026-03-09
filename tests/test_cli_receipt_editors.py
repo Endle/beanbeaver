@@ -21,7 +21,9 @@ def test_resolve_editor_prefers_visual_over_editor(monkeypatch: MonkeyPatch) -> 
 
 def test_default_editor_uses_notepad_on_windows(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(receipt_cli.os, "name", "nt")
-    monkeypatch.setattr(receipt_cli.shutil, "which", lambda cmd: "C:\\Windows\\notepad.exe" if cmd == "notepad" else None)
+    monkeypatch.setattr(
+        receipt_cli.shutil, "which", lambda cmd: "C:\\Windows\\notepad.exe" if cmd == "notepad" else None
+    )
 
     assert receipt_cli._default_editor_command() == ["notepad"]
 

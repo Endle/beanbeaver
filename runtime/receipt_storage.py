@@ -31,6 +31,7 @@ from beanbeaver.runtime import (
 
 logger = get_logger(__name__)
 
+
 def _project_paths():
     return get_paths()
 
@@ -75,7 +76,7 @@ def ensure_directories() -> None:
     """Create required receipt directories if they do not exist."""
     _project_paths().ensure_receipt_directories()
     _migrate_legacy_flat_receipts()
- 
+
 
 def _next_available_dir(path: Path) -> Path:
     """Return a unique directory path when collisions exist."""
@@ -103,6 +104,7 @@ def _next_available_file(path: Path) -> Path:
         if not candidate.exists():
             return candidate
         counter += 1
+
 
 def _slug(text: str | None) -> str:
     """Return a filesystem-safe slug."""

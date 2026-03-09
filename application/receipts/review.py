@@ -8,13 +8,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from beanbeaver.application.receipts.approval import _validate_review_patch
+from beanbeaver.receipt.receipt_structuring import load_stage_document, save_stage_document
 from beanbeaver.runtime.receipt_storage import (
     create_next_review_stage,
     move_scanned_to_approved,
     refresh_stage_artifacts,
 )
-from beanbeaver.receipt.receipt_structuring import load_stage_document, save_stage_document
-from beanbeaver.application.receipts.approval import _validate_review_patch
 
 EditScannedStatus = Literal[
     "editor_not_found",

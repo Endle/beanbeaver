@@ -229,10 +229,10 @@ Notes:
         return _run_legacy_command(cmd_re_edit, args)
     elif args.command == "api":
         from beanbeaver.cli.api import (
+            cmd_api_apply_match,
             cmd_api_approve_scanned,
             cmd_api_approve_scanned_with_review,
             cmd_api_get_config,
-            cmd_api_apply_match,
             cmd_api_list_approved,
             cmd_api_list_scanned,
             cmd_api_match_candidates,
