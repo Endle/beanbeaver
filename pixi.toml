@@ -20,9 +20,14 @@ ruff-format-check = "ruff format --check ."
 mypy = "mypy --config-file pyproject.toml --explicit-package-bases . --ignore-missing-imports --no-error-summary"
 mypy-strict = "mypy --config-file pyproject.toml --explicit-package-bases . --ignore-missing-imports --no-error-summary --disallow-untyped-defs --warn-redundant-casts --warn-unreachable"
 lint = [{ task = "ruff-check" }, { task = "ruff-format-check" }, { task = "mypy" }, { task = "mypy-strict" }]
-test = "pytest tests --ignore=tests/test_e2e_receipts.py"
-test-e2e-cached = "pytest tests/test_e2e_receipts.py --beanbeaver-e2e-mode cached"
-test-e2e-live = "pytest tests/test_e2e_receipts.py --beanbeaver-e2e-mode live -v"
+pytest-unit = "python -m pytest tests --ignore=tests/test_e2e_receipts.py"
+pytest-e2e-cached = "python -m pytest tests/test_e2e_receipts.py --beanbeaver-e2e-mode cached"
+pytest-e2e-live = "python -m pytest tests/test_e2e_receipts.py --beanbeaver-e2e-mode live -v"
+python-editable-install = "python -m pip install -e \".[dev,test]\""
+maturin-develop-native = "maturin develop"
+maturin-develop = [{ task = "maturin-develop-native" }, { task = "python-editable-install" }]
+test = [{ task = "maturin-develop" }, { task = "pytest-unit" }]
+test-e2e-cached = [{ task = "maturin-develop" }, { task = "pytest-e2e-cached" }]
+test-e2e-live = [{ task = "maturin-develop" }, { task = "pytest-e2e-live" }]
 serve = "python -m beanbeaver.cli.main serve"
-maturin-develop = "maturin develop"
 bb-tui = "cargo run --bin bb-tui"

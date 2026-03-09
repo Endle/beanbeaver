@@ -1,24 +1,14 @@
-"""Centralized ledger access for Beancount files.
-
-This module is intended to be the single place that reads ledger files from disk.
-Other components should gradually migrate to consume this API instead of calling
-`beancount.loader.load_file()` directly.
-"""
+"""Centralized ledger access for Beancount files."""
 
 from __future__ import annotations
 
 import datetime as dt
-import fnmatch
-import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from beanbeaver.ledger_access._native import _native_backend
 from beanbeaver.ledger_access._paths import default_main_beancount_path
-from beancount.core import data
-from beancount.loader import load_file
-
-logger = logging.getLogger(f"beancount_local.{__name__}")
 DEFAULT_MAIN_BEANCOUNT_PATH = default_main_beancount_path()
 
 
@@ -27,8 +17,8 @@ class LoadedLedger:
     """Structured result from loading a Beancount ledger."""
 
     path: Path
-    entries: list[data.Directive]
-    errors: list[Any]
+    entries: list[Any]
+    errors: list[str]
     options: dict[str, Any]
 
 
@@ -43,64 +33,14 @@ class LedgerReader:
             return self.default_ledger_path
         return Path(ledger_path)
 
-    def load(self, ledger_path: Path | str | None = None) -> LoadedLedger:
-        """Load ledger entries from disk."""
+    def list_transactions_payload(
+        self,
+        ledger_path: Path | str | None = None,
+    ) -> tuple[Path, list[dict[str, object]], list[str], dict[str, object]]:
+        """Return plain transaction payloads from the native backend."""
         path = self._resolve_path(ledger_path)
-        entries, errors, options = load_file(str(path))
-
-        if errors:
-            logger.warning("Beancount reported %d error(s) while loading %s", len(errors), path)
-
-        return LoadedLedger(
-            path=path,
-            entries=list(entries),
-            errors=list(errors),
-            options=dict(options),
-        )
-
-    def transactions(self, ledger_path: Path | str | None = None) -> list[data.Transaction]:
-        """Return all transactions from the ledger."""
-        loaded = self.load(ledger_path=ledger_path)
-        return [entry for entry in loaded.entries if isinstance(entry, data.Transaction)]
-
-    @staticmethod
-    def _collect_account_timeline(
-        entries: list[data.Directive],
-    ) -> tuple[dict[str, dt.date], dict[str, dt.date]]:
-        """Return latest open/close dates per account from ledger entries."""
-        last_open: dict[str, dt.date] = {}
-        last_close: dict[str, dt.date] = {}
-
-        for entry in entries:
-            if isinstance(entry, data.Open):
-                prior_open = last_open.get(entry.account)
-                if prior_open is None or entry.date > prior_open:
-                    last_open[entry.account] = entry.date
-            elif isinstance(entry, data.Close):
-                prior_close = last_close.get(entry.account)
-                if prior_close is None or entry.date > prior_close:
-                    last_close[entry.account] = entry.date
-
-        return last_open, last_close
-
-    @staticmethod
-    def _is_account_open_as_of(
-        account: str,
-        *,
-        as_of: dt.date,
-        last_open: dict[str, dt.date],
-        last_close: dict[str, dt.date],
-    ) -> bool:
-        """Return whether account should be considered open as of the provided date."""
-        opened = last_open.get(account)
-        if not opened or opened > as_of:
-            return False
-
-        closed = last_close.get(account)
-        if closed is None or closed > as_of:
-            return True
-
-        return opened > closed
+        raw_path, transactions, errors, options = _native_backend.ledger_access_list_transactions(str(path))
+        return Path(raw_path), list(transactions), list(errors), dict(options)
 
     def open_accounts(
         self,
@@ -116,24 +56,14 @@ class LedgerReader:
         if as_of is None:
             as_of = dt.date.today()
 
-        loaded = self.load(ledger_path=ledger_path)
-        last_open, last_close = self._collect_account_timeline(loaded.entries)
-
-        matches: list[str] = []
-        for account in last_open:
-            if not self._is_account_open_as_of(
-                account,
-                as_of=as_of,
-                last_open=last_open,
-                last_close=last_close,
-            ):
-                continue
-            for pattern in patterns:
-                if fnmatch.fnmatch(account, pattern):
-                    matches.append(account)
-                    break
-
-        return sorted(matches)
+        path = self._resolve_path(ledger_path)
+        return list(
+            _native_backend.ledger_access_open_accounts(
+                str(path),
+                patterns,
+                as_of.toordinal(),
+            )
+        )
 
     def open_credit_card_accounts(
         self,
@@ -157,14 +87,11 @@ class LedgerReader:
         ledger_path: Path | str | None = None,
     ) -> set[dt.date]:
         """Return transaction dates where the given account appears in postings."""
-        loaded = self.load(ledger_path=ledger_path)
-        dates: set[dt.date] = set()
-        for entry in loaded.entries:
-            if not isinstance(entry, data.Transaction):
-                continue
-            if any(posting.account == account for posting in entry.postings):
-                dates.add(entry.date)
-        return dates
+        path = self._resolve_path(ledger_path)
+        return {
+            dt.date.fromordinal(ordinal)
+            for ordinal in _native_backend.ledger_access_transaction_dates_for_account(str(path), account)
+        }
 
 
 _reader: LedgerReader | None = None
