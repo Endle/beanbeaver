@@ -1,6 +1,7 @@
 """Spatial (bbox-based) receipt item extraction."""
 
 import importlib
+import importlib.machinery
 import importlib.util
 import re
 from decimal import Decimal
@@ -43,13 +44,21 @@ def _load_rust_matcher() -> ModuleType | None:
     for directory in (project_root / "target" / "maturin", project_root / "target" / "debug"):
         if not directory.exists():
             continue
-        for pattern in ("_rust_matcher*.so", "_rust_matcher*.pyd", "_rust_matcher*.dylib"):
+        for pattern in (
+            "_rust_matcher*.so",
+            "lib_rust_matcher*.so",
+            "_rust_matcher*.pyd",
+            "lib_rust_matcher*.pyd",
+            "_rust_matcher*.dylib",
+            "lib_rust_matcher*.dylib",
+        ):
             for candidate in sorted(directory.glob(pattern)):
-                spec = importlib.util.spec_from_file_location("beanbeaver._rust_matcher", candidate)
-                if spec is None or spec.loader is None:
+                loader = importlib.machinery.ExtensionFileLoader("beanbeaver._rust_matcher", str(candidate))
+                spec = importlib.util.spec_from_file_location("beanbeaver._rust_matcher", candidate, loader=loader)
+                if spec is None:
                     continue
                 module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
+                loader.exec_module(module)
                 return module
 
     return None

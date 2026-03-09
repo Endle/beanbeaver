@@ -86,7 +86,42 @@ def list_transactions(
     ledger_path: Path | str | None = None,
 ) -> LedgerTransactionList:
     """Return all ledger transactions using DTOs, without Beancount objects."""
-    loaded = get_ledger_reader().load(ledger_path=ledger_path)
+    reader = get_ledger_reader()
+    payload = reader.list_transactions_payload(ledger_path=ledger_path)
+    if payload is not None:
+        path, transactions_payload, errors, options = payload
+        transactions = [
+            LedgerTransaction(
+                date=dt.date.fromordinal(int(txn["date_ordinal"])),
+                payee=txn["payee"],
+                narration=txn["narration"],
+                postings=tuple(
+                    LedgerPosting(
+                        account=str(posting["account"]),
+                        units=(
+                            LedgerAmount(
+                                number=Decimal(str(posting["number_str"])),
+                                currency=str(posting["currency"]),
+                            )
+                            if posting["number_str"] is not None and posting["currency"] is not None
+                            else None
+                        ),
+                    )
+                    for posting in txn["postings"]
+                ),
+                file_path=str(txn["file_path"]),
+                line_number=int(txn["line_number"]),
+            )
+            for txn in transactions_payload
+        ]
+        return LedgerTransactionList(
+            path=path,
+            transactions=transactions,
+            errors=list(errors),
+            options={str(k): v for k, v in options.items()},
+        )
+
+    loaded = reader.load(ledger_path=ledger_path)
     transactions = [_map_transaction(entry) for entry in loaded.entries if isinstance(entry, data.Transaction)]
     return LedgerTransactionList(
         path=loaded.path,

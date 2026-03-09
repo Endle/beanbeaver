@@ -8,6 +8,7 @@ Supports bidirectional matching:
 from __future__ import annotations
 
 import importlib
+import importlib.machinery
 import importlib.util
 import re
 from collections.abc import Sequence
@@ -103,11 +104,12 @@ def _load_rust_matcher() -> ModuleType | None:
             "lib_rust_matcher*.dylib",
         ):
             for candidate in sorted(directory.glob(pattern)):
-                spec = importlib.util.spec_from_file_location("beanbeaver._rust_matcher", candidate)
-                if spec is None or spec.loader is None:
+                loader = importlib.machinery.ExtensionFileLoader("beanbeaver._rust_matcher", str(candidate))
+                spec = importlib.util.spec_from_file_location("beanbeaver._rust_matcher", candidate, loader=loader)
+                if spec is None:
                     continue
                 module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
+                loader.exec_module(module)
                 return module
 
     return None

@@ -12,6 +12,7 @@ from typing import Any
 from beancount.loader import load_file
 
 from beanbeaver.domain.match import comment_block, find_transaction_end
+from beanbeaver.ledger_access._native import _native_backend
 from beanbeaver.ledger_access._paths import default_main_beancount_path
 
 logger = logging.getLogger(f"beancount_local.{__name__}")
@@ -45,6 +46,16 @@ class LedgerWriter:
     def validate_ledger(self, ledger_path: Path | str | None = None) -> list[Any]:
         """Run Beancount loader validation and return errors (if any)."""
         path = self._resolve_path(ledger_path)
+        if _native_backend is not None:
+            try:
+                errors = list(_native_backend.ledger_access_validate_ledger(str(path)))
+            except (AttributeError, TypeError):
+                errors = None
+            else:
+                if errors:
+                    logger.warning("Beancount validation found %d error(s) in %s", len(errors), path)
+                return errors
+
         _, errors, _ = load_file(str(path))
         if errors:
             logger.warning("Beancount validation found %d error(s) in %s", len(errors), path)
@@ -57,6 +68,25 @@ class LedgerWriter:
         enriched_path: Path,
     ) -> ReceiptMatchSnapshot:
         """Capture the ledger-side files that a receipt match may modify."""
+        if _native_backend is not None:
+            try:
+                statement_original, enriched_existed, enriched_original = (
+                    _native_backend.ledger_access_snapshot_receipt_match_files(
+                        str(statement_path),
+                        str(enriched_path),
+                    )
+                )
+            except (AttributeError, TypeError):
+                pass
+            else:
+                return ReceiptMatchSnapshot(
+                    statement_path=statement_path,
+                    statement_original=statement_original,
+                    enriched_path=enriched_path,
+                    enriched_existed=bool(enriched_existed),
+                    enriched_original=enriched_original,
+                )
+
         enriched_existed = enriched_path.exists()
         return ReceiptMatchSnapshot(
             statement_path=statement_path,
@@ -68,6 +98,20 @@ class LedgerWriter:
 
     def restore_receipt_match_files(self, snapshot: ReceiptMatchSnapshot) -> None:
         """Restore ledger-side files from a previously captured snapshot."""
+        if _native_backend is not None:
+            try:
+                _native_backend.ledger_access_restore_receipt_match_files(
+                    str(snapshot.statement_path),
+                    snapshot.statement_original,
+                    str(snapshot.enriched_path),
+                    snapshot.enriched_existed,
+                    snapshot.enriched_original,
+                )
+            except (AttributeError, TypeError):
+                pass
+            else:
+                return
+
         snapshot.statement_path.write_text(snapshot.statement_original)
         if snapshot.enriched_existed:
             if snapshot.enriched_original is not None:
@@ -90,6 +134,19 @@ class LedgerWriter:
             "applied" if statement was updated,
             "already_applied" if include already exists.
         """
+        if _native_backend is not None:
+            try:
+                return str(
+                    _native_backend.ledger_access_replace_transaction_with_include(
+                        str(statement_path),
+                        line_number,
+                        include_rel_path,
+                        receipt_name,
+                    )
+                )
+            except (AttributeError, TypeError):
+                pass
+
         lines = statement_path.read_text().splitlines(keepends=True)
         include_prefix = f'include "{include_rel_path}"'
         for line in lines:
@@ -142,6 +199,23 @@ class LedgerWriter:
 
         On any failure, restores modified files to their original state.
         """
+        resolved_ledger_path = self._resolve_path(ledger_path)
+        if _native_backend is not None:
+            try:
+                return str(
+                    _native_backend.ledger_access_apply_receipt_match(
+                        str(resolved_ledger_path),
+                        str(statement_path),
+                        line_number,
+                        include_rel_path,
+                        receipt_name,
+                        str(enriched_path),
+                        enriched_content,
+                    )
+                )
+            except (AttributeError, TypeError):
+                pass
+
         original_statement = statement_path.read_text()
         enriched_existed = enriched_path.exists()
         original_enriched = enriched_path.read_text() if enriched_existed else None
@@ -159,7 +233,7 @@ class LedgerWriter:
             enriched_path.parent.mkdir(parents=True, exist_ok=True)
             enriched_path.write_text(enriched_content)
 
-            apply_errors = self.validate_ledger(ledger_path=ledger_path)
+            apply_errors = self.validate_ledger(ledger_path=resolved_ledger_path)
             if apply_errors:
                 error_preview = "; ".join(str(err) for err in apply_errors[:2])
                 raise RuntimeError(f"ledger validation failed after replacement: {error_preview}")

@@ -17,6 +17,7 @@ from typing import Any
 from beancount.core import data
 from beancount.loader import load_file
 
+from beanbeaver.ledger_access._native import _native_backend
 from beanbeaver.ledger_access._paths import default_main_beancount_path
 
 logger = logging.getLogger(f"beancount_local.{__name__}")
@@ -58,6 +59,22 @@ class LedgerReader:
             errors=list(errors),
             options=dict(options),
         )
+
+    def list_transactions_payload(
+        self,
+        ledger_path: Path | str | None = None,
+    ) -> tuple[Path, list[dict[str, object]], list[str], dict[str, object]] | None:
+        """Return plain transaction payloads from the native backend when available."""
+        path = self._resolve_path(ledger_path)
+        if _native_backend is None:
+            return None
+
+        try:
+            raw_path, transactions, errors, options = _native_backend.ledger_access_list_transactions(str(path))
+        except (AttributeError, TypeError):
+            return None
+
+        return Path(raw_path), list(transactions), list(errors), dict(options)
 
     def transactions(self, ledger_path: Path | str | None = None) -> list[data.Transaction]:
         """Return all transactions from the ledger."""
@@ -117,7 +134,20 @@ class LedgerReader:
         if as_of is None:
             as_of = dt.date.today()
 
-        loaded = self.load(ledger_path=ledger_path)
+        path = self._resolve_path(ledger_path)
+        if _native_backend is not None:
+            try:
+                return list(
+                    _native_backend.ledger_access_open_accounts(
+                        str(path),
+                        patterns,
+                        as_of.toordinal(),
+                    )
+                )
+            except (AttributeError, TypeError):
+                pass
+
+        loaded = self.load(ledger_path=path)
         last_open, last_close = self._collect_account_timeline(loaded.entries)
 
         matches: list[str] = []
@@ -158,7 +188,17 @@ class LedgerReader:
         ledger_path: Path | str | None = None,
     ) -> set[dt.date]:
         """Return transaction dates where the given account appears in postings."""
-        loaded = self.load(ledger_path=ledger_path)
+        path = self._resolve_path(ledger_path)
+        if _native_backend is not None:
+            try:
+                return {
+                    dt.date.fromordinal(ordinal)
+                    for ordinal in _native_backend.ledger_access_transaction_dates_for_account(str(path), account)
+                }
+            except (AttributeError, TypeError):
+                pass
+
+        loaded = self.load(ledger_path=path)
         dates: set[dt.date] = set()
         for entry in loaded.entries:
             if not isinstance(entry, data.Transaction):
