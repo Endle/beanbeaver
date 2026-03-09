@@ -30,18 +30,23 @@ jobs:
         run: |
           python -m venv .venv
           echo "VIRTUAL_ENV=$GITHUB_WORKSPACE/.venv" >> "$GITHUB_ENV"
-          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
-          echo "$GITHUB_WORKSPACE/.venv/Scripts" >> "$GITHUB_PATH"
+          if [ -x "$GITHUB_WORKSPACE/.venv/bin/python" ]; then
+            echo "VENV_PYTHON=$GITHUB_WORKSPACE/.venv/bin/python" >> "$GITHUB_ENV"
+            echo "VENV_MATURIN=$GITHUB_WORKSPACE/.venv/bin/maturin" >> "$GITHUB_ENV"
+          else
+            echo "VENV_PYTHON=$GITHUB_WORKSPACE/.venv/Scripts/python.exe" >> "$GITHUB_ENV"
+            echo "VENV_MATURIN=$GITHUB_WORKSPACE/.venv/Scripts/maturin.exe" >> "$GITHUB_ENV"
+          fi
 
       - name: Install test dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[test,dev]"
-          maturin develop
-          python -m pip install -e ".[test,dev]"
+          "$VENV_PYTHON" -m pip install --upgrade pip
+          "$VENV_PYTHON" -m pip install -e ".[test,dev]"
+          "$VENV_MATURIN" develop
+          "$VENV_PYTHON" -m pip install -e ".[test,dev]"
 
       - name: Run tests (excluding e2e)
-        run: python -m pytest tests --ignore=tests/test_e2e_receipts.py
+        run: "$VENV_PYTHON" -m pytest tests --ignore=tests/test_e2e_receipts.py
 
   native-matcher:
     runs-on: ubuntu-latest
