@@ -111,14 +111,14 @@ fn re_short_parenthetical_code() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"^\([^)]{1,5}\)").unwrap())
 }
 
-fn re_phone_number() -> &'static Regex {
+fn re_footer_address_patterns() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\(\d{3}\)\s*\d{3}-\d{4}").unwrap())
-}
-
-fn re_postal_code() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\bL\d[A-Z]\d\b").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(
+            r"\b(AVE|AVENUE|ST|STREET|RD|ROAD|BLVD|BOULEVARD|DR|DRIVE|HWY|HIGHWAY)\b|\b(MARKHAM|TORONTO|MISSISSAUGA|RICHMOND\s+HILL|ON|ONTARIO)\b|\b(L\d[A-Z]\d)\b|\(\d{3}\)\s*\d{3}-\d{4}",
+        )
+        .unwrap()
+    })
 }
 
 fn re_count_at_price() -> &'static Regex {
@@ -149,6 +149,21 @@ fn re_parenthetical_offer_prefix() -> &'static Regex {
 fn re_section_header_with_aisle() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"^[^A-Z0-9]*\d{1,2}\s*[-:]\s*[A-Z]{3,}$").unwrap())
+}
+
+fn re_summary_patterns() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"^(?:SUB\s*TOTAL|SUBTOTAL|TOTAL|HST|GST|PST|TAX|MASTER(?:CARD)?|VISA|DEBIT|CREDIT|POINTS|CASH|CHANGE|BALANCE|APPROVED|CARD|TERMINAL|MEMBER)\b",
+        )
+        .unwrap()
+    })
+}
+
+fn re_tax_tokens() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\b(HST|GST|PST|TAX)\b").unwrap())
 }
 
 fn re_section_aisle_prefix() -> &'static Regex {
@@ -346,47 +361,17 @@ fn is_summary_line(text: &str) -> bool {
         return false;
     }
     let upper = text.trim().to_ascii_uppercase();
-    let summary_prefixes = [
-        "SUBTOTAL",
-        "SUB TOTAL",
-        "TOTAL",
-        "HST",
-        "GST",
-        "PST",
-        "TAX",
-        "MASTERCARD",
-        "MASTERCARD",
-        "VISA",
-        "DEBIT",
-        "CREDIT",
-        "POINTS",
-        "CASH",
-        "CHANGE",
-        "BALANCE",
-        "APPROVED",
-        "CARD",
-        "TERMINAL",
-        "MEMBER",
-    ];
-    if summary_prefixes
-        .iter()
-        .any(|prefix| upper.starts_with(prefix))
-    {
+    if re_summary_patterns().is_match(&upper) {
         return true;
     }
     if upper.contains("SUBTOTAL") || upper.contains("SUB TOTAL") || upper.contains("TOTAL") {
         return true;
     }
-    if ["HST", "GST", "PST", "TAX"]
-        .iter()
-        .any(|token| upper.contains(token))
-    {
+    if re_tax_tokens().is_match(&upper) {
         return true;
     }
     upper.starts_with("H=")
-        && ["HST", "GST", "PST", "TAX"]
-            .iter()
-            .any(|token| upper.contains(token))
+        && re_tax_tokens().is_match(&upper)
 }
 
 fn trailing_price_scaled(text: &str) -> Option<i64> {
@@ -468,30 +453,7 @@ fn looks_like_quantity_expression(text: &str) -> bool {
 }
 
 fn footer_address_like(text: &str) -> bool {
-    let upper = text.to_ascii_uppercase();
-    let has_address_token = [
-        "AVE",
-        "AVENUE",
-        "ST",
-        "STREET",
-        "RD",
-        "ROAD",
-        "BLVD",
-        "BOULEVARD",
-        "DR",
-        "DRIVE",
-        "HWY",
-        "HIGHWAY",
-        "MARKHAM",
-        "TORONTO",
-        "MISSISSAUGA",
-        "RICHMOND HILL",
-        " ON ",
-        "ONTARIO",
-    ]
-    .iter()
-    .any(|token| upper.contains(token));
-    has_address_token || re_postal_code().is_match(&upper) || re_phone_number().is_match(&upper)
+    re_footer_address_patterns().is_match(&text.to_ascii_uppercase())
 }
 
 fn clean_description(desc: &str) -> String {
@@ -845,21 +807,47 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
         let mut chosen_line_index = None;
         let mut chosen_distance = f64::INFINITY;
 
-        if let Some(index) = onsale_target_line_index {
-            if !used_line_indices[index] {
-                chosen_line_index = Some(index);
-                chosen_distance = (all_lines[index].line_y - price_y).abs();
+        if onsale_target_line_index.is_none()
+            && !used_line_indices[price_candidate.source_line_index]
+        {
+            let source_distance = (source_line.line_y - price_y).abs();
+            let source_left_is_header = is_section_header_text(&source_line.left_text)
+                && !is_priced_generic_item_label(&source_line.left_text, &source_line.full_text);
+            if source_distance <= Y_TOLERANCE
+                && !source_line.left_text.is_empty()
+                && !looks_like_quantity_expression(&source_line.left_text)
+                && !is_summary_line(&source_line.left_text)
+                && !is_summary_line(&source_line.full_text)
+                && !source_left_is_header
+                && !is_section_header_text(&source_line.full_text)
+                && !footer_address_like(&source_line.full_text)
+            {
+                chosen_line_index = Some(price_candidate.source_line_index);
+                chosen_distance = source_distance;
             }
-        } else if let Some((index, distance)) = crate::spatial::select_spatial_item_line(
-            price_y,
-            Y_TOLERANCE,
-            MAX_ITEM_DISTANCE,
-            prefer_below,
-            price_line_has_onsale,
-            line_selection_candidates,
-        ) {
-            chosen_line_index = Some(index);
-            chosen_distance = distance;
+        }
+
+        if chosen_line_index.is_none() {
+            if let Some(index) = onsale_target_line_index {
+                if !used_line_indices[index] {
+                    chosen_line_index = Some(index);
+                    chosen_distance = (all_lines[index].line_y - price_y).abs();
+                }
+            }
+        }
+
+        if chosen_line_index.is_none() {
+            if let Some((index, distance)) = crate::spatial::select_spatial_item_line(
+                price_y,
+                Y_TOLERANCE,
+                MAX_ITEM_DISTANCE,
+                prefer_below,
+                price_line_has_onsale,
+                line_selection_candidates,
+            ) {
+                chosen_line_index = Some(index);
+                chosen_distance = distance;
+            }
         }
 
         if let Some(index) = chosen_line_index {

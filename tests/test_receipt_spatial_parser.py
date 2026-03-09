@@ -1,4 +1,3 @@
-import os
 from decimal import Decimal
 
 from beanbeaver.receipt.ocr_parser.items_spatial_parser import _rust_matcher, _select_spatial_item_line
@@ -203,9 +202,6 @@ def test_extract_items_with_bbox_keeps_cash_prefix_product_name() -> None:
 
 
 def test_select_spatial_item_line_uses_rust_backend_when_required() -> None:
-    if os.environ.get("BEANBEAVER_REQUIRE_RUST_MATCHER") != "1":
-        return
-
     assert _rust_matcher is not None
 
     result = _select_spatial_item_line(
