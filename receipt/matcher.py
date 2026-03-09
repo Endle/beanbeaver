@@ -139,9 +139,7 @@ def _config_payload(config: MatchConfig) -> dict[str, int]:
         "date_tolerance_days": config.date_tolerance_days,
         "amount_tolerance_scaled": _decimal_to_scaled(config.amount_tolerance),
         "amount_tolerance_percent_scaled": _decimal_to_scaled(config.amount_tolerance_percent),
-        "merchant_min_similarity_scaled": _decimal_to_scaled(
-            Decimal(str(config.merchant_min_similarity))
-        ),
+        "merchant_min_similarity_scaled": _decimal_to_scaled(Decimal(str(config.merchant_min_similarity))),
     }
 
 
@@ -575,11 +573,11 @@ def match_receipt_to_transactions(
     if rust_matches is not None:
         results: list[MatchResult] = []
         for index, confidence, details in rust_matches:
-            txn = cast(TransactionLike, transactions[index])
-            file_path, line_number = _transaction_location(txn)
+            matched_txn = cast(TransactionLike, transactions[index])
+            file_path, line_number = _transaction_location(matched_txn)
             results.append(
                 MatchResult(
-                    transaction=txn,
+                    transaction=matched_txn,
                     file_path=file_path,
                     line_number=line_number,
                     confidence=confidence,
@@ -589,10 +587,10 @@ def match_receipt_to_transactions(
         return results
 
     matches: list[MatchResult] = []
-    for txn in transactions:
+    for candidate_txn in transactions:
         result = _try_match_py(
             receipt,
-            cast(TransactionLike, txn),
+            cast(TransactionLike, candidate_txn),
             resolved_config,
             merchant_families=merchant_families,
         )

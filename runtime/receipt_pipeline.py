@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-
 from beanbeaver.receipt.ocr_extraction import OCR_IMAGE_PADDING, resize_image_bytes, transform_paddleocr_result
 from beanbeaver.runtime import get_logger, get_paths
 
@@ -98,6 +97,7 @@ def create_debug_overlay(
     img_width, img_height = img.size
     draw = ImageDraw.Draw(img)
 
+    font: Any
     try:
         font_size = max(14, int(img_height / 150))
         font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)

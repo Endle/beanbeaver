@@ -9,10 +9,9 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from beancount.loader import load_file
-
 from beanbeaver.domain.match import comment_block, find_transaction_end
 from beanbeaver.ledger_access._paths import default_main_beancount_path
+from beancount.loader import load_file
 
 logger = logging.getLogger(f"beancount_local.{__name__}")
 DEFAULT_MAIN_BEANCOUNT_PATH = default_main_beancount_path()

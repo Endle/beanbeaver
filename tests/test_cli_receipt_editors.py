@@ -7,7 +7,7 @@ from pathlib import Path
 
 from _pytest.capture import CaptureFixture
 from _pytest.monkeypatch import MonkeyPatch
-from beanbeaver.application.receipts.review import ReEditApprovedReceiptResult
+from beanbeaver.application.receipts.review import ReEditApprovedReceiptRequest, ReEditApprovedReceiptResult
 from beanbeaver.cli import receipt as receipt_cli
 
 
@@ -21,7 +21,9 @@ def test_resolve_editor_prefers_visual_over_editor(monkeypatch: MonkeyPatch) -> 
 
 def test_default_editor_uses_notepad_on_windows(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(receipt_cli.os, "name", "nt")
-    monkeypatch.setattr(receipt_cli.shutil, "which", lambda cmd: "C:\\Windows\\notepad.exe" if cmd == "notepad" else None)
+    monkeypatch.setattr(
+        receipt_cli.shutil, "which", lambda cmd: "C:\\Windows\\notepad.exe" if cmd == "notepad" else None
+    )
 
     assert receipt_cli._default_editor_command() == ["notepad"]
 
@@ -48,7 +50,7 @@ def test_cmd_re_edit_accepts_direct_path(
         def isatty(self) -> bool:
             return True
 
-    def _fake_run(request: object) -> ReEditApprovedReceiptResult:
+    def _fake_run(request: ReEditApprovedReceiptRequest) -> ReEditApprovedReceiptResult:
         captured_path["target"] = request.target_path
         return ReEditApprovedReceiptResult(status="updated", updated_path=updated)
 

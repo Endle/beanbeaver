@@ -6,8 +6,8 @@ from typing import Any
 
 from beanbeaver.receipt.receipt_structuring import get_stage_summary, receipt_from_stage_document
 
-from ..item_categories import ItemCategoryRuleLayers
 from ..formatter import format_parsed_receipt
+from ..item_categories import ItemCategoryRuleLayers
 
 
 def render_stage_document_as_beancount(

@@ -10,11 +10,10 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
+from beanbeaver.domain.chequing_import import next_day
 from beancount.core import amount, data, flags
 from beancount.ingest import importer
 from beancount.ingest.cache import _FileMemo
-
-from beanbeaver.domain.chequing_import import next_day
 
 
 @dataclass

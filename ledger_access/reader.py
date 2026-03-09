@@ -14,10 +14,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from beanbeaver.ledger_access._paths import default_main_beancount_path
 from beancount.core import data
 from beancount.loader import load_file
-
-from beanbeaver.ledger_access._paths import default_main_beancount_path
 
 logger = logging.getLogger(f"beancount_local.{__name__}")
 DEFAULT_MAIN_BEANCOUNT_PATH = default_main_beancount_path()

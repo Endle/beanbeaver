@@ -35,11 +35,7 @@ def _load_families_from_path(path: Path) -> list[MerchantFamily]:
     for family in config.get("families", []):
         canonical = str(family.get("canonical", "")).strip()
         raw_aliases = family.get("aliases", [])
-        aliases = tuple(
-            alias.strip()
-            for alias in raw_aliases
-            if isinstance(alias, str) and alias.strip()
-        )
+        aliases = tuple(alias.strip() for alias in raw_aliases if isinstance(alias, str) and alias.strip())
         if canonical:
             families.append(MerchantFamily(canonical=canonical, aliases=aliases))
     return families

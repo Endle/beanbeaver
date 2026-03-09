@@ -40,7 +40,7 @@ fi
 
 # 3. Mypy type checking
 echo -e "\n${YELLOW}[3/$TOTAL] Mypy type checking...${NC}"
-if mypy --config-file pyproject.toml . --ignore-missing-imports --no-error-summary 2>/dev/null; then
+if mypy --config-file pyproject.toml --explicit-package-bases . --ignore-missing-imports --no-error-summary 2>/dev/null; then
     echo -e "${GREEN}✓ Mypy type checking passed${NC}"
 else
     echo -e "${RED}✗ Mypy type checking found issues${NC}"
@@ -51,6 +51,7 @@ fi
 echo -e "\n${YELLOW}[4/$TOTAL] Mypy strict checks...${NC}"
 if mypy \
     --config-file pyproject.toml \
+    --explicit-package-bases \
     . \
     --ignore-missing-imports \
     --no-error-summary \

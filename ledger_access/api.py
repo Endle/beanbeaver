@@ -8,10 +8,9 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
-from beancount.core import data
-
 from beanbeaver.ledger_access.reader import get_ledger_reader
 from beanbeaver.ledger_access.writer import ReceiptMatchSnapshot, get_ledger_writer
+from beancount.core import data
 
 
 @dataclass(frozen=True)
@@ -52,7 +51,7 @@ class LedgerTransactionList:
     options: dict[str, object]
 
 
-ReceiptMatchFileSnapshot = ReceiptMatchSnapshot
+type ReceiptMatchFileSnapshot = ReceiptMatchSnapshot
 
 
 def _map_posting(posting: data.Posting) -> LedgerPosting:

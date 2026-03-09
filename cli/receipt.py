@@ -16,7 +16,6 @@ logger = get_logger(__name__)
 def cmd_serve(args: argparse.Namespace) -> None:
     """Start the FastAPI server for receiving receipt uploads."""
     import uvicorn
-
     from beanbeaver.runtime import receipt_server as server
 
     print(f"Starting receipt server on {args.host}:{args.port}")

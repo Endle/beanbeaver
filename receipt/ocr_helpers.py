@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 from .detection_normalization import normalize_detections
-from .ocr_schema import OCR_ENGINE_NAME_PADDLE, OCR_SCHEMA_VERSION, OcrBBox, OcrDocument
+from .ocr_schema import OCR_ENGINE_NAME_PADDLE, OCR_SCHEMA_VERSION, OcrBBox, OcrDocument, OcrLine, OcrWord
 
 MAX_IMAGE_DIMENSION = 3000  # Resize if either dimension exceeds this
 OCR_IMAGE_PADDING = 50  # White padding around image to prevent edge truncation
@@ -29,7 +29,7 @@ def resize_image_bytes(
     """
     from PIL import Image, ImageOps
 
-    img = Image.open(io.BytesIO(image_bytes))
+    img: Any = Image.open(io.BytesIO(image_bytes))
 
     # Apply EXIF orientation to normalize the image
     # This ensures OCR and debug overlay see the same orientation
@@ -38,6 +38,7 @@ def resize_image_bytes(
     width, height = img.size
 
     # Check if resizing is needed
+    img_final: Any = img
     if width <= max_dimension and height <= max_dimension:
         img_final = img
     else:
@@ -400,9 +401,9 @@ def transform_paddleocr_result(raw_result: dict[str, Any], padding: int = OCR_IM
     lines = _group_detections_by_y_overlap(detection_data, image_width)
 
     # Convert to API format
-    result_lines: list[dict[str, Any]] = []
+    result_lines: list[OcrLine] = []
     for line_idx, line in enumerate(lines, start=1):
-        words: list[dict[str, Any]] = []
+        words: list[OcrWord] = []
         line_confidence_sum = 0.0
         for word_idx, det in enumerate(line, start=1):
             normalized_bbox = _normalized_bbox_from_points(det["bbox"], image_width, image_height)
@@ -418,7 +419,7 @@ def transform_paddleocr_result(raw_result: dict[str, Any], padding: int = OCR_IM
             )
 
         line_text = " ".join(str(w["text"]) for w in words)
-        line_bbox = {
+        line_bbox: OcrBBox = {
             "left": min(word["bbox"]["left"] for word in words),
             "top": min(word["bbox"]["top"] for word in words),
             "right": max(word["bbox"]["right"] for word in words),

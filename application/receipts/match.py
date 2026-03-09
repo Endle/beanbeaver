@@ -22,6 +22,8 @@ from beanbeaver.domain.match import (
 )
 from beanbeaver.domain.receipt import Receipt
 from beanbeaver.ledger_access import (
+    LedgerTransaction,
+    LedgerTransactionList,
     ReceiptMatchFileSnapshot,
     apply_receipt_match,
     list_transactions,
@@ -156,7 +158,7 @@ def _format_ledger_errors(errors: Sequence[Any], *, limit: int = 5) -> list[str]
     return formatted
 
 
-def _load_ledger_transactions(ledger_path: Path) -> tuple[object, list[str]]:
+def _load_ledger_transactions(ledger_path: Path) -> tuple[LedgerTransactionList, list[str]]:
     """Load ledger transactions and convert diagnostics to CLI/API-safe strings."""
     snapshot = list_transactions(ledger_path=ledger_path)
     errors = _format_ledger_errors(snapshot.errors, limit=5)
@@ -165,7 +167,7 @@ def _load_ledger_transactions(ledger_path: Path) -> tuple[object, list[str]]:
 
 def _resolve_receipt_match_candidates(
     receipt: Receipt,
-    transactions: Sequence[object],
+    transactions: Sequence[LedgerTransaction],
     *,
     merchant_families: Sequence[object] | None,
 ) -> _ResolvedMatchCandidates:

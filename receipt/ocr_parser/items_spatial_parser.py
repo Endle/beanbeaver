@@ -26,8 +26,8 @@ from .common import (
     _is_section_header_text,
     _line_has_trailing_price,
     _looks_like_onsale_marker,
-    _looks_like_receipt_metadata_line,
     _looks_like_quantity_expression,
+    _looks_like_receipt_metadata_line,
     _looks_like_summary_line,
     _parse_quantity_modifier,
     _strip_leading_receipt_codes,
@@ -70,11 +70,6 @@ def _select_spatial_item_line_py(
 ) -> tuple[int, float] | None:
     closest: tuple[int, float] | None = None
 
-    def update(index: int, distance: float) -> None:
-        nonlocal closest
-        if closest is None or distance < closest[1]:
-            closest = (index, distance)
-
     for index, candidate in enumerate(candidates):
         distance = abs(candidate["line_y"] - price_y)
         if (
@@ -85,7 +80,8 @@ def _select_spatial_item_line_py(
             or candidate["looks_like_quantity_expression"]
         ):
             continue
-        update(index, distance)
+        if closest is None or distance < closest[1]:
+            closest = (index, distance)
     if closest is not None:
         return closest
 
@@ -98,33 +94,33 @@ def _select_spatial_item_line_py(
                 or candidate["line_y"] - price_y > MAX_ITEM_DISTANCE + _SPATIAL_FLOAT_EPSILON
             ):
                 continue
-            update(index, abs(candidate["line_y"] - price_y))
+            distance = abs(candidate["line_y"] - price_y)
+            if closest is None or distance < closest[1]:
+                closest = (index, distance)
         if closest is not None:
             return closest
 
     for index, candidate in enumerate(candidates):
         if candidate["is_used"] or not candidate["is_valid_item_line"]:
             continue
-        if (
-            candidate["line_y"] > price_y
-            or price_y - candidate["line_y"] > MAX_ITEM_DISTANCE + _SPATIAL_FLOAT_EPSILON
-        ):
+        if candidate["line_y"] > price_y or price_y - candidate["line_y"] > MAX_ITEM_DISTANCE + _SPATIAL_FLOAT_EPSILON:
             continue
         if price_line_has_onsale and candidate["line_y"] < price_y and candidate["has_trailing_price"]:
             continue
-        update(index, abs(candidate["line_y"] - price_y))
+        distance = abs(candidate["line_y"] - price_y)
+        if closest is None or distance < closest[1]:
+            closest = (index, distance)
     if closest is not None:
         return closest
 
     for index, candidate in enumerate(candidates):
         if candidate["is_used"] or not candidate["is_valid_item_line"]:
             continue
-        if (
-            candidate["line_y"] <= price_y
-            or candidate["line_y"] > price_y + Y_TOLERANCE * 2 + _SPATIAL_FLOAT_EPSILON
-        ):
+        if candidate["line_y"] <= price_y or candidate["line_y"] > price_y + Y_TOLERANCE * 2 + _SPATIAL_FLOAT_EPSILON:
             continue
-        update(index, abs(candidate["line_y"] - price_y))
+        distance = abs(candidate["line_y"] - price_y)
+        if closest is None or distance < closest[1]:
+            closest = (index, distance)
 
     return closest
 
@@ -482,20 +478,20 @@ def _extract_items_with_bbox(
 
             nearest_unpriced_above = None
             nearest_unpriced_below = None
-            for index, candidate in enumerate(line_selection_candidates):
+            for index, selection_candidate in enumerate(line_selection_candidates):
                 if (
-                    candidate["is_used"]
-                    or not candidate["is_valid_item_line"]
-                    or candidate["has_trailing_price"]
+                    selection_candidate["is_used"]
+                    or not selection_candidate["is_valid_item_line"]
+                    or selection_candidate["has_trailing_price"]
                 ):
                     continue
-                distance = abs(candidate["line_y"] - selection_anchor_y)
+                distance = abs(selection_candidate["line_y"] - selection_anchor_y)
                 if distance > MAX_ITEM_DISTANCE + _SPATIAL_FLOAT_EPSILON:
                     continue
-                if candidate["line_y"] < selection_anchor_y:
+                if selection_candidate["line_y"] < selection_anchor_y:
                     if nearest_unpriced_above is None or distance < nearest_unpriced_above[1]:
                         nearest_unpriced_above = (index, distance)
-                elif candidate["line_y"] > selection_anchor_y:
+                elif selection_candidate["line_y"] > selection_anchor_y:
                     if nearest_unpriced_below is None or distance < nearest_unpriced_below[1]:
                         nearest_unpriced_below = (index, distance)
 
@@ -514,16 +510,16 @@ def _extract_items_with_bbox(
         if not prefer_below and source_line_is_quantity_expression:
             nearest_same_row_above = None
             nearest_same_row_below = None
-            for candidate in line_selection_candidates:
-                if candidate["is_used"] or not candidate["is_valid_item_line"]:
+            for selection_candidate in line_selection_candidates:
+                if selection_candidate["is_used"] or not selection_candidate["is_valid_item_line"]:
                     continue
-                distance = abs(candidate["line_y"] - selection_anchor_y)
+                distance = abs(selection_candidate["line_y"] - selection_anchor_y)
                 if distance > Y_TOLERANCE + _SPATIAL_FLOAT_EPSILON:
                     continue
-                if candidate["line_y"] < selection_anchor_y:
+                if selection_candidate["line_y"] < selection_anchor_y:
                     if nearest_same_row_above is None or distance < nearest_same_row_above:
                         nearest_same_row_above = distance
-                elif candidate["line_y"] > selection_anchor_y:
+                elif selection_candidate["line_y"] > selection_anchor_y:
                     if nearest_same_row_below is None or distance < nearest_same_row_below:
                         nearest_same_row_below = distance
             if nearest_same_row_below is not None and nearest_same_row_above is None:

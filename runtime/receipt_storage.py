@@ -7,7 +7,7 @@ import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from beanbeaver.domain.receipt import Receipt, ReceiptItem
 from beanbeaver.receipt.beancount_rendering import render_stage_document_as_beancount
@@ -23,6 +23,7 @@ from beanbeaver.receipt.receipt_structuring import (
     save_stage_document,
 )
 from beanbeaver.runtime import (
+    ProjectPaths,
     get_logger,
     get_paths,
     load_item_category_rule_layers,
@@ -31,7 +32,15 @@ from beanbeaver.runtime import (
 
 logger = get_logger(__name__)
 
-def _project_paths():
+
+class _LegacyReceiptItemData(TypedDict):
+    description: str
+    price: Decimal
+    quantity: int
+    category: str
+
+
+def _project_paths() -> ProjectPaths:
     return get_paths()
 
 
@@ -75,7 +84,7 @@ def ensure_directories() -> None:
     """Create required receipt directories if they do not exist."""
     _project_paths().ensure_receipt_directories()
     _migrate_legacy_flat_receipts()
- 
+
 
 def _next_available_dir(path: Path) -> Path:
     """Return a unique directory path when collisions exist."""
@@ -103,6 +112,7 @@ def _next_available_file(path: Path) -> Path:
         if not candidate.exists():
             return candidate
         counter += 1
+
 
 def _slug(text: str | None) -> str:
     """Return a filesystem-safe slug."""
@@ -156,7 +166,7 @@ def _parse_legacy_receipt_from_beancount(filepath: Path) -> tuple[Receipt, str |
     receipt_date: date | None = None
     date_is_unknown = False
     total = Decimal("0")
-    items = []
+    items: list[_LegacyReceiptItemData] = []
     tax: Decimal | None = None
     image_filename = ""
     image_sha256: str | None = None

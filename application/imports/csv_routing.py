@@ -11,7 +11,7 @@ import datetime
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from beanbeaver.application.imports.shared import (
     downloads_display_path,
@@ -270,12 +270,13 @@ def detect_credit_card_importer_id(path: Path) -> CardImporterId:
 
     importer_ids = sorted({route.importer_id for route in routes})
     if len(importer_ids) == 1:
-        return importer_ids[0]  # type: ignore[return-value]
+        return cast(CardImporterId, importer_ids[0])
 
-    return select_interactive_option(
+    selected = select_interactive_option(
         importer_ids,
         heading=f"Ambiguous credit card importer for file: {path.name}",
         prompt="Select importer (number): ",
         non_tty_error="Ambiguous credit card importer for CSV. Run interactively to choose",
         invalid_choice_error="Invalid importer selection",
-    )  # type: ignore[return-value]
+    )
+    return cast(CardImporterId, selected)

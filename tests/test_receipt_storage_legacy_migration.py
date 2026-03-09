@@ -4,6 +4,7 @@ import importlib
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from types import ModuleType
 
 import beanbeaver.runtime.paths as runtime_paths
 from _pytest.monkeypatch import MonkeyPatch
@@ -13,7 +14,7 @@ from beanbeaver.runtime.item_category_rules import (
 )
 
 
-def _reload_receipt_storage(tmp_path: Path, monkeypatch: MonkeyPatch):
+def _reload_receipt_storage(tmp_path: Path, monkeypatch: MonkeyPatch) -> ModuleType:
     monkeypatch.setenv("BEANBEAVER_ROOT", str(tmp_path))
     runtime_paths._paths = runtime_paths.ProjectPaths(root=tmp_path)
     load_item_category_rule_layers.cache_clear()
