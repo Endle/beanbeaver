@@ -38,6 +38,12 @@ FOOTER_ADDRESS_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+RECEIPT_METADATA_PATTERNS = re.compile(
+    r"WS#|RECEIPT#|CASHIER|ITEM\s+COUNT|NUMBER\s+OF\s+ITEMS|HAPPY\s+SHOPPING|"
+    r"CREDIT\s+CARD|DEBIT|APPROVED|AUTH|REFERENCE|TERMINAL|CUSTOMER\s+COPY",
+    re.IGNORECASE,
+)
+
 # Quantity/weight modifier patterns for multi-row item formats
 # These patterns detect lines like "3 @ $1.99", "1.22 lb @ $2.99/lb", "2 /for $3.00"
 QUANTITY_MODIFIER_PATTERNS = [
@@ -104,6 +110,13 @@ def _looks_like_summary_line(text: str) -> bool:
     if upper.startswith("H=") and any(tag in upper for tag in ("HST", "GST", "PST", "TAX")):
         return True
     return False
+
+
+def _looks_like_receipt_metadata_line(text: str) -> bool:
+    """Return True for operational/header/footer lines that are not items."""
+    if not text:
+        return False
+    return RECEIPT_METADATA_PATTERNS.search(text.strip()) is not None
 
 
 def _line_has_trailing_price(text: str) -> bool:
