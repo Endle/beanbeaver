@@ -3,9 +3,6 @@
 import argparse
 from collections.abc import Callable, Sequence
 
-from beanbeaver.application.imports.csv_routing import detect_download_route
-from beanbeaver.application.imports.shared import downloads_display_path
-
 
 def _coerce_exit_code(code: object) -> int:
     if code is None:
@@ -156,6 +153,9 @@ Notes:
         return 1
 
     if args.command == "import":
+        from beanbeaver.application.imports.csv_routing import detect_download_route
+        from beanbeaver.application.imports.shared import downloads_display_path
+
         if args.import_type is None:
             try:
                 route = detect_download_route()

@@ -77,7 +77,11 @@ def load_native_backend() -> ModuleType:
                 if module is not None:
                     return module
 
-    raise ImportError("beanbeaver native extension module '_rust_matcher' is required but was not found")
+    raise ImportError(
+        "beanbeaver native extension module '_rust_matcher' is required but was not found. "
+        "Install it with 'pixi run maturin-develop' or run 'maturin develop' followed by "
+        "'python -m pip install -e \".[dev,test]\"'."
+    )
 
 
 _native_backend = load_native_backend()

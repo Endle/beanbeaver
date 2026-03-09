@@ -27,6 +27,12 @@ pixi install
 pixi run bb --help
 ```
 
+For ledger-backed commands such as `bb import` and `bb match`, install the native extension once:
+
+```bash
+pixi run maturin-develop
+```
+
 Standard Python editable install:
 
 ```bash
