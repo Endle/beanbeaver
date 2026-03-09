@@ -1,4 +1,5 @@
 mod matcher;
+mod spatial;
 
 use pyo3::prelude::*;
 
@@ -54,6 +55,20 @@ struct PyMerchantFamilyInput {
     aliases: Vec<String>,
 }
 
+#[derive(FromPyObject)]
+struct PySpatialLineCandidateInput {
+    #[pyo3(item("line_y"))]
+    line_y: f64,
+    #[pyo3(item("is_used"))]
+    is_used: bool,
+    #[pyo3(item("is_valid_item_line"))]
+    is_valid_item_line: bool,
+    #[pyo3(item("has_trailing_price"))]
+    has_trailing_price: bool,
+    #[pyo3(item("looks_like_quantity_expression"))]
+    looks_like_quantity_expression: bool,
+}
+
 fn to_match_config(config: PyMatchConfig) -> matcher::MatchConfig {
     matcher::MatchConfig::new(
         config.date_tolerance_days,
@@ -92,6 +107,18 @@ fn to_transaction_query_input(
 
 fn to_merchant_family_input(family: PyMerchantFamilyInput) -> matcher::MerchantFamilyInput {
     matcher::MerchantFamilyInput::new(family.canonical, family.aliases)
+}
+
+fn to_spatial_line_candidate(
+    candidate: PySpatialLineCandidateInput,
+) -> spatial::SpatialLineCandidate {
+    spatial::SpatialLineCandidate::new(
+        candidate.line_y,
+        candidate.is_used,
+        candidate.is_valid_item_line,
+        candidate.has_trailing_price,
+        candidate.looks_like_quantity_expression,
+    )
 }
 
 #[pyfunction]
@@ -152,10 +179,30 @@ fn match_transaction_to_receipts(
     .collect()
 }
 
+#[pyfunction]
+fn select_spatial_item_line(
+    price_y: f64,
+    y_tolerance: f64,
+    max_item_distance: f64,
+    prefer_below: bool,
+    price_line_has_onsale: bool,
+    candidates: Vec<PySpatialLineCandidateInput>,
+) -> Option<(usize, f64)> {
+    spatial::select_spatial_item_line(
+        price_y,
+        y_tolerance,
+        max_item_distance,
+        prefer_below,
+        price_line_has_onsale,
+        candidates.into_iter().map(to_spatial_line_candidate).collect(),
+    )
+}
+
 #[pymodule]
 fn _rust_matcher(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(merchant_similarity, module)?)?;
     module.add_function(wrap_pyfunction!(match_receipt_to_transactions, module)?)?;
     module.add_function(wrap_pyfunction!(match_transaction_to_receipts, module)?)?;
+    module.add_function(wrap_pyfunction!(select_spatial_item_line, module)?)?;
     Ok(())
 }
