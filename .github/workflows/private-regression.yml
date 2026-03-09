@@ -48,6 +48,8 @@ jobs:
         run: |
           python -m venv .venv
           echo "VIRTUAL_ENV=$GITHUB_WORKSPACE/.venv" >> "$GITHUB_ENV"
+          PARENT_DIR="$(python -c 'from pathlib import Path; import os; print(Path(os.environ[\"GITHUB_WORKSPACE\"]).parent)')"
+          echo "PYTHONPATH=$PARENT_DIR" >> "$GITHUB_ENV"
           if [ -x "$GITHUB_WORKSPACE/.venv/bin/python" ]; then
             echo "VENV_PYTHON=$GITHUB_WORKSPACE/.venv/bin/python" >> "$GITHUB_ENV"
             echo "VENV_MATURIN=$GITHUB_WORKSPACE/.venv/bin/maturin" >> "$GITHUB_ENV"
@@ -62,7 +64,6 @@ jobs:
           "$VENV_PYTHON" -m pip install --upgrade pip
           "$VENV_PYTHON" -m pip install -e ".[test,dev]"
           "$VENV_MATURIN" develop
-          "$VENV_PYTHON" -m pip install -e ".[test,dev]"
 
       - name: Check out private tests
         uses: actions/checkout@v4
