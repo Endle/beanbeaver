@@ -1,7 +1,11 @@
 """Spatial (bbox-based) receipt item extraction."""
 
+import importlib
+import importlib.util
 import re
 from decimal import Decimal
+from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 from beanbeaver.domain.receipt import ReceiptItem, ReceiptWarning
@@ -26,6 +30,122 @@ from .common import (
     _looks_like_summary_line,
     _strip_leading_receipt_codes,
 )
+
+
+def _load_rust_matcher() -> ModuleType | None:
+    for module_name in ("beanbeaver._rust_matcher", "_rust_matcher"):
+        try:
+            return importlib.import_module(module_name)
+        except ImportError:
+            continue
+
+    project_root = Path(__file__).resolve().parents[2]
+    for directory in (project_root / "target" / "maturin", project_root / "target" / "debug"):
+        if not directory.exists():
+            continue
+        for pattern in ("_rust_matcher*.so", "_rust_matcher*.pyd", "_rust_matcher*.dylib"):
+            for candidate in sorted(directory.glob(pattern)):
+                spec = importlib.util.spec_from_file_location("beanbeaver._rust_matcher", candidate)
+                if spec is None or spec.loader is None:
+                    continue
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                return module
+
+    return None
+
+
+_rust_matcher = _load_rust_matcher()
+
+
+def _select_spatial_item_line_py(
+    price_y: float,
+    candidates: list[dict[str, Any]],
+    *,
+    prefer_below: bool,
+    price_line_has_onsale: bool,
+) -> tuple[int, float] | None:
+    closest: tuple[int, float] | None = None
+
+    def update(index: int, distance: float) -> None:
+        nonlocal closest
+        if closest is None or distance < closest[1]:
+            closest = (index, distance)
+
+    for index, candidate in enumerate(candidates):
+        distance = abs(candidate["line_y"] - price_y)
+        if (
+            candidate["is_used"]
+            or not candidate["is_valid_item_line"]
+            or distance > Y_TOLERANCE
+            or not candidate["has_trailing_price"]
+            or candidate["looks_like_quantity_expression"]
+        ):
+            continue
+        update(index, distance)
+    if closest is not None:
+        return closest
+
+    if prefer_below:
+        for index, candidate in enumerate(candidates):
+            if candidate["is_used"] or not candidate["is_valid_item_line"]:
+                continue
+            if candidate["line_y"] < price_y or candidate["line_y"] - price_y > MAX_ITEM_DISTANCE:
+                continue
+            update(index, abs(candidate["line_y"] - price_y))
+        if closest is not None:
+            return closest
+
+    for index, candidate in enumerate(candidates):
+        if candidate["is_used"] or not candidate["is_valid_item_line"]:
+            continue
+        if candidate["line_y"] > price_y or price_y - candidate["line_y"] > MAX_ITEM_DISTANCE:
+            continue
+        if price_line_has_onsale and candidate["line_y"] < price_y and candidate["has_trailing_price"]:
+            continue
+        update(index, abs(candidate["line_y"] - price_y))
+    if closest is not None:
+        return closest
+
+    for index, candidate in enumerate(candidates):
+        if candidate["is_used"] or not candidate["is_valid_item_line"]:
+            continue
+        if candidate["line_y"] <= price_y or candidate["line_y"] > price_y + Y_TOLERANCE * 2:
+            continue
+        update(index, abs(candidate["line_y"] - price_y))
+
+    return closest
+
+
+def _select_spatial_item_line(
+    price_y: float,
+    candidates: list[dict[str, Any]],
+    *,
+    prefer_below: bool,
+    price_line_has_onsale: bool,
+) -> tuple[int, float] | None:
+    if _rust_matcher is not None:
+        try:
+            result = _rust_matcher.select_spatial_item_line(
+                price_y,
+                Y_TOLERANCE,
+                MAX_ITEM_DISTANCE,
+                prefer_below,
+                price_line_has_onsale,
+                candidates,
+            )
+        except (AttributeError, TypeError):
+            result = None
+        if result is not None:
+            index, distance = result
+            return int(index), float(distance)
+
+    return _select_spatial_item_line_py(
+        price_y,
+        candidates,
+        prefer_below=prefer_below,
+        price_line_has_onsale=price_line_has_onsale,
+    )
 
 
 def _extract_items_with_bbox(
@@ -313,78 +433,30 @@ def _extract_items_with_bbox(
                 return False
             return True
 
-        # Fast path: use the nearest line directly only when it is clearly a
-        # descriptive priced item row (not a qty/offer expression row).
-        if closest_line_to_price:
-            line_y, full_text, left_text, left_x = closest_line_to_price
-            if (
-                line_y not in used_item_y_positions
-                and abs(line_y - price_y) <= Y_TOLERANCE
-                and _line_has_trailing_price(full_text)
-                and not _looks_like_quantity_expression(left_text)
-                and is_valid_item_line(line_y, left_text, full_text)
-            ):
-                closest_line = (line_y, full_text, left_text, left_x)
-                closest_distance = abs(line_y - price_y)
+        line_selection_candidates = [
+            {
+                "line_y": line_y,
+                "is_used": line_y in used_item_y_positions,
+                "is_valid_item_line": is_valid_item_line(line_y, left_text, full_text),
+                "has_trailing_price": _line_has_trailing_price(full_text),
+                "looks_like_quantity_expression": _looks_like_quantity_expression(left_text),
+            }
+            for line_y, full_text, left_text, _ in all_lines
+        ]
 
         if onsale_target_line and onsale_target_line[0] not in used_item_y_positions:
             closest_line = onsale_target_line
             closest_distance = abs(onsale_target_line[0] - price_y)
-
-        if prefer_below and closest_line is None:
-            # Prefer the nearest valid item below when price is on a header line
-            for line_y, full_text, left_text, left_x in all_lines:
-                if line_y < price_y:
-                    continue
-                if line_y - price_y > MAX_ITEM_DISTANCE:
-                    continue
-                if not is_valid_item_line(line_y, left_text, full_text):
-                    continue
-                if line_y in used_item_y_positions:
-                    continue
-                distance = abs(line_y - price_y)
-                if distance < closest_distance:
-                    closest_distance = distance
-                    closest_line = (line_y, full_text, left_text, left_x)
-        # First pass: only items at or above price
-        if closest_line is None:
-            for line_y, full_text, left_text, left_x in all_lines:
-                if line_y > price_y:  # Strictly above (smaller Y = higher on page)
-                    continue
-                if price_y - line_y > MAX_ITEM_DISTANCE:
-                    continue
-                # For ONSALE rows, avoid attaching to previous lines that already
-                # have their own explicit price.
-                if price_line_has_onsale and line_y < price_y and _line_has_trailing_price(full_text):
-                    continue
-                if not is_valid_item_line(line_y, left_text, full_text):
-                    continue
-                # Skip items already used by another price
-                if line_y in used_item_y_positions:
-                    continue
-                distance = abs(line_y - price_y)
-                if distance < closest_distance:
-                    closest_distance = distance
-                    closest_line = (line_y, full_text, left_text, left_x)
-
-        # Second pass: ONLY if nothing found above, allow same-row tolerance below
-        # Use larger tolerance (2x) for items that appear on the same visual row
-        if closest_line is None:
-            for line_y, full_text, left_text, left_x in all_lines:
-                # Allow slightly below (same row due to word height variations)
-                if line_y > price_y + Y_TOLERANCE * 2:
-                    continue
-                if line_y <= price_y:  # Already checked in first pass
-                    continue
-                if not is_valid_item_line(line_y, left_text, full_text):
-                    continue
-                # Skip items already used by another price
-                if line_y in used_item_y_positions:
-                    continue
-                distance = abs(line_y - price_y)
-                if distance < closest_distance:
-                    closest_distance = distance
-                    closest_line = (line_y, full_text, left_text, left_x)
+        else:
+            selected_line = _select_spatial_item_line(
+                price_y,
+                line_selection_candidates,
+                prefer_below=prefer_below,
+                price_line_has_onsale=price_line_has_onsale,
+            )
+            if selected_line is not None:
+                selected_index, closest_distance = selected_line
+                closest_line = all_lines[selected_index]
 
         if closest_line and closest_distance <= Y_TOLERANCE:
             line_y, _, left_text, _ = closest_line

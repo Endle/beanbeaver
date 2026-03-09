@@ -1,5 +1,7 @@
+import os
 from decimal import Decimal
 
+from beanbeaver.receipt.ocr_parser.items_spatial_parser import _rust_matcher, _select_spatial_item_line
 from beanbeaver.receipt.receipt_structuring.parsers.common import _is_spatial_layout_receipt
 from beanbeaver.receipt.receipt_structuring.parsers.items_spatial_parser import _extract_items_with_bbox
 from beanbeaver.runtime.item_category_rules import load_receipt_structuring_rule_layers
@@ -198,3 +200,34 @@ def test_extract_items_with_bbox_keeps_cash_prefix_product_name() -> None:
     assert len(items) == 1
     assert items[0].description == "CASHMERE BATHROOM TISSUE"
     assert items[0].price == Decimal("9.99")
+
+
+def test_select_spatial_item_line_uses_rust_backend_when_required() -> None:
+    if os.environ.get("BEANBEAVER_REQUIRE_RUST_MATCHER") != "1":
+        return
+
+    assert _rust_matcher is not None
+
+    result = _select_spatial_item_line(
+        0.20,
+        [
+            {
+                "line_y": 0.18,
+                "is_used": False,
+                "is_valid_item_line": True,
+                "has_trailing_price": False,
+                "looks_like_quantity_expression": False,
+            },
+            {
+                "line_y": 0.20,
+                "is_used": False,
+                "is_valid_item_line": True,
+                "has_trailing_price": True,
+                "looks_like_quantity_expression": False,
+            },
+        ],
+        prefer_below=False,
+        price_line_has_onsale=False,
+    )
+
+    assert result == (1, 0.0)
