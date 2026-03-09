@@ -51,6 +51,7 @@ jobs:
           echo "VIRTUAL_ENV=$GITHUB_WORKSPACE/.venv" >> "$GITHUB_ENV"
           echo "VENV_PYTHON=$GITHUB_WORKSPACE/.venv/bin/python" >> "$GITHUB_ENV"
           echo "VENV_MATURIN=$GITHUB_WORKSPACE/.venv/bin/maturin" >> "$GITHUB_ENV"
+          echo "PYTHONPATH=$(dirname "$GITHUB_WORKSPACE")" >> "$GITHUB_ENV"
 
       - name: Install native test dependencies
         run: |
