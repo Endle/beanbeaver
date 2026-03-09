@@ -477,10 +477,11 @@ def _extract_items_with_bbox(
             target_direction = None
             if source_modifier is not None:
                 pattern_type = source_modifier.get("pattern_type")
-                if pattern_type == "count_at_price":
-                    target_direction = "below"
-                elif pattern_type in {"weight_at_price", "multi_for_price"}:
+                if pattern_type in {"count_at_price", "weight_at_price", "multi_for_price"}:
                     target_direction = "above"
+
+            nearest_unpriced_above = None
+            nearest_unpriced_below = None
             for index, candidate in enumerate(line_selection_candidates):
                 if (
                     candidate["is_used"]
@@ -489,14 +490,26 @@ def _extract_items_with_bbox(
                 ):
                     continue
                 distance = abs(candidate["line_y"] - selection_anchor_y)
-                if distance > Y_TOLERANCE + _SPATIAL_FLOAT_EPSILON:
+                if distance > MAX_ITEM_DISTANCE + _SPATIAL_FLOAT_EPSILON:
                     continue
-                if target_direction == "above" and candidate["line_y"] >= selection_anchor_y:
-                    continue
-                if target_direction == "below" and candidate["line_y"] <= selection_anchor_y:
-                    continue
-                if quantity_same_row_target is None or distance < quantity_same_row_target[1]:
-                    quantity_same_row_target = (index, distance)
+                if candidate["line_y"] < selection_anchor_y:
+                    if nearest_unpriced_above is None or distance < nearest_unpriced_above[1]:
+                        nearest_unpriced_above = (index, distance)
+                elif candidate["line_y"] > selection_anchor_y:
+                    if nearest_unpriced_below is None or distance < nearest_unpriced_below[1]:
+                        nearest_unpriced_below = (index, distance)
+
+            if nearest_unpriced_above and nearest_unpriced_below:
+                if target_direction == "above":
+                    quantity_same_row_target = nearest_unpriced_above
+                elif target_direction == "below":
+                    quantity_same_row_target = nearest_unpriced_below
+                elif nearest_unpriced_above[1] <= nearest_unpriced_below[1]:
+                    quantity_same_row_target = nearest_unpriced_above
+                else:
+                    quantity_same_row_target = nearest_unpriced_below
+            else:
+                quantity_same_row_target = nearest_unpriced_above or nearest_unpriced_below
 
         if not prefer_below and source_line_is_quantity_expression:
             nearest_same_row_above = None
