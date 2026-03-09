@@ -56,6 +56,7 @@ def _load_rust_matcher() -> ModuleType | None:
 
 
 _rust_matcher = _load_rust_matcher()
+_RUST_SCALE_FACTOR = Decimal("10000")
 
 
 def _select_spatial_item_line_py(
@@ -148,6 +149,39 @@ def _select_spatial_item_line(
     )
 
 
+def _extract_items_with_bbox_rust(
+    pages: list[dict[str, Any]],
+    warning_sink: list[ReceiptWarning] | None = None,
+    *,
+    item_category_rule_layers: ItemCategoryRuleLayers,
+) -> list[ReceiptItem] | None:
+    if _rust_matcher is None:
+        return None
+
+    try:
+        raw_items, raw_warnings = _rust_matcher.extract_spatial_items(pages)
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+    items = [
+        ReceiptItem(
+            description=description,
+            price=(Decimal(int(price_scaled)) / _RUST_SCALE_FACTOR),
+            category=categorize_item(description, rule_layers=item_category_rule_layers),
+        )
+        for description, price_scaled in raw_items
+    ]
+    if warning_sink is not None:
+        for message, after_item_index in raw_warnings:
+            warning_sink.append(
+                ReceiptWarning(
+                    message=str(message),
+                    after_item_index=None if after_item_index is None else int(after_item_index),
+                )
+            )
+    return items
+
+
 def _extract_items_with_bbox(
     pages: list[dict[str, Any]],
     warning_sink: list[ReceiptWarning] | None = None,
@@ -166,6 +200,14 @@ def _extract_items_with_bbox(
     3. If no item on same row, look at lines above the price
     4. Filter out section headers and summary lines
     """
+    rust_items = _extract_items_with_bbox_rust(
+        pages,
+        warning_sink=warning_sink,
+        item_category_rule_layers=item_category_rule_layers,
+    )
+    if rust_items is not None:
+        return rust_items
+
     items: list[ReceiptItem] = []
 
     if not pages:
