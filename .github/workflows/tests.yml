@@ -46,7 +46,8 @@ jobs:
           "$VENV_PYTHON" -m pip install -e ".[test,dev]"
 
       - name: Run tests (excluding e2e)
-        run: "$VENV_PYTHON" -m pytest tests --ignore=tests/test_e2e_receipts.py
+        run: |
+          "$VENV_PYTHON" -m pytest tests --ignore=tests/test_e2e_receipts.py
 
   native-matcher:
     runs-on: ubuntu-latest

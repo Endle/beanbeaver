@@ -58,7 +58,8 @@ jobs:
           exit 1
 
       - name: Run e2e tests in live mode
-        run: "$VENV_PYTHON" -m pytest tests/test_e2e_receipts.py --beanbeaver-e2e-mode live -v
+        run: |
+          "$VENV_PYTHON" -m pytest tests/test_e2e_receipts.py --beanbeaver-e2e-mode live -v
 
       - name: Dump OCR logs on failure
         if: failure()
