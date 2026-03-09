@@ -11,6 +11,8 @@ import importlib
 import importlib.machinery
 import importlib.util
 import re
+import site
+import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -88,22 +90,35 @@ def _load_rust_matcher() -> ModuleType | None:
             continue
 
     project_root = Path(__file__).resolve().parents[1]
-    candidate_patterns = (
+    suffixes = list(importlib.machinery.EXTENSION_SUFFIXES)
+    if ".dylib" not in suffixes:
+        suffixes.append(".dylib")
+    if ".dll" not in suffixes:
+        suffixes.append(".dll")
+    patterns = [f"{stem}*{suffix}" for stem in ("_rust_matcher", "lib_rust_matcher") for suffix in suffixes]
+
+    directories = [
         project_root / "target" / "maturin",
         project_root / "target" / "debug",
-    )
-    for directory in candidate_patterns:
-        if not directory.exists():
+        project_root / "target" / "release",
+        project_root / "target",
+        *(Path(base) for base in site.getsitepackages()),
+        *(Path(base) for base in sys.path if base),
+    ]
+    site_roots = {Path(base) for base in site.getsitepackages()}
+    seen: set[Path] = set()
+    for directory in directories:
+        try:
+            resolved = directory.resolve()
+        except OSError:
+            resolved = directory
+        if resolved in seen or not directory.exists():
             continue
-        for pattern in (
-            "_rust_matcher*.so",
-            "lib_rust_matcher*.so",
-            "_rust_matcher*.pyd",
-            "lib_rust_matcher*.pyd",
-            "_rust_matcher*.dylib",
-            "lib_rust_matcher*.dylib",
-        ):
-            for candidate in sorted(directory.glob(pattern)):
+        seen.add(resolved)
+
+        matcher = directory.rglob if directory == project_root / "target" or directory in site_roots else directory.glob
+        for pattern in patterns:
+            for candidate in sorted(matcher(pattern)):
                 loader = importlib.machinery.ExtensionFileLoader("beanbeaver._rust_matcher", str(candidate))
                 spec = importlib.util.spec_from_file_location("beanbeaver._rust_matcher", candidate, loader=loader)
                 if spec is None:
