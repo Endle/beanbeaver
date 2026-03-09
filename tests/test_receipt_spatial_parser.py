@@ -244,6 +244,52 @@ def test_extract_items_with_bbox_keeps_following_priced_row_from_stealing_multib
     )
 
 
+def test_extract_items_with_bbox_accepts_following_item_for_tnt_department_price_rows() -> None:
+    lines = [
+        {
+            "text": "PRODUCE W $2.68",
+            "words": [
+                _word("PRODUCE", 0.02, 0.150, 0.12, 0.170),
+                _word("W $2.68", 0.84, 0.164, 0.93, 0.180),
+            ],
+        },
+        {
+            "text": "(SALE) WHITE POMELO",
+            "words": [_word("(SALE) WHITE POMELO", 0.05, 0.176, 0.30, 0.188)],
+        },
+        {
+            "text": "DELI W $4.99",
+            "words": [
+                _word("DELI", 0.02, 0.530, 0.06, 0.544),
+                _word("W $4.99", 0.87, 0.545, 0.95, 0.563),
+            ],
+        },
+        {
+            "text": "NEILSON JOYYA CHOCOLATE E MILK",
+            "words": [
+                _word("NEILSON JOYYA CHOCOLATE", 0.08, 0.552, 0.36, 0.566),
+                _word("E MILK", 0.40, 0.552, 0.53, 0.566),
+            ],
+        },
+        {
+            "text": "TOTAL 7.67",
+            "words": [
+                _word("TOTAL", 0.09, 0.700, 0.180, 0.712),
+                _word("7.67", 0.88, 0.700, 0.93, 0.712),
+            ],
+        },
+    ]
+
+    items = _extract_items_with_bbox(
+        pages=[{"lines": lines}],
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
+    )
+
+    pairs = [(item.description, item.price) for item in items]
+    assert ("WHITE POMELO", Decimal("2.68")) in pairs
+    assert ("NEILSON JOYYA CHOCOLATE E MILK", Decimal("4.99")) in pairs
+
+
 def test_extract_items_with_bbox_keeps_cash_prefix_product_name() -> None:
     lines = [
         {

@@ -266,12 +266,14 @@ def _extract_items_with_bbox(
             source_line_y, source_full_text, source_left_text = source_line_ctx
         if closest_line_to_price:
             line_y, full_text, left_text, _ = closest_line_to_price
-            full_upper = source_full_text.upper() if source_full_text else full_text.upper()
+            context_full_text = source_full_text if source_full_text else full_text
+            context_left_text = source_left_text if source_left_text else left_text
+            full_upper = context_full_text.upper()
             price_line_has_onsale = _looks_like_onsale_marker(full_upper)
-            left_is_header = _is_section_header_text(left_text) and not _is_priced_generic_item_label(
-                left_text, full_text
+            left_is_header = _is_section_header_text(context_left_text) and not _is_priced_generic_item_label(
+                context_left_text, context_full_text
             )
-            if left_is_header or _is_section_header_text(full_text) or not left_text:
+            if left_is_header or _is_section_header_text(context_full_text) or not context_left_text:
                 prefer_below = True
             # ONSALE marker rows usually carry sale price for adjacent item text.
             if price_line_has_onsale:
@@ -533,7 +535,7 @@ def _extract_items_with_bbox(
 
         direct_match_tolerance = (
             MAX_ITEM_DISTANCE + _SPATIAL_FLOAT_EPSILON
-            if source_line_is_quantity_expression
+            if source_line_is_quantity_expression or prefer_below
             else Y_TOLERANCE + _SPATIAL_FLOAT_EPSILON
         )
         if closest_line and closest_distance <= direct_match_tolerance:
