@@ -1,4 +1,4 @@
-"""Optional native backend loader for ledger access."""
+"""Native backend loader for ledger access."""
 
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ def _load_extension_module(candidate: Path) -> ModuleType | None:
     return module
 
 
-def load_native_backend() -> ModuleType | None:
-    """Load the PyO3 extension if it is available locally."""
+def load_native_backend() -> ModuleType:
+    """Load the PyO3 extension, raising if it cannot be found."""
     for module_name in ("beanbeaver._rust_matcher", "_rust_matcher"):
         try:
             return importlib.import_module(module_name)
@@ -44,7 +44,7 @@ def load_native_backend() -> ModuleType | None:
                 if module is not None:
                     return module
 
-    return None
+    raise ImportError("beanbeaver native extension module '_rust_matcher' is required but was not found")
 
 
 _native_backend = load_native_backend()
