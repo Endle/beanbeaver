@@ -69,11 +69,14 @@ def parse_receipt(
     items: list[ReceiptItem] = []
     warnings: list[ReceiptWarning] = []
     if _has_useful_bbox_data(pages) and _is_spatial_layout_receipt(pages, full_text):
-        items = _extract_items_with_bbox(
-            pages,
-            warning_sink=warnings,
-            item_category_rule_layers=item_category_rule_layers,
-        )
+        try:
+            items = _extract_items_with_bbox(
+                pages,
+                warning_sink=warnings,
+                item_category_rule_layers=item_category_rule_layers,
+            )
+        except ImportError:
+            items = []
 
     # Fall back to text-based parsing if bbox parsing didn't find items
     if not items:

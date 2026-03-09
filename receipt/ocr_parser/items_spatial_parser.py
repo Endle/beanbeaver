@@ -43,10 +43,13 @@ def _load_rust_matcher() -> ModuleType | None:
 
 
 _rust_matcher = _load_rust_matcher()
-if _rust_matcher is None:
-    raise ImportError("beanbeaver._rust_matcher is required for spatial receipt parsing")
-
 _RUST_SCALE_FACTOR = Decimal("10000")
+
+
+def _require_rust_matcher() -> ModuleType:
+    if _rust_matcher is None:
+        raise ImportError("beanbeaver._rust_matcher is required for spatial receipt parsing")
+    return _rust_matcher
 
 
 def _select_spatial_item_line(
@@ -56,7 +59,7 @@ def _select_spatial_item_line(
     prefer_below: bool,
     price_line_has_onsale: bool,
 ) -> tuple[int, float] | None:
-    result = _rust_matcher.select_spatial_item_line(
+    result = _require_rust_matcher().select_spatial_item_line(
         price_y,
         0.02,
         0.08,
@@ -76,7 +79,7 @@ def _extract_items_with_bbox(
     *,
     item_category_rule_layers: ItemCategoryRuleLayers,
 ) -> list[ReceiptItem]:
-    raw_items, raw_warnings = _rust_matcher.extract_spatial_items(pages)
+    raw_items, raw_warnings = _require_rust_matcher().extract_spatial_items(pages)
 
     items = [
         ReceiptItem(

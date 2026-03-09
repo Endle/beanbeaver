@@ -1,9 +1,12 @@
 from decimal import Decimal
 
+import pytest
 from beanbeaver.receipt.ocr_parser.items_spatial_parser import _rust_matcher, _select_spatial_item_line
 from beanbeaver.receipt.receipt_structuring.parsers.common import _is_spatial_layout_receipt
 from beanbeaver.receipt.receipt_structuring.parsers.items_spatial_parser import _extract_items_with_bbox
 from beanbeaver.runtime.item_category_rules import load_receipt_structuring_rule_layers
+
+pytestmark = pytest.mark.skipif(_rust_matcher is None, reason="beanbeaver._rust_matcher is not built")
 
 
 def _word(text: str, x_left: float, y_top: float, x_right: float, y_bottom: float) -> dict:
