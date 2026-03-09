@@ -35,6 +35,7 @@ jobs:
           fi
 
       - name: Install test dependencies
+        shell: bash
         run: |
           "$VENV_PYTHON" -m pip install --upgrade pip
           "$VENV_PYTHON" -m pip install -e ".[test,dev]"
@@ -42,5 +43,6 @@ jobs:
           "$VENV_PYTHON" -m pip install -e ".[test,dev]"
 
       - name: Run e2e tests in cached mode
+        shell: bash
         run: |
           "$VENV_PYTHON" -m pytest tests/test_e2e_receipts.py --beanbeaver-e2e-mode cached

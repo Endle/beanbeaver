@@ -35,6 +35,7 @@ jobs:
           fi
 
       - name: Install test dependencies
+        shell: bash
         run: |
           "$VENV_PYTHON" -m pip install --upgrade pip
           "$VENV_PYTHON" -m pip install -e ".[test,dev]"
@@ -42,6 +43,7 @@ jobs:
           "$VENV_PYTHON" -m pip install -e ".[test,dev]"
 
       - name: Run tests with coverage (excluding e2e)
+        shell: bash
         run: |
           "$VENV_PYTHON" -m pytest tests \
             --ignore=tests/test_e2e_receipts.py \
@@ -51,6 +53,7 @@ jobs:
             --cov-report=term-missing:skip-covered
 
       - name: Add coverage summary
+        shell: bash
         run: |
           "$VENV_PYTHON" - <<'PY'
           import xml.etree.ElementTree as ET

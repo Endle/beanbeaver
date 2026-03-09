@@ -34,6 +34,7 @@ jobs:
           fi
 
       - name: Install test dependencies
+        shell: bash
         run: |
           "$VENV_PYTHON" -m pip install --upgrade pip
           "$VENV_PYTHON" -m pip install -e ".[test,dev]"
@@ -58,6 +59,7 @@ jobs:
           exit 1
 
       - name: Run e2e tests in live mode
+        shell: bash
         run: |
           "$VENV_PYTHON" -m pytest tests/test_e2e_receipts.py --beanbeaver-e2e-mode live -v
 

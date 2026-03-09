@@ -39,6 +39,7 @@ jobs:
           fi
 
       - name: Install test dependencies
+        shell: bash
         run: |
           "$VENV_PYTHON" -m pip install --upgrade pip
           "$VENV_PYTHON" -m pip install -e ".[test,dev]"
@@ -46,6 +47,7 @@ jobs:
           "$VENV_PYTHON" -m pip install -e ".[test,dev]"
 
       - name: Run tests (excluding e2e)
+        shell: bash
         run: |
           "$VENV_PYTHON" -m pytest tests --ignore=tests/test_e2e_receipts.py
 
