@@ -31,13 +31,17 @@ Standard Python editable install:
 
 ```bash
 python -m pip install --upgrade pip
-python -m pip install -e ".[test]"
+python -m pip install -e ".[dev,test]"
+maturin develop
+python -m pip install -e ".[dev,test]"
 bb --help
 ```
 
 For contributors who want the Rust/PyO3 toolchain ready as well:
 
 ```bash
+python -m pip install -e ".[dev,test]"
+maturin develop
 python -m pip install -e ".[dev,test]"
 ```
 
