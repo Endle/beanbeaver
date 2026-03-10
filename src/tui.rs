@@ -2473,9 +2473,16 @@ fn resume_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> AppResu
     Ok(())
 }
 
-fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> AppResult<()> {
+fn run_app(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    app: &mut App,
+    quit_after_launch: bool,
+) -> AppResult<()> {
     loop {
         terminal.draw(|frame| render_app(frame, app))?;
+        if quit_after_launch {
+            return Ok(());
+        }
         if app.should_quit {
             return Ok(());
         }
@@ -2811,13 +2818,13 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
     }
 }
 
-pub fn run() -> AppResult<()> {
+pub fn run(quit_after_launch: bool) -> AppResult<()> {
     let mut terminal = setup_terminal()?;
     let result = (|| -> AppResult<()> {
         let mut app = App::new();
         app.refresh()?;
         app.refresh_runtime_pages(true)?;
-        let run_result = run_app(&mut terminal, &mut app);
+        let run_result = run_app(&mut terminal, &mut app, quit_after_launch);
         let shutdown_result = app.shutdown();
         run_result.and(shutdown_result)
     })();
