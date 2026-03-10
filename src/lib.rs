@@ -3,10 +3,12 @@ mod python_ledger_access;
 mod python_receipt_categories;
 mod python_receipt_fields;
 mod python_receipt_spatial;
+mod python_receipt_text;
 mod python_spatial;
 mod receipt_categories;
 mod receipt_fields;
 mod receipt_spatial;
+mod receipt_text;
 mod spatial;
 
 use pyo3::prelude::*;
@@ -171,5 +173,6 @@ fn _rust_matcher(module: &Bound<'_, PyModule>) -> PyResult<()> {
     python_receipt_fields::register(module)?;
     python_spatial::register(module)?;
     python_receipt_spatial::register(module)?;
+    python_receipt_text::register(module)?;
     Ok(())
 }
