@@ -23,6 +23,7 @@ version = "0.1.0"
 dependencies = [
  "crossterm",
  "pyo3",
+ "pyo3-build-config",
  "ratatui",
  "regex",
  "serde",
