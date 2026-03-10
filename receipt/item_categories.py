@@ -16,6 +16,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from ._rust import require_rust_matcher
+
 # Fuzzy matching thresholds (0.0 to 1.0)
 # Higher = stricter matching, lower = more tolerant of OCR errors
 # Short keywords use char frequency (allows 1 char error in 4-char word)
@@ -437,13 +439,7 @@ def classify_item_key(
     default: str | None = None,
 ) -> str | None:
     """Classify an item to a semantic category key."""
-    matches = _find_all_matches(description, rule_layers.rules, rule_layers.exact_only_keywords)
-    category_matches = [match for match in matches if match.category]
-
-    if not category_matches:
-        return default
-
-    return max(category_matches, key=_match_sort_key).category
+    return require_rust_matcher().receipt_classify_item_key(description, rule_layers, default)
 
 
 def classify_item_tags(
@@ -451,16 +447,7 @@ def classify_item_tags(
     rule_layers: ItemCategoryRuleLayers,
 ) -> list[str]:
     """Return additive semantic tags for one item description."""
-    matches = _find_all_matches(description, rule_layers.rules, rule_layers.exact_only_keywords)
-    tags: list[str] = []
-    seen: set[str] = set()
-    for match in matches:
-        for tag in match.tags:
-            if tag in seen:
-                continue
-            seen.add(tag)
-            tags.append(tag)
-    return tags
+    return list(require_rust_matcher().receipt_classify_item_tags(description, rule_layers))
 
 
 def classify_item_semantic(
@@ -545,14 +532,12 @@ def categorize_item_debug(
     Returns:
         List of (category, matched_keyword, score) tuples, sorted by score descending
     """
-    matches = _find_all_matches(description, rule_layers.rules, rule_layers.exact_only_keywords)
-    matches.sort(key=_match_sort_key, reverse=True)
+    matches = require_rust_matcher().receipt_find_item_matches(description, rule_layers)
     return [
         (
-            _resolve_account_target(match.category, rule_layers.account_mapping, default=match.category)
-            or (match.category or ""),
-            match.matched_keyword,
-            float(match.priority * 10000 + (1000 if match.is_exact else 0) + match.keyword_length),
+            _resolve_account_target(category, rule_layers.account_mapping, default=category) or (category or ""),
+            matched_keyword,
+            float(priority * 10000 + (1000 if is_exact else 0) + keyword_length),
         )
-        for match in matches
+        for category, matched_keyword, priority, keyword_length, is_exact, _rule_index in matches
     ]

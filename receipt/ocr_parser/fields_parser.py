@@ -2,9 +2,10 @@
 
 import re
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any
 
+from .._rust import require_rust_matcher
 from .common import MIN_LINE_CONFIDENCE, _normalize_decimal_spacing
 
 
@@ -168,221 +169,44 @@ def _numeric_date_candidates(part1: str, part2: str, part3: str) -> list[tuple[d
     return candidates
 
 
-# TODO remove it
 def _extract_date(lines: list[str], full_text: str, *, reference_date: date | None = None) -> date | None:
     """Extract date from receipt (returns None if unknown)."""
-    if not full_text and not lines:
+    result = require_rust_matcher().receipt_extract_date(
+        lines,
+        full_text,
+        (reference_date or date.today()).year,
+    )
+    if result is None:
         return None
-    source_lines = lines or [line.strip() for line in full_text.split("\n") if line.strip()]
-    month_map = {
-        "jan": 1,
-        "feb": 2,
-        "mar": 3,
-        "apr": 4,
-        "may": 5,
-        "jun": 6,
-        "jul": 7,
-        "aug": 8,
-        "sep": 9,
-        "oct": 10,
-        "nov": 11,
-        "dec": 12,
-    }
-    current_year = (reference_date or date.today()).year
-    current_yy = current_year % 100
-
-    ranked_candidates: list[tuple[int, int, int, date]] = []
-    for line_idx, line in enumerate(source_lines):
-        normalized_line = _normalize_decimal_spacing(line)
-        hint_bonus = 40 if _DATE_CONTEXT_HINT.search(normalized_line) else 0
-        prefer_year_first = hint_bonus > 0
-
-        for match in _SEPARATED_DATE_PATTERN.finditer(normalized_line):
-            part1, part2, part3 = match.groups()
-            for candidate_date, kind in _numeric_date_candidates(part1, part2, part3):
-                if kind == "ymd2":
-                    # Treat ambiguous short dates as YY/MM/DD only in date-labeled context.
-                    year_token = int(part1)
-                    if not (prefer_year_first and 20 <= year_token <= current_yy + 1):
-                        continue
-                base = {
-                    "ymd4": 35,
-                    "ymd2": 28,
-                    "mdy4": 25,
-                    "dmy4": 24,
-                    "mdy2": 22,
-                    "dmy2": 20,
-                }.get(kind, 0)
-                # Keep a weak North America bias for ambiguous short dates.
-                if kind == "mdy2":
-                    base += 2
-                if kind == "ymd2" and prefer_year_first:
-                    base += 3
-                year_score = max(0, 10 - abs(candidate_date.year - current_year))
-                ranked_candidates.append((base + hint_bonus + year_score, line_idx, match.start(), candidate_date))
-
-        for match in _COMPACT_DATE_PATTERN.finditer(normalized_line):
-            compact_date = _safe_date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
-            if compact_date is not None:
-                year_score = max(0, 10 - abs(compact_date.year - current_year))
-                ranked_candidates.append((30 + hint_bonus + year_score, line_idx, match.start(), compact_date))
-
-        for match in _MONTH_NAME_DATE_PATTERN.finditer(normalized_line):
-            month = month_map.get(match.group(1)[:3].lower())
-            if month is None:
-                continue
-            month_name_date = _safe_date(int(match.group(3)), month, int(match.group(2)))
-            if month_name_date is not None:
-                year_score = max(0, 10 - abs(month_name_date.year - current_year))
-                ranked_candidates.append((26 + hint_bonus + year_score, line_idx, match.start(), month_name_date))
-
-    if not ranked_candidates:
-        return None
-
-    ranked_candidates.sort(key=lambda x: (-x[0], x[1], x[2]))
-    return ranked_candidates[0][3]
+    year, month, day = result
+    return date(int(year), int(month), int(day))
 
 
 def _extract_total(lines: list[str]) -> Decimal:
     """Extract total amount."""
-    excluded_phrases = (
-        "TOTAL DISCOUNT",
-        "TOTAL DISCOUNT(S)",
-        "TOTAL SAVINGS",
-        "TOTAL SAVED",
-        "TOTAL NUMBER",
-        "TOTAL NUMBER OF ITEMS",
-        "TOTAL ITEMS",
-    )
-    for i, line in enumerate(reversed(lines)):
-        idx = len(lines) - 1 - i  # Original index
-        line_upper = line.upper()
-        # Skip lines like "TOTAL NUMBER OF ITEMS" - these are item counts, not the total amount
-        if "TOTAL NUMBER" in line_upper:
-            continue
-        if any(phrase in line_upper for phrase in excluded_phrases):
-            continue
-        if "TOTAL" in line_upper and "SUBTOTAL" not in line_upper:
-            prev_upper = lines[idx - 1].upper() if idx > 0 else ""
-            next_upper = lines[idx + 1].upper() if idx + 1 < len(lines) else ""
-            # Skip footer discount totals like:
-            #   TOTAL NUMBER OF ITEMS SOLD
-            #   TOTAL $ 5.00
-            #   DISCOUNT(S)
-            if "DISCOUNT" in next_upper:
-                continue
-            if "TOTAL NUMBER OF ITEMS SOLD" in prev_upper:
-                continue
-            # Try to find price on same line
-            amount = _extract_price_from_line(line)
-            if amount:
-                return amount
-            # Try next line first (most common: price is below TOTAL label)
-            if idx + 1 < len(lines):
-                amount = _extract_price_from_line(lines[idx + 1])
-                if amount:
-                    return amount
-            # Try previous line as fallback (some receipts have price above TOTAL label)
-            if idx > 0:
-                prev_line = lines[idx - 1]
-                prev_upper = prev_line.upper()
-                # Don't grab tax/subtotal values as total
-                if "TAX" not in prev_upper and "HST" not in prev_upper and "GST" not in prev_upper:
-                    amount = _extract_price_from_line(prev_line)
-                    if amount:
-                        return amount
-    return Decimal("0.00")
+    cents = int(require_rust_matcher().receipt_extract_total(lines))
+    return Decimal(cents) / Decimal("100")
 
 
 def _extract_tax(lines: list[str]) -> Decimal | None:
     """Extract tax amount (HST, GST, PST, TAX)."""
-    if not lines:
+    cents = require_rust_matcher().receipt_extract_tax(lines)
+    if cents is None:
         return None
-    # Scan bottom-up to prefer summary/footer tax lines while avoiding over-narrow anchors.
-    for i in range(len(lines) - 1, -1, -1):
-        line = lines[i]
-        line_upper = line.upper()
-        # Skip lines that are about subtotal or total (with or without space)
-        if "SUBTOTAL" in line_upper or "SUB TOTAL" in line_upper:
-            continue
-        # Skip category headers like "TAXED GROCERY" and summary lines like "TOTAL AFTER TAX"
-        if "TAXED" in line_upper or "TAXABLE" in line_upper:
-            continue
-        if "TOTAL" in line_upper and "AFTER TAX" in line_upper:
-            continue
-        # Skip TOTAL lines, but NOT lines like "(TOTAL GST+PST)" which indicate tax
-        # Check if this is a tax-related total (contains both TOTAL and a tax keyword)
-        has_total = "TOTAL" in line_upper
-        has_tax_keyword = re.search(r"\b(HST|GST|PST|TAX)\b", line_upper) is not None
-        if has_total and not has_tax_keyword:
-            continue
-        if has_tax_keyword:
-            amount = _extract_price_from_line(line)
-            # Use 'is not None' since Decimal("0.00") is falsy but valid
-            if amount is not None:
-                return amount
-            # Try next line first (most common: price is below TAX label)
-            if i + 1 < len(lines):
-                next_line = lines[i + 1]
-                next_line_upper = next_line.upper()
-                # Don't grab the TOTAL value as tax - check both the line itself
-                # and the line after it (for format: "253.00" / "TOTAL")
-                is_total_value = "TOTAL" in next_line_upper
-                if not is_total_value and i + 2 < len(lines):
-                    line_i2_upper = lines[i + 2].upper()
-                    # Check if line i+2 contains TOTAL (meaning next line might be total value)
-                    if "TOTAL" in line_i2_upper and "SUBTOTAL" not in line_i2_upper:
-                        # But if TOTAL is followed by another price, then next line is tax, not total
-                        # Format: [TAX] [tax_value] [TOTAL] [total_value]
-                        if i + 3 < len(lines) and _extract_price_from_line(lines[i + 3]) is not None:
-                            is_total_value = False  # Next line is actually tax
-                        else:
-                            is_total_value = True  # Next line is total (format: [TAX] [total] [TOTAL])
-                # Only accept next line if it looks like a standalone price
-                if not is_total_value and re.match(r"^\$?\s*\d+\.\d{2}\s*$", next_line):
-                    amount = _extract_price_from_line(next_line)
-                    if amount is not None:
-                        return amount
-            # Try previous line as fallback (some receipts have price above TAX label)
-            if i > 0 and re.match(r"^\$?\s*\d+\.\d{2}\s*$", lines[i - 1]):
-                prev_line_upper = lines[i - 1].upper()
-                # Don't grab the SUBTOTAL value as tax
-                if "SUBTOTAL" not in prev_line_upper and "TOTAL" not in prev_line_upper:
-                    amount = _extract_price_from_line(lines[i - 1])
-                    if amount is not None:
-                        return amount
-    return None
+    return Decimal(int(cents)) / Decimal("100")
 
 
 def _extract_subtotal(lines: list[str]) -> Decimal | None:
     """Extract subtotal amount."""
-    for i, line in enumerate(lines):
-        line_upper = line.upper()
-        if "SUBTOTAL" in line_upper or "SUB TOTAL" in line_upper:
-            amount = _extract_price_from_line(line)
-            if amount is not None:
-                return amount
-            # Try next line
-            if i + 1 < len(lines):
-                amount = _extract_price_from_line(lines[i + 1])
-                if amount is not None:
-                    return amount
-    return None
+    cents = require_rust_matcher().receipt_extract_subtotal(lines)
+    if cents is None:
+        return None
+    return Decimal(int(cents)) / Decimal("100")
 
 
 def _extract_price_from_line(line: str) -> Decimal | None:
     """Extract a price from a line of text."""
-    line = _normalize_decimal_spacing(line)
-    # Look for price patterns: $XX.XX, XX.XX, etc.
-    patterns = [
-        r"\$?\s*(\d+\.\d{2})\s*$",  # Price at end of line
-        r"\$?\s*(\d+\.\d{2})",  # Price anywhere
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, line)
-        if match:
-            try:
-                return Decimal(match.group(1))
-            except InvalidOperation:
-                continue
-    return None
+    cents = require_rust_matcher().receipt_extract_price_from_line(line)
+    if cents is None:
+        return None
+    return Decimal(int(cents)) / Decimal("100")
