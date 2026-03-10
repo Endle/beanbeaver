@@ -8,30 +8,26 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
-from beanbeaver.ledger_access.reader import get_ledger_reader
-from beanbeaver.ledger_access.writer import ReceiptMatchSnapshot, get_ledger_writer
+from beanbeaver.ledger_access._native import _native_backend
+from beanbeaver.ledger_access._paths import default_main_beancount_path
+
+DEFAULT_MAIN_BEANCOUNT_PATH = default_main_beancount_path()
 
 
 @dataclass(frozen=True)
 class LedgerAmount:
-    """Simple amount DTO detached from Beancount value types."""
-
     number: Decimal
     currency: str
 
 
 @dataclass(frozen=True)
 class LedgerPosting:
-    """Simple posting DTO detached from Beancount posting types."""
-
     account: str
     units: LedgerAmount | None
 
 
 @dataclass(frozen=True)
 class LedgerTransaction:
-    """Simple transaction DTO detached from Beancount transaction types."""
-
     date: dt.date
     payee: str | None
     narration: str | None
@@ -42,24 +38,31 @@ class LedgerTransaction:
 
 @dataclass(frozen=True)
 class LedgerTransactionList:
-    """Transactions loaded from ledger plus loader diagnostics."""
-
     path: Path
     transactions: list[LedgerTransaction]
     errors: list[str]
     options: dict[str, object]
 
 
+@dataclass(frozen=True)
+class ReceiptMatchSnapshot:
+    statement_path: Path
+    statement_original: str
+    enriched_path: Path
+    enriched_existed: bool
+    enriched_original: str | None
+
+
 ReceiptMatchFileSnapshot = ReceiptMatchSnapshot
 
 
-def list_transactions(
-    *,
-    ledger_path: Path | str | None = None,
-) -> LedgerTransactionList:
-    """Return all ledger transactions using DTOs, without Beancount objects."""
-    reader = get_ledger_reader()
-    path, transactions_payload, errors, options = reader.list_transactions_payload(ledger_path=ledger_path)
+def _resolve_path(ledger_path: Path | str | None) -> Path:
+    return DEFAULT_MAIN_BEANCOUNT_PATH if ledger_path is None else Path(ledger_path)
+
+
+def list_transactions(*, ledger_path: Path | str | None = None) -> LedgerTransactionList:
+    path = _resolve_path(ledger_path)
+    raw_path, transactions_payload, errors, options = _native_backend.ledger_access_list_transactions(str(path))
     transactions = [
         LedgerTransaction(
             date=dt.date.fromordinal(int(txn["date_ordinal"])),
@@ -69,10 +72,7 @@ def list_transactions(
                 LedgerPosting(
                     account=str(posting["account"]),
                     units=(
-                        LedgerAmount(
-                            number=Decimal(str(posting["number_str"])),
-                            currency=str(posting["currency"]),
-                        )
+                        LedgerAmount(number=Decimal(str(posting["number_str"])), currency=str(posting["currency"]))
                         if posting["number_str"] is not None and posting["currency"] is not None
                         else None
                     ),
@@ -84,79 +84,56 @@ def list_transactions(
         )
         for txn in transactions_payload
     ]
-    return LedgerTransactionList(
-        path=path,
-        transactions=transactions,
-        errors=list(errors),
-        options={str(k): v for k, v in options.items()},
+    return LedgerTransactionList(Path(raw_path), transactions, list(errors), {str(k): v for k, v in dict(options).items()})
+
+
+def open_accounts(patterns: list[str], *, as_of: dt.date | None = None, ledger_path: Path | str | None = None) -> list[str]:
+    if not patterns:
+        return []
+    as_of = as_of or dt.date.today()
+    path = _resolve_path(ledger_path)
+    return list(_native_backend.ledger_access_open_accounts(str(path), patterns, as_of.toordinal()))
+
+
+def transaction_dates_for_account(account: str, *, ledger_path: Path | str | None = None) -> set[dt.date]:
+    path = _resolve_path(ledger_path)
+    ordinals = _native_backend.ledger_access_transaction_dates_for_account(str(path), account)
+    return {dt.date.fromordinal(ordinal) for ordinal in ordinals}
+
+
+def validate_ledger(*, ledger_path: Path | str | None = None) -> list[str]:
+    path = _resolve_path(ledger_path)
+    return list(_native_backend.ledger_access_validate_ledger(str(path)))
+
+
+def apply_receipt_match(*, ledger_path: Path | str | None, statement_path: Path, line_number: int, include_rel_path: str, receipt_name: str, enriched_path: Path, enriched_content: str) -> str:
+    path = _resolve_path(ledger_path)
+    return str(
+        _native_backend.ledger_access_apply_receipt_match(
+            str(path),
+            str(statement_path),
+            line_number,
+            include_rel_path,
+            receipt_name,
+            str(enriched_path),
+            enriched_content,
+        )
     )
 
 
-def open_accounts(
-    patterns: list[str],
-    *,
-    as_of: dt.date | None = None,
-    ledger_path: Path | str | None = None,
-) -> list[str]:
-    """Return open account names matching fnmatch patterns."""
-    return get_ledger_reader().open_accounts(
-        patterns=patterns,
-        as_of=as_of,
-        ledger_path=ledger_path,
+def snapshot_receipt_match_files(*, statement_path: Path, enriched_path: Path) -> ReceiptMatchFileSnapshot:
+    statement_original, enriched_existed, enriched_original = _native_backend.ledger_access_snapshot_receipt_match_files(
+        str(statement_path),
+        str(enriched_path),
     )
-
-
-def transaction_dates_for_account(
-    account: str,
-    *,
-    ledger_path: Path | str | None = None,
-) -> set[dt.date]:
-    """Return transaction dates where the given account appears."""
-    return get_ledger_reader().transaction_dates_for_account(account, ledger_path=ledger_path)
-
-
-def validate_ledger(
-    *,
-    ledger_path: Path | str | None = None,
-) -> list[str]:
-    """Validate ledger and return diagnostics as strings."""
-    return [str(err) for err in get_ledger_writer().validate_ledger(ledger_path=ledger_path)]
-
-
-def apply_receipt_match(
-    *,
-    ledger_path: Path | str | None,
-    statement_path: Path,
-    line_number: int,
-    include_rel_path: str,
-    receipt_name: str,
-    enriched_path: Path,
-    enriched_content: str,
-) -> str:
-    """Apply a receipt match transaction replacement."""
-    return get_ledger_writer().apply_receipt_match(
-        ledger_path=ledger_path,
-        statement_path=statement_path,
-        line_number=line_number,
-        include_rel_path=include_rel_path,
-        receipt_name=receipt_name,
-        enriched_path=enriched_path,
-        enriched_content=enriched_content,
-    )
-
-
-def snapshot_receipt_match_files(
-    *,
-    statement_path: Path,
-    enriched_path: Path,
-) -> ReceiptMatchFileSnapshot:
-    """Capture ledger-side file state so a later rollback can restore it."""
-    return get_ledger_writer().snapshot_receipt_match_files(
-        statement_path=statement_path,
-        enriched_path=enriched_path,
-    )
+    return ReceiptMatchSnapshot(statement_path, statement_original, enriched_path, bool(enriched_existed), enriched_original)
 
 
 def restore_receipt_match_files(snapshot: ReceiptMatchFileSnapshot) -> None:
-    """Restore ledger-side file state captured before applying a receipt match."""
-    get_ledger_writer().restore_receipt_match_files(snapshot)
+    _native_backend.ledger_access_restore_receipt_match_files(
+        str(snapshot.statement_path),
+        snapshot.statement_original,
+        str(snapshot.enriched_path),
+        snapshot.enriched_existed,
+        snapshot.enriched_original,
+    )
