@@ -7,6 +7,7 @@ const PRICE_X_THRESHOLD: f64 = 0.65;
 const ITEM_X_THRESHOLD: f64 = 0.6;
 const Y_TOLERANCE: f64 = 0.02;
 const MAX_ITEM_DISTANCE: f64 = 0.08;
+const SPATIAL_FLOAT_EPSILON: f64 = 1e-6;
 
 #[derive(Clone, Debug)]
 pub(crate) struct BboxInput {
@@ -681,17 +682,23 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
         let source_line = &all_lines[price_candidate.source_line_index];
         let closest_line = &all_lines[closest_line_index];
 
-        let full_upper = if source_line.full_text.is_empty() {
-            closest_line.full_text.to_ascii_uppercase()
+        let context_full_text = if source_line.full_text.is_empty() {
+            &closest_line.full_text
         } else {
-            source_line.full_text.to_ascii_uppercase()
+            &source_line.full_text
         };
+        let context_left_text = if source_line.left_text.is_empty() {
+            &closest_line.left_text
+        } else {
+            &source_line.left_text
+        };
+        let full_upper = context_full_text.to_ascii_uppercase();
         let price_line_has_onsale = looks_like_onsale_marker(&full_upper);
-        let left_is_header = is_section_header_text(&closest_line.left_text)
-            && !is_priced_generic_item_label(&closest_line.left_text, &closest_line.full_text);
+        let left_is_header = is_section_header_text(context_left_text)
+            && !is_priced_generic_item_label(context_left_text, context_full_text);
         let mut prefer_below = left_is_header
-            || is_section_header_text(&closest_line.full_text)
-            || closest_line.left_text.is_empty();
+            || is_section_header_text(context_full_text)
+            || context_left_text.is_empty();
         if price_line_has_onsale {
             prefer_below = true;
         }
@@ -776,12 +783,22 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
                         && is_valid_onsale_target(candidate)
                 })
                 .min_by(|(_, left), (_, right)| left.line_y.partial_cmp(&right.line_y).unwrap());
-            if let Some((index, _)) = nearest_above {
-                onsale_target_line_index = Some(index);
-            } else if let Some((index, _)) = nearest_below {
-                onsale_target_line_index = Some(index);
-            } else {
-                is_summary = true;
+            match (nearest_above, nearest_below) {
+                (Some((above_index, above)), Some((below_index, below))) => {
+                    let above_distance = anchor_y - above.line_y;
+                    let below_distance = below.line_y - anchor_y;
+                    onsale_target_line_index = Some(if above_distance <= below_distance {
+                        above_index
+                    } else {
+                        below_index
+                    });
+                }
+                (Some((index, _)), None) | (None, Some((index, _))) => {
+                    onsale_target_line_index = Some(index);
+                }
+                (None, None) => {
+                    is_summary = true;
+                }
             }
         }
 
@@ -801,11 +818,96 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
                     looks_like_quantity_expression(&line.left_text),
                 )
             })
-            .collect();
+            .collect::<Vec<_>>();
 
         let mut found_item = false;
         let mut chosen_line_index = None;
         let mut chosen_distance = f64::INFINITY;
+        let selection_anchor_y = source_line.line_y;
+        let source_line_is_quantity_expression = looks_like_quantity_expression(&source_line.left_text);
+
+        if source_line_is_quantity_expression {
+            let source_modifier = parse_quantity_modifier(&source_line.left_text);
+            let mut nearest_unpriced_above = None;
+            let mut nearest_unpriced_below = None;
+
+            for (index, candidate) in all_lines.iter().enumerate() {
+                if used_line_indices[index]
+                    || !is_valid_item_line(candidate, total_line_y)
+                    || line_has_trailing_price(&candidate.full_text)
+                {
+                    continue;
+                }
+
+                let distance = (candidate.line_y - selection_anchor_y).abs();
+                if distance > MAX_ITEM_DISTANCE + SPATIAL_FLOAT_EPSILON {
+                    continue;
+                }
+
+                if candidate.line_y < selection_anchor_y {
+                    match nearest_unpriced_above {
+                        Some((_, current_distance)) if distance >= current_distance => {}
+                        _ => nearest_unpriced_above = Some((index, distance)),
+                    }
+                } else if candidate.line_y > selection_anchor_y {
+                    match nearest_unpriced_below {
+                        Some((_, current_distance)) if distance >= current_distance => {}
+                        _ => nearest_unpriced_below = Some((index, distance)),
+                    }
+                }
+            }
+
+            chosen_line_index = match (nearest_unpriced_above, nearest_unpriced_below, source_modifier) {
+                (Some((index, distance)), Some(_), true) => {
+                    chosen_distance = distance;
+                    Some(index)
+                }
+                (Some((above_index, above_distance)), Some((below_index, below_distance)), false) => {
+                    if above_distance <= below_distance {
+                        chosen_distance = above_distance;
+                        Some(above_index)
+                    } else {
+                        chosen_distance = below_distance;
+                        Some(below_index)
+                    }
+                }
+                (Some((index, distance)), None, _) | (None, Some((index, distance)), _) => {
+                    chosen_distance = distance;
+                    Some(index)
+                }
+                (None, None, _) => None,
+            };
+        }
+
+        if !prefer_below && source_line_is_quantity_expression {
+            let mut nearest_same_row_above = None;
+            let mut nearest_same_row_below = None;
+
+            for (index, candidate) in all_lines.iter().enumerate() {
+                if used_line_indices[index] || !is_valid_item_line(candidate, total_line_y) {
+                    continue;
+                }
+                let distance = (candidate.line_y - selection_anchor_y).abs();
+                if distance > Y_TOLERANCE + SPATIAL_FLOAT_EPSILON {
+                    continue;
+                }
+                if candidate.line_y < selection_anchor_y {
+                    match nearest_same_row_above {
+                        Some(current_distance) if distance >= current_distance => {}
+                        _ => nearest_same_row_above = Some(distance),
+                    }
+                } else if candidate.line_y > selection_anchor_y {
+                    match nearest_same_row_below {
+                        Some(current_distance) if distance >= current_distance => {}
+                        _ => nearest_same_row_below = Some(distance),
+                    }
+                }
+            }
+
+            if nearest_same_row_below.is_some() && nearest_same_row_above.is_none() {
+                prefer_below = true;
+            }
+        }
 
         if onsale_target_line_index.is_none()
             && !used_line_indices[price_candidate.source_line_index]
@@ -838,7 +940,7 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
 
         if chosen_line_index.is_none() {
             if let Some((index, distance)) = crate::spatial::select_spatial_item_line(
-                price_y,
+                selection_anchor_y,
                 Y_TOLERANCE,
                 MAX_ITEM_DISTANCE,
                 prefer_below,
@@ -851,7 +953,12 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
         }
 
         if let Some(index) = chosen_line_index {
-            if chosen_distance <= Y_TOLERANCE {
+            let direct_match_tolerance = if source_line_is_quantity_expression || prefer_below {
+                MAX_ITEM_DISTANCE + SPATIAL_FLOAT_EPSILON
+            } else {
+                Y_TOLERANCE + SPATIAL_FLOAT_EPSILON
+            };
+            if chosen_distance <= direct_match_tolerance {
                 let description = clean_description(&all_lines[index].left_text);
                 if description.len() > 2 {
                     used_line_indices[index] = true;
