@@ -4,6 +4,8 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from .._rust import require_rust_matcher
+
 # Minimum average confidence for a line to be considered reliable
 MIN_LINE_CONFIDENCE = 0.6
 
@@ -362,18 +364,7 @@ def _clean_description(desc: str) -> str:
 
 def _has_useful_bbox_data(pages: list[dict[str, Any]]) -> bool:
     """Check if the OCR result has useful bbox data for spatial parsing."""
-    if not pages:
-        return False
-
-    # Check first page for bbox data
-    for line in pages[0].get("lines", [])[:10]:
-        for word in line.get("words", []):
-            bbox = word.get("bbox")
-            if isinstance(bbox, dict) and {"left", "top", "right", "bottom"} <= set(bbox):
-                return True
-            if isinstance(bbox, (list, tuple)) and len(bbox) >= 2:
-                return True
-    return False
+    return bool(require_rust_matcher().receipt_has_useful_bbox_data(pages))
 
 
 # TODO remove pages
@@ -384,26 +375,4 @@ def _is_spatial_layout_receipt(_pages: list[dict[str, Any]], full_text: str) -> 
 
     Examples: T&T, Real Canadian Superstore, and similar formats.
     """
-    full_text_upper = full_text.upper()
-
-    # Check for known merchants with this layout
-    spatial_merchants = [
-        "T&T",
-        "T & T",
-        "REAL CANADIAN",
-        "SUPERSTORE",
-        "C&C",
-        "C & C",
-        "NOFRILLS",
-        "NO FRILLS",
-    ]
-    for merchant in spatial_merchants:
-        if merchant in full_text_upper:
-            return True
-
-    # Check for "W $" pattern which is characteristic of T&T
-    w_price_pattern = re.compile(r"W\s+\$\d+\.\d{2}")
-    if w_price_pattern.search(full_text):
-        return True
-
-    return False
+    return bool(require_rust_matcher().receipt_is_spatial_layout_receipt(full_text))
