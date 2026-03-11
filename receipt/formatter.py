@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from beanbeaver.domain.receipt import Receipt, ReceiptWarning
+from beanbeaver.receipt._rust import require_rust_matcher
 from beanbeaver.receipt.item_categories import account_for_category_key
 
 if TYPE_CHECKING:
@@ -135,89 +136,16 @@ def format_parsed_receipt(
     Returns:
         Formatted beancount content with metadata header
     """
-    lines = []
-
-    # Metadata header for efficient parsing
-    lines.append("; === PARSED RECEIPT - AWAITING CC MATCH ===")
-    lines.append(f"; @merchant: {receipt.merchant}")
-    date_str, date_is_placeholder = _format_receipt_date_for_output(receipt)
-    if date_is_placeholder:
-        lines.append("; @date: UNKNOWN")
-        lines.append(f"; FIXME: unknown date (placeholder used: {date_str})")
-    else:
-        lines.append(f"; @date: {date_str}")
-    lines.append(f"; @total: {receipt.total:.2f}")
-    lines.append(f"; @items: {len(receipt.items)}")
-    if receipt.tax:
-        lines.append(f"; @tax: {receipt.tax:.2f}")
-    if receipt.image_filename:
-        lines.append(f"; @image: {receipt.image_filename}")
-        lines.append(f"; @image_filename: {receipt.image_filename}")
-    if image_sha256:
-        lines.append(f"; @image_sha256: {image_sha256}")
-    lines.append("")
-
-    # Main transaction
-    date_str, date_is_placeholder = _format_receipt_date_for_output(receipt)
-    merchant_clean = receipt.merchant.replace('"', "'")
-    lines.append(f'{date_str} * "{merchant_clean}" "Receipt scan"')
-
-    # Collect all postings for aligned formatting
-    postings: list[tuple[str, str, str | None]] = []
-
-    # Credit card posting (placeholder)
-    total_str = f"-{receipt.total:.2f}"
-    card_last4 = _extract_card_last4(receipt.raw_text)
-    card_comment = f"card ****{card_last4}" if card_last4 else None
-    postings.append((credit_card_account, f"{total_str} CAD", card_comment))
-
-    # Item postings
-    items_total = Decimal("0")
-    item_posting_indexes: list[int] = []
-
-    for item in receipt.items:
-        posting_idx = len(postings)
-        category = _posting_account_for_item(item.category, default="Expenses:FIXME")
-        price_str = f"{item.price:.2f}"
-        desc_clean = item.description.replace('"', "'")
-
-        if item.quantity > 1:
-            postings.append((category, f"{price_str} CAD", f"{desc_clean} (qty {item.quantity})"))
-        else:
-            postings.append((category, f"{price_str} CAD", desc_clean))
-        item_posting_indexes.append(posting_idx)
-
-        items_total += item.price
-
-    # Tax posting if present
-    if receipt.tax:
-        tax_str = f"{receipt.tax:.2f}"
-        postings.append(("Expenses:Tax:HST", f"{tax_str} CAD", None))
-        items_total += receipt.tax
-
-    # Balancing line for remaining amount
-    if items_total != receipt.total and receipt.total > Decimal("0"):
-        diff = receipt.total - items_total
-        if diff > Decimal("0"):
-            diff_str = f"{diff:.2f}"
-            postings.append(("Expenses:FIXME", f"{diff_str} CAD", "FIXME: unaccounted amount"))
-
-    # Format postings with aligned comments
-    formatted_postings = _format_postings_aligned(postings)
-    posting_warnings = _build_posting_warning_map(receipt.warnings, item_posting_indexes)
-    lines.extend(_inject_posting_warnings(formatted_postings, posting_warnings))
-
-    # Raw OCR text as comments for reference
-    if receipt.raw_text:
-        lines.append("")
-        lines.append("; --- Raw OCR Text (for reference) ---")
-        for ocr_line in receipt.raw_text.split("\n"):
-            if ocr_line.strip():
-                lines.append(f"; {ocr_line}")
-
-    lines.append("")
-
-    return "\n".join(lines)
+    item_accounts = [
+        _posting_account_for_item(item.category, default="Expenses:FIXME")
+        for item in receipt.items
+    ]
+    return require_rust_matcher().receipt_format_parsed_receipt(
+        receipt,
+        item_accounts,
+        credit_card_account,
+        image_sha256,
+    )
 
 
 def format_draft_beancount(receipt: Receipt, credit_card_account: str = "Liabilities:CreditCard:FIXME") -> str:
@@ -233,79 +161,15 @@ def format_draft_beancount(receipt: Receipt, credit_card_account: str = "Liabili
     Returns:
         Formatted beancount transaction as a string
     """
-    lines = []
-
-    # Header
-    lines.append("; === DRAFT - REVIEW NEEDED ===")
-    lines.append(f"; Source: {receipt.image_filename}")
-    lines.append("; Generated from OCR - please verify all values")
-    lines.append("")
-
-    # Main transaction
-    date_str, date_is_placeholder = _format_receipt_date_for_output(receipt)
-    merchant_clean = receipt.merchant.replace('"', "'")
-    if date_is_placeholder:
-        lines.append(f"; FIXME: unknown date (placeholder used: {date_str})")
-    lines.append(f'{date_str} * "{merchant_clean}" "FIXME: add description"')
-
-    # Collect all postings for aligned formatting
-    postings: list[tuple[str, str, str | None]] = []
-
-    # Credit card posting (negative amount)
-    total_str = f"-{receipt.total:.2f}"
-    card_last4 = _extract_card_last4(receipt.raw_text)
-    card_comment = f"card ****{card_last4}" if card_last4 else None
-    postings.append((credit_card_account, f"{total_str} CAD", card_comment))
-
-    # Item postings
-    default_expense = "Expenses:FIXME"
-    items_total = Decimal("0")
-    item_posting_indexes: list[int] = []
-
-    for item in receipt.items:
-        posting_idx = len(postings)
-        category = _posting_account_for_item(item.category, default=default_expense)
-        price_str = f"{item.price:.2f}"
-        desc_clean = item.description.replace('"', "'")
-
-        # Add quantity note if > 1
-        if item.quantity > 1:
-            postings.append((category, f"{price_str} CAD", f"{desc_clean} (qty {item.quantity})"))
-        else:
-            postings.append((category, f"{price_str} CAD", desc_clean))
-        item_posting_indexes.append(posting_idx)
-
-        items_total += item.price
-
-    # Tax posting if present
-    if receipt.tax:
-        tax_str = f"{receipt.tax:.2f}"
-        postings.append(("Expenses:Tax:HST", f"{tax_str} CAD", None))
-        items_total += receipt.tax
-
-    # If items don't add up to total, add a balancing line
-    if items_total != receipt.total and receipt.total > Decimal("0"):
-        diff = receipt.total - items_total
-        if diff > Decimal("0"):
-            diff_str = f"{diff:.2f}"
-            postings.append(("Expenses:FIXME", f"{diff_str} CAD", "FIXME: unaccounted amount"))
-        elif diff < Decimal("0"):
-            lines.append(f"  ; WARNING: items total ({items_total:.2f}) exceeds receipt total ({receipt.total:.2f})")
-
-    # Format postings with aligned comments
-    formatted_postings = _format_postings_aligned(postings)
-    posting_warnings = _build_posting_warning_map(receipt.warnings, item_posting_indexes)
-    lines.extend(_inject_posting_warnings(formatted_postings, posting_warnings))
-
-    lines.append("")
-
-    # Raw OCR text as comments for reference
-    lines.append("; --- Raw OCR Text (for reference) ---")
-    for ocr_line in receipt.raw_text.split("\n"):
-        if ocr_line.strip():
-            lines.append(f"; {ocr_line}")
-
-    return "\n".join(lines)
+    item_accounts = [
+        _posting_account_for_item(item.category, default="Expenses:FIXME")
+        for item in receipt.items
+    ]
+    return require_rust_matcher().receipt_format_draft_beancount(
+        receipt,
+        item_accounts,
+        credit_card_account,
+    )
 
 
 def generate_filename(receipt: Receipt) -> str:
@@ -314,19 +178,7 @@ def generate_filename(receipt: Receipt) -> str:
 
     Format: YYYY-MM-DD-merchant.beancount
     """
-    if receipt.date_is_placeholder:
-        date_str = "unknown-date"
-    else:
-        date_str = receipt.date.strftime("%Y-%m-%d")
-    # Clean merchant name for filename
-    merchant_clean = receipt.merchant.lower()
-    merchant_clean = "".join(c if c.isalnum() else "-" for c in merchant_clean)
-    merchant_clean = "-".join(filter(None, merchant_clean.split("-")))  # Remove consecutive dashes
-
-    if not merchant_clean:
-        merchant_clean = "unknown"
-
-    return f"{date_str}-{merchant_clean}.beancount"
+    return require_rust_matcher().receipt_generate_filename(receipt)
 
 
 def format_enriched_transaction(
