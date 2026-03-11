@@ -57,7 +57,8 @@ pub(crate) fn extract_merchant_with_confidence(pages: &[MerchantPageInput]) -> O
             if line.words.is_empty() {
                 continue;
             }
-            let avg_confidence = line.words.iter().map(|word| word.confidence).sum::<f64>() / line.words.len() as f64;
+            let avg_confidence = line.words.iter().map(|word| word.confidence).sum::<f64>()
+                / line.words.len() as f64;
             if avg_confidence < MIN_LINE_CONFIDENCE {
                 lines_checked += 1;
                 continue;

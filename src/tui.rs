@@ -53,14 +53,23 @@ mod process_util {
         let extra = ["serve", "--host", SERVE_HOST, "--port", "8080"];
         let command_line = render_command_line(&base, &extra);
         let child = spawn_logged_full_command(&base, &extra, log_lines)?;
-        Ok(SpawnedProcess { child, command_line })
+        Ok(SpawnedProcess {
+            child,
+            command_line,
+        })
     }
 
-    pub(super) fn spawn_fava(ledger_path: &str, log_lines: &Arc<Mutex<VecDeque<String>>>) -> io::Result<SpawnedProcess> {
+    pub(super) fn spawn_fava(
+        ledger_path: &str,
+        log_lines: &Arc<Mutex<VecDeque<String>>>,
+    ) -> io::Result<SpawnedProcess> {
         let command = fava_command(ledger_path);
         let command_line = command.join(" ");
         let child = spawn_logged_full_command(&command, &[], log_lines)?;
-        Ok(SpawnedProcess { child, command_line })
+        Ok(SpawnedProcess {
+            child,
+            command_line,
+        })
     }
 
     pub(super) fn run_backend_capture(
@@ -95,7 +104,15 @@ mod process_util {
     }
 
     pub(super) fn podman_inspect_running() -> io::Result<Output> {
-        run_program_output("podman", ["inspect", "--format", "{{.State.Running}}", OCR_CONTAINER_NAME])
+        run_program_output(
+            "podman",
+            [
+                "inspect",
+                "--format",
+                "{{.State.Running}}",
+                OCR_CONTAINER_NAME,
+            ],
+        )
     }
 
     pub(super) fn podman_inspect_ocr() -> io::Result<Output> {
@@ -236,7 +253,10 @@ mod process_util {
         child.wait_with_output()
     }
 
-    fn run_interactive_full_command(command: &[String], extra_args: &[&str]) -> io::Result<ExitStatus> {
+    fn run_interactive_full_command(
+        command: &[String],
+        extra_args: &[&str],
+    ) -> io::Result<ExitStatus> {
         let (program, program_args) = split_command(command)?;
         Command::new(program)
             .args(program_args)
@@ -405,48 +425,136 @@ struct ApplyMatchResponse {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum EditMode {
-    ApproveScanned,
+enum ReviewPane {
+    Items,
+    Fields,
+    Preview,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum EditField {
-    Merchant,
-    Date,
-    Total,
-}
-
-impl EditField {
-    fn label(self) -> &'static str {
-        match self {
-            EditField::Merchant => "Merchant",
-            EditField::Date => "Date",
-            EditField::Total => "Total",
-        }
-    }
-
+impl ReviewPane {
     fn next(self) -> Self {
         match self {
-            EditField::Merchant => EditField::Date,
-            EditField::Date => EditField::Total,
-            EditField::Total => EditField::Merchant,
+            ReviewPane::Items => ReviewPane::Fields,
+            ReviewPane::Fields => ReviewPane::Preview,
+            ReviewPane::Preview => ReviewPane::Items,
         }
     }
 
     fn previous(self) -> Self {
         match self {
-            EditField::Merchant => EditField::Total,
-            EditField::Date => EditField::Merchant,
-            EditField::Total => EditField::Date,
+            ReviewPane::Items => ReviewPane::Preview,
+            ReviewPane::Fields => ReviewPane::Items,
+            ReviewPane::Preview => ReviewPane::Fields,
         }
     }
 }
 
-struct EditState {
-    merchant: String,
-    date: String,
-    total: String,
-    active_field: EditField,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReviewTab {
+    Effective,
+    Diff,
+    Raw,
+}
+
+impl ReviewTab {
+    fn next(self) -> Self {
+        match self {
+            ReviewTab::Effective => ReviewTab::Diff,
+            ReviewTab::Diff => ReviewTab::Raw,
+            ReviewTab::Raw => ReviewTab::Effective,
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            ReviewTab::Effective => "Effective Preview",
+            ReviewTab::Diff => "Unsaved Diff",
+            ReviewTab::Raw => "Raw Stage JSON",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReceiptReviewField {
+    Merchant,
+    Date,
+    Subtotal,
+    Tax,
+    Total,
+    Notes,
+}
+
+impl ReceiptReviewField {
+    fn label(self) -> &'static str {
+        match self {
+            ReceiptReviewField::Merchant => "Merchant",
+            ReceiptReviewField::Date => "Date",
+            ReceiptReviewField::Subtotal => "Subtotal",
+            ReceiptReviewField::Tax => "Tax",
+            ReceiptReviewField::Total => "Total",
+            ReceiptReviewField::Notes => "Notes",
+        }
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            ReceiptReviewField::Merchant => "merchant",
+            ReceiptReviewField::Date => "date",
+            ReceiptReviewField::Subtotal => "subtotal",
+            ReceiptReviewField::Tax => "tax",
+            ReceiptReviewField::Total => "total",
+            ReceiptReviewField::Notes => "notes",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ReceiptFieldState {
+    field: ReceiptReviewField,
+    original: String,
+    value: String,
+}
+
+#[derive(Clone, Debug)]
+struct ReviewItemState {
+    id: String,
+    original_description: String,
+    description: String,
+    price: String,
+    quantity: String,
+    original_category: String,
+    category: String,
+    original_removed: bool,
+    removed: bool,
+}
+
+#[derive(Clone, Debug)]
+enum ReviewEditTarget {
+    ReceiptField(usize),
+    ItemDescription(usize),
+    ItemCategory(usize),
+}
+
+#[derive(Clone, Debug)]
+struct TextInputState {
+    target: ReviewEditTarget,
+    label: String,
+    value: String,
+}
+
+struct ReviewState {
+    path: String,
+    receipt_dir: String,
+    stage_file: String,
+    original_document: Value,
+    pane: ReviewPane,
+    preview_tab: ReviewTab,
+    preview_scroll_y: u16,
+    fields: Vec<ReceiptFieldState>,
+    field_state: ListState,
+    items: Vec<ReviewItemState>,
+    item_state: ListState,
+    text_input: Option<TextInputState>,
 }
 
 struct ConfigState {
@@ -583,32 +691,306 @@ impl MatchState {
     }
 }
 
-impl EditState {
-    fn from_summary(summary: &ReceiptSummary) -> Self {
-        Self {
-            merchant: summary.merchant.clone().unwrap_or_default(),
-            date: summary.date.clone().unwrap_or_default(),
-            total: summary.total.clone().unwrap_or_default(),
-            active_field: EditField::Merchant,
-        }
-    }
+impl ReviewState {
+    fn from_detail(detail: &ShowReceiptResponse) -> Self {
+        let mut field_state = ListState::default();
+        field_state.select(Some(0));
+        let mut item_state = ListState::default();
 
-    fn active_value_mut(&mut self) -> &mut String {
-        match self.active_field {
-            EditField::Merchant => &mut self.merchant,
-            EditField::Date => &mut self.date,
-            EditField::Total => &mut self.total,
-        }
-    }
-
-    fn review_payload(&self) -> Value {
-        serde_json::json!({
-            "review": {
-                "merchant": self.merchant,
-                "date": self.date,
-                "total": self.total,
+        let document = &detail.document;
+        let fields = [
+            ReceiptReviewField::Merchant,
+            ReceiptReviewField::Date,
+            ReceiptReviewField::Subtotal,
+            ReceiptReviewField::Tax,
+            ReceiptReviewField::Total,
+            ReceiptReviewField::Notes,
+        ]
+        .into_iter()
+        .map(|field| {
+            let value = effective_receipt_text(document, field.key());
+            ReceiptFieldState {
+                field,
+                original: value.clone(),
+                value,
             }
         })
+        .collect::<Vec<_>>();
+
+        let mut items = Vec::new();
+        if let Some(item_docs) = document.get("items").and_then(Value::as_array) {
+            for item in item_docs {
+                let Some(item_id) = item.get("id") else {
+                    continue;
+                };
+                let id = json_value_to_text(Some(item_id));
+                if id.is_empty() {
+                    continue;
+                }
+                items.push(ReviewItemState {
+                    id,
+                    original_description: effective_item_text(item, "description"),
+                    description: effective_item_text(item, "description"),
+                    price: effective_item_text(item, "price"),
+                    quantity: effective_item_text(item, "quantity"),
+                    original_category: effective_item_category_text(item),
+                    category: effective_item_category_text(item),
+                    original_removed: effective_item_removed(item),
+                    removed: effective_item_removed(item),
+                });
+            }
+        }
+        if !items.is_empty() {
+            item_state.select(Some(0));
+        }
+
+        Self {
+            path: detail.path.clone(),
+            receipt_dir: detail.summary.receipt_dir.clone(),
+            stage_file: detail.summary.stage_file.clone(),
+            original_document: detail.document.clone(),
+            pane: ReviewPane::Items,
+            preview_tab: ReviewTab::Effective,
+            preview_scroll_y: 0,
+            fields,
+            field_state,
+            items,
+            item_state,
+            text_input: None,
+        }
+    }
+
+    fn selected_field_index(&self) -> Option<usize> {
+        self.field_state.selected()
+    }
+
+    fn selected_item_index(&self) -> Option<usize> {
+        self.item_state.selected()
+    }
+
+    fn start_selected_field_edit(&mut self) {
+        let Some(index) = self.selected_field_index() else {
+            return;
+        };
+        if let Some(field) = self.fields.get(index) {
+            self.text_input = Some(TextInputState {
+                target: ReviewEditTarget::ReceiptField(index),
+                label: field.field.label().to_string(),
+                value: field.value.clone(),
+            });
+        }
+    }
+
+    fn start_selected_item_description_edit(&mut self) {
+        let Some(index) = self.selected_item_index() else {
+            return;
+        };
+        if let Some(item) = self.items.get(index) {
+            self.text_input = Some(TextInputState {
+                target: ReviewEditTarget::ItemDescription(index),
+                label: format!("Item Description ({})", item.id),
+                value: item.description.clone(),
+            });
+        }
+    }
+
+    fn start_selected_item_category_edit(&mut self) {
+        let Some(index) = self.selected_item_index() else {
+            return;
+        };
+        if let Some(item) = self.items.get(index) {
+            self.text_input = Some(TextInputState {
+                target: ReviewEditTarget::ItemCategory(index),
+                label: format!("Item Category ({})", item.id),
+                value: item.category.clone(),
+            });
+        }
+    }
+
+    fn commit_text_input(&mut self) {
+        let Some(input) = self.text_input.take() else {
+            return;
+        };
+        match input.target {
+            ReviewEditTarget::ReceiptField(index) => {
+                if let Some(field) = self.fields.get_mut(index) {
+                    field.value = input.value;
+                }
+            }
+            ReviewEditTarget::ItemDescription(index) => {
+                if let Some(item) = self.items.get_mut(index) {
+                    item.description = input.value;
+                }
+            }
+            ReviewEditTarget::ItemCategory(index) => {
+                if let Some(item) = self.items.get_mut(index) {
+                    item.category = input.value;
+                }
+            }
+        }
+    }
+
+    fn payload(&self) -> Value {
+        let mut review = serde_json::Map::new();
+        for field in &self.fields {
+            if field.value != field.original {
+                review.insert(
+                    field.field.key().to_string(),
+                    Value::String(field.value.clone()),
+                );
+            }
+        }
+
+        let mut items = Vec::new();
+        for item in &self.items {
+            let mut item_review = serde_json::Map::new();
+            if item.description != item.original_description {
+                item_review.insert(
+                    "description".to_string(),
+                    Value::String(item.description.clone()),
+                );
+            }
+            if item.category != item.original_category {
+                item_review.insert("category".to_string(), Value::String(item.category.clone()));
+            }
+            if item.removed != item.original_removed {
+                item_review.insert("removed".to_string(), Value::Bool(item.removed));
+            }
+            if !item_review.is_empty() {
+                items.push(serde_json::json!({
+                    "id": item.id.clone(),
+                    "review": Value::Object(item_review),
+                }));
+            }
+        }
+
+        serde_json::json!({
+            "review": Value::Object(review),
+            "items": items,
+        })
+    }
+
+    fn effective_preview_lines(&self) -> Vec<String> {
+        let mut lines = vec![
+            format!("Receipt Dir: {}", self.receipt_dir),
+            format!("Stage File: {}", self.stage_file),
+            String::new(),
+            "Receipt".to_string(),
+        ];
+        for field in &self.fields {
+            let value = if field.value.trim().is_empty() {
+                "<empty>"
+            } else {
+                field.value.as_str()
+            };
+            lines.push(format!("{:>8}: {}", field.field.label(), value));
+        }
+        lines.push(String::new());
+        lines.push(format!(
+            "Items ({})",
+            self.items.iter().filter(|item| !item.removed).count()
+        ));
+        for (index, item) in self.items.iter().filter(|item| !item.removed).enumerate() {
+            let category = if item.category.trim().is_empty() {
+                "<uncategorized>"
+            } else {
+                item.category.as_str()
+            };
+            let quantity = if item.quantity.trim().is_empty() {
+                "1"
+            } else {
+                item.quantity.as_str()
+            };
+            lines.push(format!(
+                "{:>2}. {}  x{}  ${}  [{}]",
+                index + 1,
+                item.description,
+                quantity,
+                if item.price.is_empty() {
+                    "0.00"
+                } else {
+                    item.price.as_str()
+                },
+                category,
+            ));
+        }
+        let removed = self.items.iter().filter(|item| item.removed).count();
+        if removed > 0 {
+            lines.push(String::new());
+            lines.push(format!("Removed items: {}", removed));
+        }
+        lines
+    }
+
+    fn diff_lines(&self) -> Vec<String> {
+        let mut lines = Vec::new();
+        for field in &self.fields {
+            if field.value != field.original {
+                lines.push(format!(
+                    "{}: {} -> {}",
+                    field.field.label(),
+                    if field.original.is_empty() {
+                        "<empty>"
+                    } else {
+                        field.original.as_str()
+                    },
+                    if field.value.is_empty() {
+                        "<empty>"
+                    } else {
+                        field.value.as_str()
+                    },
+                ));
+            }
+        }
+        for item in &self.items {
+            if item.description != item.original_description {
+                lines.push(format!(
+                    "{} description: {} -> {}",
+                    item.id, item.original_description, item.description
+                ));
+            }
+            if item.category != item.original_category {
+                lines.push(format!(
+                    "{} category: {} -> {}",
+                    item.id,
+                    if item.original_category.is_empty() {
+                        "<empty>"
+                    } else {
+                        item.original_category.as_str()
+                    },
+                    if item.category.is_empty() {
+                        "<empty>"
+                    } else {
+                        item.category.as_str()
+                    },
+                ));
+            }
+            if item.removed != item.original_removed {
+                lines.push(format!(
+                    "{} removed: {} -> {}",
+                    item.id, item.original_removed, item.removed
+                ));
+            }
+        }
+        if lines.is_empty() {
+            lines.push("No unsaved changes.".to_string());
+        }
+        lines
+    }
+
+    fn raw_json_lines(&self) -> Vec<String> {
+        match serde_json::to_string_pretty(&self.original_document) {
+            Ok(json) => json.lines().map(ToOwned::to_owned).collect(),
+            Err(error) => vec![format!("Failed to render JSON: {error}")],
+        }
+    }
+
+    fn preview_lines(&self) -> Vec<String> {
+        match self.preview_tab {
+            ReviewTab::Effective => self.effective_preview_lines(),
+            ReviewTab::Diff => self.diff_lines(),
+            ReviewTab::Raw => self.raw_json_lines(),
+        }
     }
 }
 
@@ -627,8 +1009,7 @@ struct App {
     detail_scroll_y: u16,
     detail_scroll_x: u16,
     status: String,
-    edit_state: Option<EditState>,
-    edit_mode: Option<EditMode>,
+    review_state: Option<ReviewState>,
     config: ConfigResponse,
     config_state: Option<ConfigState>,
     match_state: Option<MatchState>,
@@ -662,8 +1043,7 @@ impl App {
             detail_scroll_y: 0,
             detail_scroll_x: 0,
             status: Self::page_help(Page::Receipts).to_string(),
-            edit_state: None,
-            edit_mode: None,
+            review_state: None,
             config: ConfigResponse {
                 config_path: String::new(),
                 project_root: String::new(),
@@ -944,41 +1324,30 @@ impl App {
             self.set_status("Approved receipts are re-edited in the external editor");
             return;
         }
-        self.edit_state = Some(EditState::from_summary(receipt));
-        self.edit_mode = Some(EditMode::ApproveScanned);
-        self.set_status(
-            "Edit review fields, Tab/Shift-Tab or Up/Down to move, Enter to save, Esc to cancel",
-        );
+        match backend_show_receipt(&receipt.path) {
+            Ok(detail) => {
+                self.review_state = Some(ReviewState::from_detail(&detail));
+                self.set_status(
+                    "Review receipt: h/l switch pane | Enter edit | c edit category | x toggle removed | p preview | a approve | Esc cancel",
+                );
+            }
+            Err(error) => self.set_error(format!("Failed to load receipt review state: {error}")),
+        }
     }
 
-    fn apply_edit_changes(&mut self) -> AppResult<()> {
-        let Some(path) = self.selected_receipt().map(|receipt| receipt.path.clone()) else {
-            self.set_status("No receipt selected");
+    fn apply_review_changes(&mut self) -> AppResult<()> {
+        let Some(review_state) = self.review_state.as_ref() else {
+            self.set_status("Missing review state");
             return Ok(());
         };
-        let Some(edit_mode) = self.edit_mode else {
-            self.set_status("Missing edit mode");
-            return Ok(());
-        };
-        let payload = {
-            let edit_state = self
-                .edit_state
-                .as_ref()
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Missing edit state"))?;
-            serde_json::to_string(&edit_state.review_payload())?
-        };
-        match edit_mode {
-            EditMode::ApproveScanned => {
-                let result = backend_approve_scanned_with_review(&path, &payload)?;
-                self.edit_state = None;
-                self.edit_mode = None;
-                self.refresh()?;
-                self.set_status(format!(
-                    "Approved {} -> {}",
-                    result.source_path, result.approved_path
-                ));
-            }
-        }
+        let payload = serde_json::to_string(&review_state.payload())?;
+        let result = backend_approve_scanned_with_review(&review_state.path, &payload)?;
+        self.review_state = None;
+        self.refresh()?;
+        self.set_status(format!(
+            "Approved {} -> {}",
+            result.source_path, result.approved_path
+        ));
         Ok(())
     }
 
@@ -1171,7 +1540,10 @@ impl App {
                 ));
             }
             OcrContainerState::Stopped => {
-                ensure_podman_success(process_util::podman_start_ocr()?, "podman start beanbeaver-ocr")?;
+                ensure_podman_success(
+                    process_util::podman_start_ocr()?,
+                    "podman start beanbeaver-ocr",
+                )?;
                 self.refresh_runtime_pages(true)?;
                 self.set_status(format!("Started Podman container `{OCR_CONTAINER_NAME}`"));
             }
@@ -1187,7 +1559,10 @@ impl App {
     fn stop_ocr_container(&mut self) -> AppResult<()> {
         match podman_container_state()? {
             OcrContainerState::Running => {
-                ensure_podman_success(process_util::podman_stop_ocr()?, "podman stop beanbeaver-ocr")?;
+                ensure_podman_success(
+                    process_util::podman_stop_ocr()?,
+                    "podman stop beanbeaver-ocr",
+                )?;
                 self.refresh_runtime_pages(true)?;
                 self.set_status(format!("Stopped Podman container `{OCR_CONTAINER_NAME}`"));
             }
@@ -1209,7 +1584,10 @@ impl App {
     fn restart_ocr_container(&mut self) -> AppResult<()> {
         match podman_container_state()? {
             OcrContainerState::Running | OcrContainerState::Stopped => {
-                ensure_podman_success(process_util::podman_restart_ocr()?, "podman restart beanbeaver-ocr")?;
+                ensure_podman_success(
+                    process_util::podman_restart_ocr()?,
+                    "podman restart beanbeaver-ocr",
+                )?;
                 self.refresh_runtime_pages(true)?;
                 self.set_status(format!("Restarted Podman container `{OCR_CONTAINER_NAME}`"));
             }
@@ -1324,7 +1702,8 @@ impl App {
             return Err(format!("Ledger file not found: {}", ledger_path.display()).into());
         }
 
-        let command_line = process_util::fava_command_line(&self.config.resolved_main_beancount_path);
+        let command_line =
+            process_util::fava_command_line(&self.config.resolved_main_beancount_path);
 
         replace_log_lines(
             &self.fava_state.log_lines,
@@ -1937,6 +2316,76 @@ fn render_detail_lines(detail: &ShowReceiptResponse) -> Vec<String> {
     lines
 }
 
+fn json_value_to_text(value: Option<&Value>) -> String {
+    match value {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Number(number)) => number.to_string(),
+        Some(Value::Bool(flag)) => flag.to_string(),
+        _ => String::new(),
+    }
+}
+
+fn effective_receipt_text(document: &Value, key: &str) -> String {
+    if let Some(value) = document
+        .get("review")
+        .and_then(Value::as_object)
+        .and_then(|review| review.get(key))
+    {
+        if !value.is_null() {
+            return json_value_to_text(Some(value));
+        }
+    }
+
+    json_value_to_text(
+        document
+            .get("receipt")
+            .and_then(Value::as_object)
+            .and_then(|receipt| receipt.get(key)),
+    )
+}
+
+fn effective_item_text(item: &Value, key: &str) -> String {
+    if let Some(value) = item
+        .get("review")
+        .and_then(Value::as_object)
+        .and_then(|review| review.get(key))
+    {
+        if !value.is_null() {
+            return json_value_to_text(Some(value));
+        }
+    }
+
+    json_value_to_text(item.get(key))
+}
+
+fn effective_item_category_text(item: &Value) -> String {
+    if let Some(value) = item
+        .get("review")
+        .and_then(Value::as_object)
+        .and_then(|review| review.get("classification"))
+        .and_then(Value::as_object)
+        .and_then(|classification| classification.get("category"))
+    {
+        if !value.is_null() {
+            return json_value_to_text(Some(value));
+        }
+    }
+
+    json_value_to_text(
+        item.get("classification")
+            .and_then(Value::as_object)
+            .and_then(|classification| classification.get("category")),
+    )
+}
+
+fn effective_item_removed(item: &Value) -> bool {
+    item.get("review")
+        .and_then(Value::as_object)
+        .and_then(|review| review.get("removed"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
 fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -1961,11 +2410,15 @@ fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
         );
     frame.render_widget(tabs, chunks[0]);
 
-    match app.active_page {
-        Page::Receipts => render_receipts_page(frame, app, chunks[1]),
-        Page::Serve => render_serve_page(frame, app, chunks[1]),
-        Page::Fava => render_fava_page(frame, app, chunks[1]),
-        Page::Ocr => render_ocr_page(frame, app, chunks[1]),
+    if let Some(review_state) = &mut app.review_state {
+        render_review_screen(frame, review_state, chunks[1]);
+    } else {
+        match app.active_page {
+            Page::Receipts => render_receipts_page(frame, app, chunks[1]),
+            Page::Serve => render_serve_page(frame, app, chunks[1]),
+            Page::Fava => render_fava_page(frame, app, chunks[1]),
+            Page::Ocr => render_ocr_page(frame, app, chunks[1]),
+        }
     }
 
     let footer = Paragraph::new(app.status.clone())
@@ -1973,9 +2426,6 @@ fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
         .wrap(Wrap { trim: true });
     frame.render_widget(footer, chunks[2]);
 
-    if let Some(edit_state) = &app.edit_state {
-        render_edit_modal(frame, edit_state);
-    }
     if let Some(config_state) = &app.config_state {
         render_config_modal(frame, &app.config, config_state);
     }
@@ -2134,7 +2584,9 @@ fn render_fava_page(frame: &mut ratatui::Frame<'_>, app: &App, area: ratatui::la
         .process
         .as_ref()
         .map(|process| process.command.clone())
-        .unwrap_or_else(|| process_util::fava_command_line(&app.config.resolved_main_beancount_path));
+        .unwrap_or_else(|| {
+            process_util::fava_command_line(&app.config.resolved_main_beancount_path)
+        });
     let last_exit = app
         .fava_state
         .last_exit_code
@@ -2208,10 +2660,152 @@ fn render_ocr_page(frame: &mut ratatui::Frame<'_>, app: &App, area: ratatui::lay
     frame.render_widget(logs, sections[1]);
 }
 
-fn render_edit_modal(frame: &mut ratatui::Frame<'_>, edit_state: &EditState) {
-    let popup = centered_rect(70, 14, frame.area());
+fn render_review_screen(
+    frame: &mut ratatui::Frame<'_>,
+    review_state: &mut ReviewState,
+    area: ratatui::layout::Rect,
+) {
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(10),
+            Constraint::Length(2),
+        ])
+        .split(area);
+
+    let header = Paragraph::new(format!(
+        "Review Scanned Receipt  |  {} / {}",
+        review_state.receipt_dir, review_state.stage_file
+    ))
+    .block(Block::default().borders(Borders::ALL).title("Review Mode"))
+    .wrap(Wrap { trim: true });
+    frame.render_widget(header, rows[0]);
+
+    let body = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(42), Constraint::Percentage(58)])
+        .split(rows[1]);
+    let right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(42), Constraint::Percentage(58)])
+        .split(body[1]);
+
+    let item_lines: Vec<ListItem> = review_state
+        .items
+        .iter()
+        .map(|item| {
+            let removed = if item.removed { " [removed]" } else { "" };
+            let category = if item.category.trim().is_empty() {
+                "<uncategorized>"
+            } else {
+                item.category.as_str()
+            };
+            ListItem::new(Line::from(format!(
+                "{}  ${}  {}{}",
+                item.description,
+                if item.price.is_empty() {
+                    "0.00"
+                } else {
+                    item.price.as_str()
+                },
+                category,
+                removed,
+            )))
+        })
+        .collect();
+    let items = List::new(item_lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Items")
+                .border_style(if review_state.pane == ReviewPane::Items {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default()
+                }),
+        )
+        .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+        .highlight_symbol(">> ");
+    frame.render_stateful_widget(items, body[0], &mut review_state.item_state);
+
+    let field_lines: Vec<ListItem> = review_state
+        .fields
+        .iter()
+        .map(|field| {
+            let changed = if field.value != field.original {
+                " *"
+            } else {
+                ""
+            };
+            let value = if field.value.trim().is_empty() {
+                "<empty>"
+            } else {
+                field.value.as_str()
+            };
+            ListItem::new(Line::from(format!(
+                "{}: {}{}",
+                field.field.label(),
+                value,
+                changed,
+            )))
+        })
+        .collect();
+    let fields = List::new(field_lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Receipt Fields")
+                .border_style(if review_state.pane == ReviewPane::Fields {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default()
+                }),
+        )
+        .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+        .highlight_symbol(">> ");
+    frame.render_stateful_widget(fields, right[0], &mut review_state.field_state);
+
+    let preview = Paragraph::new(Text::from(
+        review_state
+            .preview_lines()
+            .into_iter()
+            .map(Line::from)
+            .collect::<Vec<_>>(),
+    ))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(review_state.preview_tab.title())
+            .border_style(if review_state.pane == ReviewPane::Preview {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default()
+            }),
+    )
+    .scroll((review_state.preview_scroll_y, 0))
+    .wrap(Wrap { trim: false });
+    frame.render_widget(preview, right[1]);
+
+    let help = Paragraph::new(
+        "h/l pane  |  j/k move  |  Enter edit field/description  |  c edit category  |  x toggle removed  |  p preview tab  |  a approve  |  Esc cancel",
+    )
+    .wrap(Wrap { trim: true });
+    frame.render_widget(help, rows[2]);
+
+    if let Some(text_input) = &review_state.text_input {
+        render_text_input_modal(frame, text_input);
+    }
+}
+
+fn render_text_input_modal(frame: &mut ratatui::Frame<'_>, text_input: &TextInputState) {
+    let popup = centered_rect(64, 7, frame.area());
+    frame.render_widget(Clear, popup);
     frame.render_widget(
-        Block::default().style(Style::default().bg(Color::Black)),
+        Block::default()
+            .borders(Borders::ALL)
+            .title(text_input.label.as_str())
+            .style(Style::default().bg(Color::Black)),
         popup,
     );
 
@@ -2219,39 +2813,28 @@ fn render_edit_modal(frame: &mut ratatui::Frame<'_>, edit_state: &EditState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
+            Constraint::Length(2),
             Constraint::Min(1),
         ])
         .split(popup);
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title("Review And Approve");
-    frame.render_widget(block, popup);
-
-    for (row, field, value) in [
-        (rows[0], EditField::Merchant, edit_state.merchant.as_str()),
-        (rows[1], EditField::Date, edit_state.date.as_str()),
-        (rows[2], EditField::Total, edit_state.total.as_str()),
-    ] {
-        let style = if edit_state.active_field == field {
+    let value = if text_input.value.is_empty() {
+        "<empty>".to_string()
+    } else {
+        text_input.value.clone()
+    };
+    let input = Paragraph::new(value)
+        .block(Block::default().borders(Borders::ALL).title("Value"))
+        .style(
             Style::default()
                 .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-        let paragraph = Paragraph::new(format!("{}: {}", field.label(), value))
-            .block(Block::default().borders(Borders::BOTTOM))
-            .style(style);
-        frame.render_widget(paragraph, row);
-    }
+                .add_modifier(Modifier::BOLD),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(input, rows[0]);
 
-    let help = Paragraph::new("Enter save | Esc cancel | Backspace delete | Tab move")
-        .wrap(Wrap { trim: true });
-    frame.render_widget(help, rows[3]);
+    let help =
+        Paragraph::new("Enter apply  |  Esc cancel  |  Backspace delete").wrap(Wrap { trim: true });
+    frame.render_widget(help, rows[1]);
 }
 
 fn render_config_modal(
@@ -2499,39 +3082,150 @@ fn run_app(
             continue;
         }
 
-        if app.edit_state.is_some() {
-            match key.code {
-                KeyCode::Esc => {
-                    app.edit_state = None;
-                    app.edit_mode = None;
-                    app.set_status("Review cancelled");
-                }
-                KeyCode::Enter => {
-                    if let Err(error) = app.apply_edit_changes() {
-                        app.set_error(error.to_string());
+        if app.review_state.is_some() {
+            let mut review_cancelled = false;
+            let mut approve_requested = false;
+            let mut status_message: Option<String> = None;
+            if let Some(review_state) = app.review_state.as_mut() {
+                if let Some(text_input) = review_state.text_input.as_mut() {
+                    match key.code {
+                        KeyCode::Esc => {
+                            review_state.text_input = None;
+                            status_message = Some("Cancelled field edit".to_string());
+                        }
+                        KeyCode::Enter => {
+                            review_state.commit_text_input();
+                            status_message = Some("Applied edit to review state".to_string());
+                        }
+                        KeyCode::Backspace => {
+                            text_input.value.pop();
+                        }
+                        KeyCode::Char(ch) => {
+                            text_input.value.push(ch);
+                        }
+                        _ => {}
+                    }
+                } else {
+                    match (key.code, key.modifiers) {
+                        (KeyCode::Esc, _) => review_cancelled = true,
+                        (KeyCode::Char('a'), _) => approve_requested = true,
+                        (KeyCode::Char('p'), _) => {
+                            review_state.preview_tab = review_state.preview_tab.next();
+                            review_state.preview_scroll_y = 0;
+                        }
+                        (KeyCode::Tab, _)
+                        | (KeyCode::Char('l'), KeyModifiers::NONE)
+                        | (KeyCode::Right, _) => {
+                            review_state.pane = review_state.pane.next();
+                        }
+                        (KeyCode::BackTab, _)
+                        | (KeyCode::Char('h'), KeyModifiers::NONE)
+                        | (KeyCode::Left, _) => {
+                            review_state.pane = review_state.pane.previous();
+                        }
+                        (KeyCode::Down, _) | (KeyCode::Char('j'), KeyModifiers::NONE) => {
+                            match review_state.pane {
+                                ReviewPane::Items => {
+                                    let len = review_state.items.len();
+                                    if len > 0 {
+                                        let current =
+                                            review_state.item_state.selected().unwrap_or(0)
+                                                as isize;
+                                        let next =
+                                            (current + 1).clamp(0, (len - 1) as isize) as usize;
+                                        review_state.item_state.select(Some(next));
+                                    }
+                                }
+                                ReviewPane::Fields => {
+                                    let len = review_state.fields.len();
+                                    if len > 0 {
+                                        let current =
+                                            review_state.field_state.selected().unwrap_or(0)
+                                                as isize;
+                                        let next =
+                                            (current + 1).clamp(0, (len - 1) as isize) as usize;
+                                        review_state.field_state.select(Some(next));
+                                    }
+                                }
+                                ReviewPane::Preview => {
+                                    review_state.preview_scroll_y =
+                                        review_state.preview_scroll_y.saturating_add(1);
+                                }
+                            }
+                        }
+                        (KeyCode::Up, _) | (KeyCode::Char('k'), KeyModifiers::NONE) => {
+                            match review_state.pane {
+                                ReviewPane::Items => {
+                                    let len = review_state.items.len();
+                                    if len > 0 {
+                                        let current =
+                                            review_state.item_state.selected().unwrap_or(0)
+                                                as isize;
+                                        let next =
+                                            (current - 1).clamp(0, (len - 1) as isize) as usize;
+                                        review_state.item_state.select(Some(next));
+                                    }
+                                }
+                                ReviewPane::Fields => {
+                                    let len = review_state.fields.len();
+                                    if len > 0 {
+                                        let current =
+                                            review_state.field_state.selected().unwrap_or(0)
+                                                as isize;
+                                        let next =
+                                            (current - 1).clamp(0, (len - 1) as isize) as usize;
+                                        review_state.field_state.select(Some(next));
+                                    }
+                                }
+                                ReviewPane::Preview => {
+                                    review_state.preview_scroll_y =
+                                        review_state.preview_scroll_y.saturating_sub(1);
+                                }
+                            }
+                        }
+                        (KeyCode::Enter, _) => match review_state.pane {
+                            ReviewPane::Items => {
+                                review_state.start_selected_item_description_edit()
+                            }
+                            ReviewPane::Fields => review_state.start_selected_field_edit(),
+                            ReviewPane::Preview => {}
+                        },
+                        (KeyCode::Char('c'), _) => {
+                            if review_state.pane == ReviewPane::Items {
+                                review_state.start_selected_item_category_edit();
+                            }
+                        }
+                        (KeyCode::Char('x'), _) => {
+                            if review_state.pane == ReviewPane::Items {
+                                if let Some(index) = review_state.selected_item_index() {
+                                    if let Some(item) = review_state.items.get_mut(index) {
+                                        item.removed = !item.removed;
+                                        status_message = Some(format!(
+                                            "{} {}",
+                                            item.id,
+                                            if item.removed {
+                                                "marked removed"
+                                            } else {
+                                                "restored"
+                                            }
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                 }
-                KeyCode::Tab | KeyCode::Down => {
-                    if let Some(edit_state) = app.edit_state.as_mut() {
-                        edit_state.active_field = edit_state.active_field.next();
-                    }
+            }
+            if review_cancelled {
+                app.review_state = None;
+                app.set_status("Review cancelled");
+            } else if approve_requested {
+                if let Err(error) = app.apply_review_changes() {
+                    app.set_error(error.to_string());
                 }
-                KeyCode::BackTab | KeyCode::Up => {
-                    if let Some(edit_state) = app.edit_state.as_mut() {
-                        edit_state.active_field = edit_state.active_field.previous();
-                    }
-                }
-                KeyCode::Backspace => {
-                    if let Some(edit_state) = app.edit_state.as_mut() {
-                        edit_state.active_value_mut().pop();
-                    }
-                }
-                KeyCode::Char(ch) => {
-                    if let Some(edit_state) = app.edit_state.as_mut() {
-                        edit_state.active_value_mut().push(ch);
-                    }
-                }
-                _ => {}
+            } else if let Some(message) = status_message {
+                app.set_status(message);
             }
             continue;
         }

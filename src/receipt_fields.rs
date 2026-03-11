@@ -24,7 +24,9 @@ fn re_date_context_hint() -> &'static Regex {
 
 fn re_separated_date() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(^|[^0-9])(\d{1,4})[./-](\d{1,2})[./-](\d{1,4})([^0-9]|$)").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(r"(^|[^0-9])(\d{1,4})[./-](\d{1,2})[./-](\d{1,4})([^0-9]|$)").unwrap()
+    })
 }
 
 fn re_compact_date() -> &'static Regex {
@@ -35,8 +37,10 @@ fn re_compact_date() -> &'static Regex {
 fn re_month_name_date() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"(?i)\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+(\d{1,2}),?\s+(\d{4})\b")
-            .unwrap()
+        Regex::new(
+            r"(?i)\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+(\d{1,2}),?\s+(\d{4})\b",
+        )
+        .unwrap()
     })
 }
 
@@ -133,7 +137,10 @@ pub(crate) fn extract_total(lines: &[String]) -> i64 {
         if line_upper.contains("TOTAL NUMBER") {
             continue;
         }
-        if EXCLUDED_PHRASES.iter().any(|phrase| line_upper.contains(phrase)) {
+        if EXCLUDED_PHRASES
+            .iter()
+            .any(|phrase| line_upper.contains(phrase))
+        {
             continue;
         }
         if line_upper.contains("TOTAL") && !line_upper.contains("SUBTOTAL") {
@@ -208,7 +215,9 @@ pub(crate) fn extract_tax(lines: &[String]) -> Option<i64> {
                 if !is_total_value && idx + 2 < lines.len() {
                     let line_i2_upper = lines[idx + 2].to_ascii_uppercase();
                     if line_i2_upper.contains("TOTAL") && !line_i2_upper.contains("SUBTOTAL") {
-                        if idx + 3 < lines.len() && extract_price_from_line(&lines[idx + 3]).is_some() {
+                        if idx + 3 < lines.len()
+                            && extract_price_from_line(&lines[idx + 3]).is_some()
+                        {
                             is_total_value = false;
                         } else {
                             is_total_value = true;
@@ -290,7 +299,11 @@ fn safe_date(year: i32, month: i32, day: i32) -> Option<SimpleDate> {
     })
 }
 
-fn numeric_date_candidates(part1: &str, part2: &str, part3: &str) -> Vec<(SimpleDate, &'static str)> {
+fn numeric_date_candidates(
+    part1: &str,
+    part2: &str,
+    part3: &str,
+) -> Vec<(SimpleDate, &'static str)> {
     let a = match part1.parse::<i32>() {
         Ok(value) => value,
         Err(_) => return Vec::new(),
@@ -392,7 +405,11 @@ pub(crate) fn extract_date(
 
     for (line_index, line) in source_lines.iter().enumerate() {
         let normalized_line = normalize_decimal_spacing(line);
-        let hint_bonus = if re_date_context_hint().is_match(&normalized_line) { 40 } else { 0 };
+        let hint_bonus = if re_date_context_hint().is_match(&normalized_line) {
+            40
+        } else {
+            0
+        };
         let prefer_year_first = hint_bonus > 0;
 
         for captures in re_separated_date().captures_iter(&normalized_line) {

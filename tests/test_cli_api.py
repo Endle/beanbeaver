@@ -225,6 +225,88 @@ def test_api_approve_scanned_with_review_applies_receipt_overrides(
     }
 
 
+def test_api_approve_scanned_with_review_applies_item_overrides(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    paths = _configure_temp_root(tmp_path, monkeypatch)
+    scanned_dir = paths.receipts_json_scanned / "2026-03-04_costco_221_97_feed"
+    stage_path = scanned_dir / "parsed.receipt.json"
+    save_stage_document(
+        stage_path,
+        {
+            **_stage_document(
+                merchant="COSTCO",
+                receipt_date="2026-03-04",
+                total="221.97",
+                stage="parsed",
+                stage_index=0,
+            ),
+            "items": [
+                {
+                    "id": "item-0001",
+                    "description": "COKE ZERO",
+                    "price": "17.19",
+                    "quantity": 1,
+                    "classification": {"category": "grocery_drink_cocacola"},
+                    "warnings": [],
+                    "meta": {"source": "parser"},
+                },
+                {
+                    "id": "item-0002",
+                    "description": "DOORDASH2X50",
+                    "price": "79.99",
+                    "quantity": 1,
+                    "classification": {"category": "restaurant_gift_card"},
+                    "warnings": [],
+                    "meta": {"source": "parser"},
+                },
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "review": {"notes": "Verified against Costco receipt"},
+                    "items": [
+                        {
+                            "id": "item-0001",
+                            "review": {
+                                "description": "COKE ZERO 35PK",
+                                "category": "Expenses:Food:Grocery:Drink:CocaCola",
+                            },
+                        },
+                        {
+                            "id": "item-0002",
+                            "review": {
+                                "removed": True,
+                            },
+                        },
+                    ],
+                }
+            )
+        ),
+    )
+
+    exit_code = unified_cli.main(["api", "approve-scanned-with-review", str(stage_path)])
+
+    captured = json.loads(capsys.readouterr().out)
+    approved_path = Path(captured["approved_path"])
+    approved_document = json.loads(approved_path.read_text())
+    assert exit_code == 0
+    assert approved_document["review"]["notes"] == "Verified against Costco receipt"
+    assert approved_document["items"][0]["review"] == {
+        "description": "COKE ZERO 35PK",
+        "classification": {"category": "grocery_drink_cocacola"},
+    }
+    assert approved_document["items"][1]["review"] == {
+        "removed": True,
+    }
+
+
 def test_api_re_edit_approved_with_review_applies_receipt_overrides(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

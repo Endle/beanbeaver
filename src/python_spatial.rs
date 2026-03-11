@@ -44,7 +44,10 @@ fn select_spatial_item_line(
         max_item_distance,
         prefer_below,
         price_line_has_onsale,
-        candidates.into_iter().map(to_spatial_line_candidate).collect(),
+        candidates
+            .into_iter()
+            .map(to_spatial_line_candidate)
+            .collect(),
     )
 }
 

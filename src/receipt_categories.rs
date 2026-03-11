@@ -194,7 +194,10 @@ fn fuzzy_contains(keyword: &str, description: &str, threshold: Option<f64>) -> (
     }
 }
 
-pub(crate) fn find_all_matches(description: &str, rule_layers: &CategoryRuleLayers) -> Vec<RuleMatch> {
+pub(crate) fn find_all_matches(
+    description: &str,
+    rule_layers: &CategoryRuleLayers,
+) -> Vec<RuleMatch> {
     let mut matches = Vec::new();
 
     for (rule_index, rule) in rule_layers.rules.iter().enumerate() {
@@ -244,7 +247,10 @@ pub(crate) fn classify_item_key(
     best.and_then(|matched| matched.category).or(default)
 }
 
-pub(crate) fn classify_item_tags(description: &str, rule_layers: &CategoryRuleLayers) -> Vec<String> {
+pub(crate) fn classify_item_tags(
+    description: &str,
+    rule_layers: &CategoryRuleLayers,
+) -> Vec<String> {
     let matches = find_all_matches(description, rule_layers);
     let mut tags = Vec::new();
     let mut seen = HashSet::new();
@@ -260,7 +266,10 @@ pub(crate) fn classify_item_tags(description: &str, rule_layers: &CategoryRuleLa
     tags
 }
 
-pub(crate) fn sorted_matches_for_debug(description: &str, rule_layers: &CategoryRuleLayers) -> Vec<RuleMatch> {
+pub(crate) fn sorted_matches_for_debug(
+    description: &str,
+    rule_layers: &CategoryRuleLayers,
+) -> Vec<RuleMatch> {
     let mut matches = find_all_matches(description, rule_layers);
     matches.sort_by(|left, right| compare_match_rank(right, left));
     matches
