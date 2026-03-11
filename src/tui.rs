@@ -540,6 +540,77 @@ enum ReviewEditTarget {
     ItemNotes(usize),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ItemEditorField {
+    Description,
+    Price,
+    Category,
+    Notes,
+    Removed,
+}
+
+impl ItemEditorField {
+    fn all() -> [Self; 5] {
+        [
+            ItemEditorField::Description,
+            ItemEditorField::Price,
+            ItemEditorField::Category,
+            ItemEditorField::Notes,
+            ItemEditorField::Removed,
+        ]
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            ItemEditorField::Description => "Description",
+            ItemEditorField::Price => "Price",
+            ItemEditorField::Category => "Category",
+            ItemEditorField::Notes => "Notes",
+            ItemEditorField::Removed => "Removed",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ItemEditorState {
+    item_index: usize,
+    field_state: ListState,
+}
+
+impl ItemEditorState {
+    fn new(item_index: usize) -> Self {
+        let mut field_state = ListState::default();
+        field_state.select(Some(0));
+        Self {
+            item_index,
+            field_state,
+        }
+    }
+
+    fn selected_field(&self) -> ItemEditorField {
+        let fields = ItemEditorField::all();
+        self.field_state
+            .selected()
+            .and_then(|index| fields.get(index).copied())
+            .unwrap_or(ItemEditorField::Description)
+    }
+
+    fn move_selection(&mut self, delta: isize) {
+        let len = ItemEditorField::all().len();
+        let current = self.field_state.selected().unwrap_or(0) as isize;
+        let next = (current + delta).clamp(0, (len - 1) as isize) as usize;
+        self.field_state.select(Some(next));
+    }
+
+    fn select_field(&mut self, field: ItemEditorField) {
+        let index = ItemEditorField::all()
+            .iter()
+            .position(|candidate| *candidate == field)
+            .unwrap_or(0);
+        self.field_state.select(Some(index));
+    }
+}
+
 #[derive(Clone, Debug)]
 struct TextInputState {
     target: ReviewEditTarget,
@@ -614,6 +685,7 @@ struct ReviewState {
     field_state: ListState,
     items: Vec<ReviewItemState>,
     item_state: ListState,
+    item_editor: Option<ItemEditorState>,
     text_input: Option<TextInputState>,
 }
 
@@ -819,6 +891,7 @@ impl ReviewState {
             field_state,
             items,
             item_state,
+            item_editor: None,
             text_input: None,
         }
     }
@@ -844,10 +917,7 @@ impl ReviewState {
         }
     }
 
-    fn start_selected_item_description_edit(&mut self) {
-        let Some(index) = self.selected_item_index() else {
-            return;
-        };
+    fn start_item_description_edit(&mut self, index: usize) {
         if let Some(item) = self.items.get(index) {
             self.text_input = Some(TextInputState::with_value(
                 ReviewEditTarget::ItemDescription(index),
@@ -857,10 +927,7 @@ impl ReviewState {
         }
     }
 
-    fn start_selected_item_category_edit(&mut self) {
-        let Some(index) = self.selected_item_index() else {
-            return;
-        };
+    fn start_item_category_edit(&mut self, index: usize) {
         if let Some(item) = self.items.get(index) {
             self.text_input = Some(TextInputState::with_value(
                 ReviewEditTarget::ItemCategory(index),
@@ -870,10 +937,7 @@ impl ReviewState {
         }
     }
 
-    fn start_selected_item_price_edit(&mut self) {
-        let Some(index) = self.selected_item_index() else {
-            return;
-        };
+    fn start_item_price_edit(&mut self, index: usize) {
         if let Some(item) = self.items.get(index) {
             self.text_input = Some(TextInputState::with_value(
                 ReviewEditTarget::ItemPrice(index),
@@ -883,16 +947,74 @@ impl ReviewState {
         }
     }
 
-    fn start_selected_item_notes_edit(&mut self) {
-        let Some(index) = self.selected_item_index() else {
-            return;
-        };
+    fn start_item_notes_edit(&mut self, index: usize) {
         if let Some(item) = self.items.get(index) {
             self.text_input = Some(TextInputState::with_value(
                 ReviewEditTarget::ItemNotes(index),
                 format!("Item Notes ({})", item.id),
                 item.notes.clone(),
             ));
+        }
+    }
+
+    fn open_selected_item_editor(&mut self) {
+        let Some(index) = self.selected_item_index() else {
+            return;
+        };
+        self.item_editor = Some(ItemEditorState::new(index));
+    }
+
+    fn item_editor_select_field(&mut self, field: ItemEditorField) {
+        if self.item_editor.is_none() {
+            self.open_selected_item_editor();
+        }
+        if let Some(editor) = self.item_editor.as_mut() {
+            editor.select_field(field);
+        }
+    }
+
+    fn toggle_item_removed(&mut self, index: usize) -> Option<String> {
+        let item = self.items.get_mut(index)?;
+        item.removed = !item.removed;
+        Some(format!(
+            "{} {}",
+            item.id,
+            if item.removed {
+                "marked removed"
+            } else {
+                "restored"
+            }
+        ))
+    }
+
+    fn toggle_item_editor_removed(&mut self) -> Option<String> {
+        let item_index = self.item_editor.as_ref()?.item_index;
+        self.toggle_item_removed(item_index)
+    }
+
+    fn activate_item_editor_selection(&mut self) -> Option<String> {
+        let (item_index, field) = {
+            let editor = self.item_editor.as_ref()?;
+            (editor.item_index, editor.selected_field())
+        };
+        match field {
+            ItemEditorField::Description => {
+                self.start_item_description_edit(item_index);
+                Some("Editing item description".to_string())
+            }
+            ItemEditorField::Price => {
+                self.start_item_price_edit(item_index);
+                Some("Editing item price".to_string())
+            }
+            ItemEditorField::Category => {
+                self.start_item_category_edit(item_index);
+                Some("Editing item category".to_string())
+            }
+            ItemEditorField::Notes => {
+                self.start_item_notes_edit(item_index);
+                Some("Editing item notes".to_string())
+            }
+            ItemEditorField::Removed => self.toggle_item_removed(item_index),
         }
     }
 
@@ -1468,7 +1590,7 @@ impl App {
             Ok(detail) => {
                 self.review_state = Some(ReviewState::from_detail(&detail));
                 self.set_status(
-                    "Review receipt: h/l switch pane | Enter edit | v price | n notes | c edit category | x toggle removed | p preview | a approve | Esc cancel",
+                    "Review receipt: h/l switch pane | Enter item editor | v price | n notes | c edit category | x toggle removed | p preview | a approve | Esc cancel",
                 );
             }
             Err(error) => self.set_error(format!("Failed to load receipt review state: {error}")),
@@ -2941,14 +3063,97 @@ fn render_review_screen(
     frame.render_widget(preview, right[1]);
 
     let help = Paragraph::new(
-        "h/l pane  |  j/k move  |  Enter edit description/field  |  v edit price  |  n edit item notes  |  c edit category  |  x toggle removed  |  p preview tab  |  a approve  |  Esc cancel",
+        "h/l pane  |  j/k move  |  Enter open item editor / edit field  |  v price  |  n notes  |  c category  |  x toggle removed  |  p preview tab  |  a approve  |  Esc cancel",
     )
     .wrap(Wrap { trim: true });
     frame.render_widget(help, rows[2]);
 
+    if review_state.item_editor.is_some() {
+        render_item_editor_modal(frame, review_state);
+    }
     if let Some(text_input) = &review_state.text_input {
         render_text_input_modal(frame, text_input);
     }
+}
+
+fn render_item_editor_modal(frame: &mut ratatui::Frame<'_>, review_state: &mut ReviewState) {
+    let Some(item_index) = review_state
+        .item_editor
+        .as_ref()
+        .map(|editor| editor.item_index)
+    else {
+        return;
+    };
+    let Some(item) = review_state.items.get(item_index) else {
+        return;
+    };
+
+    let popup = centered_rect(72, 11, frame.area());
+    frame.render_widget(Clear, popup);
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(format!("Edit Item ({})", item.id))
+            .style(Style::default().bg(Color::Black)),
+        popup,
+    );
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(6), Constraint::Length(2)])
+        .split(popup);
+
+    let items = ItemEditorField::all()
+        .into_iter()
+        .map(|field| {
+            let value = match field {
+                ItemEditorField::Description => {
+                    if item.description.trim().is_empty() {
+                        "<empty>".to_string()
+                    } else {
+                        item.description.clone()
+                    }
+                }
+                ItemEditorField::Price => {
+                    if item.price.trim().is_empty() {
+                        "<empty>".to_string()
+                    } else {
+                        item.price.clone()
+                    }
+                }
+                ItemEditorField::Category => {
+                    if item.category.trim().is_empty() {
+                        "<empty>".to_string()
+                    } else {
+                        item.category.clone()
+                    }
+                }
+                ItemEditorField::Notes => {
+                    if item.notes.trim().is_empty() {
+                        "<empty>".to_string()
+                    } else {
+                        item.notes.clone()
+                    }
+                }
+                ItemEditorField::Removed => item.removed.to_string(),
+            };
+            ListItem::new(Line::from(format!("{}: {}", field.label(), value)))
+        })
+        .collect::<Vec<_>>();
+
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title("Fields"))
+        .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+        .highlight_symbol(">> ");
+    if let Some(editor) = review_state.item_editor.as_mut() {
+        frame.render_stateful_widget(list, rows[0], &mut editor.field_state);
+    }
+
+    let help = Paragraph::new(
+        "Up/Down select  |  Enter edit or toggle removed  |  x / Space toggle removed  |  Esc close",
+    )
+    .wrap(Wrap { trim: true });
+    frame.render_widget(help, rows[1]);
 }
 
 fn render_text_input_modal(frame: &mut ratatui::Frame<'_>, text_input: &TextInputState) {
@@ -3282,6 +3487,30 @@ fn run_app(
                         }
                         _ => {}
                     }
+                } else if review_state.item_editor.is_some() {
+                    match key.code {
+                        KeyCode::Esc => {
+                            review_state.item_editor = None;
+                            status_message = Some("Closed item editor".to_string());
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if let Some(editor) = review_state.item_editor.as_mut() {
+                                editor.move_selection(1);
+                            }
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            if let Some(editor) = review_state.item_editor.as_mut() {
+                                editor.move_selection(-1);
+                            }
+                        }
+                        KeyCode::Enter => {
+                            status_message = review_state.activate_item_editor_selection();
+                        }
+                        KeyCode::Char('x') | KeyCode::Char(' ') => {
+                            status_message = review_state.toggle_item_editor_removed();
+                        }
+                        _ => {}
+                    }
                 } else {
                     match (key.code, key.modifiers) {
                         (KeyCode::Esc, _) => review_cancelled = true,
@@ -3361,42 +3590,32 @@ fn run_app(
                             }
                         }
                         (KeyCode::Enter, _) => match review_state.pane {
-                            ReviewPane::Items => {
-                                review_state.start_selected_item_description_edit()
-                            }
+                            ReviewPane::Items => review_state.open_selected_item_editor(),
                             ReviewPane::Fields => review_state.start_selected_field_edit(),
                             ReviewPane::Preview => {}
                         },
                         (KeyCode::Char('c'), _) => {
                             if review_state.pane == ReviewPane::Items {
-                                review_state.start_selected_item_category_edit();
+                                review_state.item_editor_select_field(ItemEditorField::Category);
+                                status_message = review_state.activate_item_editor_selection();
                             }
                         }
                         (KeyCode::Char('v'), _) => {
                             if review_state.pane == ReviewPane::Items {
-                                review_state.start_selected_item_price_edit();
+                                review_state.item_editor_select_field(ItemEditorField::Price);
+                                status_message = review_state.activate_item_editor_selection();
                             }
                         }
                         (KeyCode::Char('n'), _) => {
                             if review_state.pane == ReviewPane::Items {
-                                review_state.start_selected_item_notes_edit();
+                                review_state.item_editor_select_field(ItemEditorField::Notes);
+                                status_message = review_state.activate_item_editor_selection();
                             }
                         }
                         (KeyCode::Char('x'), _) => {
                             if review_state.pane == ReviewPane::Items {
                                 if let Some(index) = review_state.selected_item_index() {
-                                    if let Some(item) = review_state.items.get_mut(index) {
-                                        item.removed = !item.removed;
-                                        status_message = Some(format!(
-                                            "{} {}",
-                                            item.id,
-                                            if item.removed {
-                                                "marked removed"
-                                            } else {
-                                                "restored"
-                                            }
-                                        ));
-                                    }
+                                    status_message = review_state.toggle_item_removed(index);
                                 }
                             }
                         }
