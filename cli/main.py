@@ -39,7 +39,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 Commands:
   import [cc|chequing] [csv_file]
                              Import transactions (auto-detect type if omitted)
-  scan <image>               Scan a receipt image
   serve [--port]             Start receipt upload server
   list-approved              List approved receipts
   list-scanned               List scanned receipts
@@ -69,17 +68,6 @@ Notes:
     chequing_parser = import_subparsers.add_parser("chequing", help="Import chequing transactions")
     chequing_parser.add_argument("csv_file", nargs="?", help="CSV file to import (auto-detect if not provided)")
 
-    # scan command
-    scan_parser = subparsers.add_parser("scan", help="Scan a receipt image")
-    scan_parser.add_argument("image", help="Path to receipt image")
-    scan_parser.add_argument(
-        "--ocr-url", default="http://localhost:8001", help="OCR service URL (default: http://localhost:8001)"
-    )
-    scan_parser.add_argument(
-        "--no-edit",
-        action="store_true",
-        help="Skip editor and leave draft in receipts/json/scanned/",
-    )
     # serve command
     serve_parser = subparsers.add_parser("serve", help="Start receipt upload server")
     serve_parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
@@ -203,10 +191,6 @@ Notes:
         print(f"Unsupported import type: {args.import_type}")
         return 1
 
-    elif args.command == "scan":
-        from beanbeaver.cli.receipt import cmd_scan
-
-        return _run_legacy_command(cmd_scan, args)
     elif args.command == "serve":
         from beanbeaver.cli.receipt import cmd_serve
 

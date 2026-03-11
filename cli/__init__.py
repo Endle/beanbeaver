@@ -2,8 +2,6 @@
 
 Usage:
     bb import [cc|chequing] [csv_file]
-    bb scan <image>
-    bb scan <image> --no-edit
     bb serve [--port]
     bb list-approved
     bb list-scanned
