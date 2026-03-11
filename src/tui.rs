@@ -2594,6 +2594,12 @@ fn char_to_byte_index(text: &str, char_idx: usize) -> usize {
         .unwrap_or(text.len())
 }
 
+fn popup_style() -> Style {
+    Style::default()
+        .bg(Color::Rgb(235, 235, 235))
+        .fg(Color::Black)
+}
+
 fn effective_receipt_text(document: &Value, key: &str) -> String {
     if let Some(value) = document
         .get("review")
@@ -3094,7 +3100,7 @@ fn render_item_editor_modal(frame: &mut ratatui::Frame<'_>, review_state: &mut R
         Block::default()
             .borders(Borders::ALL)
             .title(format!("Edit Item ({})", item.id))
-            .style(Style::default().bg(Color::Black)),
+            .style(popup_style()),
         popup,
     );
 
@@ -3142,7 +3148,13 @@ fn render_item_editor_modal(frame: &mut ratatui::Frame<'_>, review_state: &mut R
         .collect::<Vec<_>>();
 
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title("Fields"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Fields")
+                .style(popup_style()),
+        )
+        .style(popup_style())
         .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
         .highlight_symbol(">> ");
     if let Some(editor) = review_state.item_editor.as_mut() {
@@ -3152,6 +3164,7 @@ fn render_item_editor_modal(frame: &mut ratatui::Frame<'_>, review_state: &mut R
     let help = Paragraph::new(
         "Up/Down select  |  Enter edit or toggle removed  |  x / Space toggle removed  |  Esc close",
     )
+    .style(popup_style())
     .wrap(Wrap { trim: true });
     frame.render_widget(help, rows[1]);
 }
@@ -3163,7 +3176,7 @@ fn render_text_input_modal(frame: &mut ratatui::Frame<'_>, text_input: &TextInpu
         Block::default()
             .borders(Borders::ALL)
             .title(text_input.label.as_str())
-            .style(Style::default().bg(Color::Black)),
+            .style(popup_style()),
         popup,
     );
 
@@ -3189,17 +3202,14 @@ fn render_text_input_modal(frame: &mut ratatui::Frame<'_>, text_input: &TextInpu
         Span::raw(after),
     ]))
     .block(Block::default().borders(Borders::ALL).title("Edit"))
-    .style(
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD),
-    )
+    .style(popup_style().add_modifier(Modifier::BOLD))
     .wrap(Wrap { trim: false });
     frame.render_widget(input, rows[0]);
 
     let help = Paragraph::new(
         "Enter apply  |  Esc cancel  |  Left/Right move  |  Home/End  |  Backspace/Delete",
     )
+    .style(popup_style())
     .wrap(Wrap { trim: true });
     frame.render_widget(help, rows[1]);
 }
@@ -3228,7 +3238,7 @@ fn render_config_modal(
         Block::default()
             .borders(Borders::ALL)
             .title("Ledger Configuration")
-            .style(Style::default().bg(Color::Black)),
+            .style(popup_style()),
         popup,
     );
 
@@ -3244,11 +3254,7 @@ fn render_config_modal(
     };
     let input = Paragraph::new(input_value)
         .block(Block::default().borders(Borders::ALL).title("Project Root"))
-        .style(
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        )
+        .style(popup_style().add_modifier(Modifier::BOLD))
         .wrap(Wrap { trim: false });
     frame.render_widget(input, rows[1]);
 
@@ -3290,7 +3296,7 @@ fn render_match_modal(frame: &mut ratatui::Frame<'_>, match_state: &mut MatchSta
         Block::default()
             .borders(Borders::ALL)
             .title("Match Approved Receipt")
-            .style(Style::default().bg(Color::Black)),
+            .style(popup_style()),
         popup,
     );
 
