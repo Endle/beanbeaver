@@ -1623,7 +1623,7 @@ impl App {
         }
         let detail = backend_show_receipt(&path)?;
         self.detail_path = Some(detail.path.clone());
-        self.detail_lines = render_detail_lines(&detail);
+        self.detail_lines = render_detail_lines(self.active_queue, &detail);
         self.detail_scroll_y = 0;
         self.detail_scroll_x = 0;
         Ok(())
@@ -2677,7 +2677,7 @@ fn format_podman_ports(ports_value: &Value) -> String {
     rendered.join(", ")
 }
 
-fn render_detail_lines(detail: &ShowReceiptResponse) -> Vec<String> {
+fn render_detail_lines(queue: Queue, detail: &ShowReceiptResponse) -> Vec<String> {
     let mut lines = vec![
         format!(
             "Merchant: {}",
@@ -2694,14 +2694,84 @@ fn render_detail_lines(detail: &ShowReceiptResponse) -> Vec<String> {
         format!("Receipt Dir: {}", detail.summary.receipt_dir),
         format!("Stage File: {}", detail.summary.stage_file),
         String::new(),
-        "Stage JSON".to_string(),
+        match queue {
+            Queue::Scanned => "Stage JSON".to_string(),
+            Queue::Approved => "Reviewed JSON".to_string(),
+        },
     ];
 
-    match serde_json::to_string_pretty(&detail.document) {
+    let document = match queue {
+        Queue::Scanned => detail.document.clone(),
+        Queue::Approved => effective_detail_document(&detail.document),
+    };
+    match serde_json::to_string_pretty(&document) {
         Ok(json) => lines.extend(json.lines().map(ToOwned::to_owned)),
         Err(error) => lines.push(format!("Failed to render JSON: {error}")),
     }
     lines
+}
+
+fn effective_detail_document(document: &Value) -> Value {
+    let mut output = serde_json::Map::new();
+
+    if let Some(meta) = document.get("meta") {
+        output.insert("meta".to_string(), meta.clone());
+    }
+
+    let mut receipt = document
+        .get("receipt")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    for key in ["merchant", "date", "subtotal", "tax", "total", "notes"] {
+        let value = effective_receipt_text(document, key);
+        if value.trim().is_empty() {
+            receipt.remove(key);
+        } else {
+            receipt.insert(key.to_string(), Value::String(value));
+        }
+    }
+    output.insert("receipt".to_string(), Value::Object(receipt));
+
+    let mut items = Vec::new();
+    if let Some(item_docs) = document.get("items").and_then(Value::as_array) {
+        for item in item_docs {
+            if effective_item_removed(item) {
+                continue;
+            }
+            let mut effective_item = serde_json::Map::new();
+            if let Some(id) = item.get("id") {
+                effective_item.insert("id".to_string(), id.clone());
+            }
+
+            for key in ["description", "price", "quantity", "notes"] {
+                let value = effective_item_text(item, key);
+                if !value.trim().is_empty() {
+                    effective_item.insert(key.to_string(), Value::String(value));
+                }
+            }
+
+            if let Some(classification) = effective_item_classification(item) {
+                effective_item.insert("classification".to_string(), classification);
+            }
+
+            if let Some(warnings) = item.get("warnings") {
+                effective_item.insert("warnings".to_string(), warnings.clone());
+            }
+
+            items.push(Value::Object(effective_item));
+        }
+    }
+    output.insert("items".to_string(), Value::Array(items));
+
+    if let Some(warnings) = document.get("warnings") {
+        output.insert("warnings".to_string(), warnings.clone());
+    }
+    if let Some(raw_text) = document.get("raw_text") {
+        output.insert("raw_text".to_string(), raw_text.clone());
+    }
+
+    Value::Object(output)
 }
 
 fn json_value_to_text(value: Option<&Value>) -> String {
@@ -2777,6 +2847,28 @@ fn effective_item_category_text(item: &Value) -> String {
             .and_then(Value::as_object)
             .and_then(|classification| classification.get("category")),
     )
+}
+
+fn effective_item_classification(item: &Value) -> Option<Value> {
+    let mut classification = item
+        .get("classification")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    if let Some(review_classification) = item
+        .get("review")
+        .and_then(Value::as_object)
+        .and_then(|review| review.get("classification"))
+        .and_then(Value::as_object)
+    {
+        classification.extend(review_classification.clone());
+    }
+
+    if classification.is_empty() {
+        None
+    } else {
+        Some(Value::Object(classification))
+    }
 }
 
 fn effective_item_removed(item: &Value) -> bool {
