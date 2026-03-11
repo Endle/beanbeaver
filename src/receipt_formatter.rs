@@ -25,6 +25,25 @@ pub(crate) struct FormatterReceiptInput {
     pub(crate) warnings: Vec<FormatterWarningInput>,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct EnrichedPostingInput {
+    pub(crate) account: String,
+    pub(crate) number: Option<String>,
+    pub(crate) currency: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct EnrichedMatchInput {
+    pub(crate) transaction_date_iso: String,
+    pub(crate) payee: String,
+    pub(crate) narration: String,
+    pub(crate) postings: Vec<EnrichedPostingInput>,
+    pub(crate) file_path: String,
+    pub(crate) line_number: i32,
+    pub(crate) confidence: f64,
+    pub(crate) match_details: String,
+}
+
 fn decimal_to_cents(value: &str) -> i64 {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -349,4 +368,119 @@ pub(crate) fn generate_filename(date_iso: &str, date_is_placeholder: bool, merch
     }
 
     format!("{date_str}-{merchant_clean}.beancount")
+}
+
+pub(crate) fn format_enriched_transaction(
+    receipt: &FormatterReceiptInput,
+    match_input: &EnrichedMatchInput,
+    default_expense: &str,
+) -> String {
+    let receipt_total_cents = decimal_to_cents(&receipt.total);
+    let tax_cents = receipt.tax.as_deref().map(decimal_to_cents);
+    let mut lines = Vec::new();
+
+    lines.push("; === ENRICHED TRANSACTION - REVIEW NEEDED ===".to_string());
+    lines.push(format!("; Receipt: {}", receipt.image_filename));
+    lines.push(format!(
+        "; Matched: {}:{}",
+        match_input.file_path, match_input.line_number
+    ));
+    lines.push(format!(
+        "; Confidence: {:.0}% ({})",
+        match_input.confidence * 100.0,
+        match_input.match_details
+    ));
+    lines.push(String::new());
+
+    let payee_clean = match_input.payee.replace('"', "'");
+    let narration_clean = match_input.narration.replace('"', "'");
+    lines.push(format!(
+        r#"{} * "{}" "{}""#,
+        match_input.transaction_date_iso, payee_clean, narration_clean
+    ));
+
+    let mut cc_account: Option<String> = None;
+    let mut cc_amount_cents: Option<i64> = None;
+    let mut original_expense: Option<String> = None;
+
+    for posting in &match_input.postings {
+        let Some(number) = posting.number.as_deref() else {
+            continue;
+        };
+        let number_cents = decimal_to_cents(number);
+        if number_cents < 0 {
+            cc_account = Some(posting.account.clone());
+            cc_amount_cents = Some(number_cents);
+        } else if number_cents > 0 {
+            original_expense = Some(posting.account.clone());
+        }
+    }
+
+    let expense_base = original_expense.unwrap_or_else(|| default_expense.to_string());
+    let mut postings = Vec::new();
+    if let (Some(cc_account), Some(cc_amount_cents)) = (cc_account.clone(), cc_amount_cents) {
+        postings.push((cc_account, format!("{} CAD", cents_to_fixed(cc_amount_cents)), None));
+    } else {
+        postings.push((
+            "Liabilities:CreditCard:FIXME".to_string(),
+            format!("{} CAD", cents_to_fixed(-receipt_total_cents)),
+            None,
+        ));
+    }
+
+    let mut items_total_cents = 0i64;
+    for item in &receipt.items {
+        let desc_clean = item.description.replace('"', "'");
+        let comment = if item.quantity > 1 {
+            Some(format!("{desc_clean} (qty {})", item.quantity))
+        } else {
+            Some(desc_clean)
+        };
+        postings.push((
+            item.posting_account.clone(),
+            format!("{} CAD", cents_to_fixed(decimal_to_cents(&item.price))),
+            comment,
+        ));
+        items_total_cents += decimal_to_cents(&item.price);
+    }
+
+    if let Some(tax_cents) = tax_cents {
+        if tax_cents != 0 {
+            postings.push(("Expenses:Tax:HST".to_string(), format!("{} CAD", cents_to_fixed(tax_cents)), None));
+            items_total_cents += tax_cents;
+        }
+    }
+
+    let expected_total_cents = cc_amount_cents.map(|value| value.abs()).unwrap_or(receipt_total_cents);
+    if expected_total_cents > 0 && items_total_cents != expected_total_cents {
+        let diff = expected_total_cents - items_total_cents;
+        if diff > 1 {
+            postings.push((
+                expense_base.clone(),
+                format!("{} CAD", cents_to_fixed(diff)),
+                Some("remaining/unitemized".to_string()),
+            ));
+        } else if diff < -1 {
+            lines.push(format!(
+                "  ; WARNING: items total ({}) exceeds transaction ({})",
+                cents_to_fixed(items_total_cents),
+                cents_to_fixed(expected_total_cents)
+            ));
+        }
+    }
+
+    lines.extend(format_postings_aligned(&postings, "  "));
+    lines.push(String::new());
+    lines.push("; --- Original Transaction (to be replaced) ---".to_string());
+    lines.push(format!(
+        r#"; {} * "{}" "{}""#,
+        match_input.transaction_date_iso, payee_clean, narration_clean
+    ));
+    for posting in &match_input.postings {
+        if let (Some(number), Some(currency)) = (&posting.number, &posting.currency) {
+            lines.push(format!(";   {}  {} {}", posting.account, number, currency));
+        }
+    }
+
+    lines.join("\n")
 }

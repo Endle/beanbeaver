@@ -200,91 +200,13 @@ def format_enriched_transaction(
     Returns:
         Formatted beancount transaction as a string
     """
-    txn = match.transaction
-    lines = []
-
-    # Header with match info
-    lines.append("; === ENRICHED TRANSACTION - REVIEW NEEDED ===")
-    lines.append(f"; Receipt: {receipt.image_filename}")
-    lines.append(f"; Matched: {match.file_path}:{match.line_number}")
-    lines.append(f"; Confidence: {match.confidence:.0%} ({match.match_details})")
-    lines.append("")
-
-    # Use original transaction date and payee
-    date_str = txn.date.strftime("%Y-%m-%d")
-    payee_clean = (txn.payee or "").replace('"', "'")
-    narration = (txn.narration or "").replace('"', "'")
-    lines.append(f'{date_str} * "{payee_clean}" "{narration}"')
-
-    # Find the credit card account and amount from original transaction
-    cc_account: str | None = None
-    cc_amount: Decimal | None = None
-    original_expense = None
-
-    for posting in txn.postings:
-        number = posting.units.number if posting.units else None
-        if number is not None and number < 0:
-            cc_account = posting.account
-            cc_amount = number
-        elif number is not None and number > 0:
-            original_expense = posting.account
-
-    # Collect all postings for aligned formatting
-    postings: list[tuple[str, str, str | None]] = []
-
-    # Credit card posting (keep original)
-    if cc_account is not None and cc_amount is not None:
-        postings.append((cc_account, f"{cc_amount:.2f} CAD", None))
-    else:
-        postings.append(("Liabilities:CreditCard:FIXME", f"-{receipt.total:.2f} CAD", None))
-
-    # Use original expense category as base, or default
-    expense_base = original_expense or default_expense
-
-    # Item postings
-    items_total = Decimal("0")
-    for item in receipt.items:
-        category = _posting_account_for_item(item.category, default=expense_base)
-        price_str = f"{item.price:.2f}"
-        desc_clean = item.description.replace('"', "'")
-
-        if item.quantity > 1:
-            postings.append((category, f"{price_str} CAD", f"{desc_clean} (qty {item.quantity})"))
-        else:
-            postings.append((category, f"{price_str} CAD", desc_clean))
-
-        items_total += item.price
-
-    # Tax posting if present
-    if receipt.tax:
-        tax_str = f"{receipt.tax:.2f}"
-        postings.append(("Expenses:Tax:HST", f"{tax_str} CAD", None))
-        items_total += receipt.tax
-
-    # Balancing line for remaining amount
-    if cc_amount is not None:
-        expected_total = abs(cc_amount)
-    else:
-        expected_total = receipt.total
-
-    if items_total != expected_total and expected_total > Decimal("0"):
-        diff = expected_total - items_total
-        if diff > Decimal("0.01"):
-            diff_str = f"{diff:.2f}"
-            postings.append((expense_base, f"{diff_str} CAD", "remaining/unitemized"))
-        elif diff < Decimal("-0.01"):
-            lines.append(f"  ; WARNING: items total ({items_total:.2f}) exceeds transaction ({expected_total:.2f})")
-
-    # Format postings with aligned comments
-    lines.extend(_format_postings_aligned(postings))
-
-    lines.append("")
-
-    # Original transaction for reference
-    lines.append("; --- Original Transaction (to be replaced) ---")
-    lines.append(f'; {date_str} * "{payee_clean}" "{narration}"')
-    for posting in txn.postings:
-        if posting.units:
-            lines.append(f";   {posting.account}  {posting.units.number:.2f} {posting.units.currency}")
-
-    return "\n".join(lines)
+    item_accounts = [
+        _posting_account_for_item(item.category, default=default_expense)
+        for item in receipt.items
+    ]
+    return require_rust_matcher().receipt_format_enriched_transaction(
+        receipt,
+        item_accounts,
+        match,
+        default_expense,
+    )

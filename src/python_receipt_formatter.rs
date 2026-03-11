@@ -65,6 +65,53 @@ fn extract_formatter_receipt_input(
     })
 }
 
+fn optional_string_from_obj(value: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
+    if value.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(value.extract::<String>()?))
+}
+
+fn extract_enriched_match_input(match_obj: &Bound<'_, PyAny>) -> PyResult<receipt_formatter::EnrichedMatchInput> {
+    let txn = match_obj.getattr("transaction")?;
+    let postings_any = txn.getattr("postings")?;
+    let mut postings = Vec::new();
+    for posting in postings_any.try_iter()? {
+        let posting = posting?;
+        let units = posting.getattr("units")?;
+        let (number, currency) = if units.is_none() {
+            (None, None)
+        } else {
+            (
+                Some(fixed_decimal_string(&units.getattr("number")?)?),
+                optional_string_from_obj(&units.getattr("currency")?)?,
+            )
+        };
+        postings.push(receipt_formatter::EnrichedPostingInput {
+            account: required_string_attr(&posting, "account")?,
+            number,
+            currency,
+        });
+    }
+
+    Ok(receipt_formatter::EnrichedMatchInput {
+        transaction_date_iso: txn.getattr("date")?.str()?.extract::<String>()?,
+        payee: match txn.getattr("payee") {
+            Ok(value) if !value.is_none() => value.extract::<String>()?,
+            _ => String::new(),
+        },
+        narration: match txn.getattr("narration") {
+            Ok(value) if !value.is_none() => value.extract::<String>()?,
+            _ => String::new(),
+        },
+        postings,
+        file_path: required_string_attr(match_obj, "file_path")?,
+        line_number: match_obj.getattr("line_number")?.extract::<i32>()?,
+        confidence: match_obj.getattr("confidence")?.extract::<f64>()?,
+        match_details: required_string_attr(match_obj, "match_details")?,
+    })
+}
+
 #[pyfunction]
 fn receipt_format_parsed_receipt(
     receipt: &Bound<'_, PyAny>,
@@ -105,9 +152,26 @@ fn receipt_generate_filename(receipt: &Bound<'_, PyAny>) -> PyResult<String> {
     ))
 }
 
+#[pyfunction]
+fn receipt_format_enriched_transaction(
+    receipt: &Bound<'_, PyAny>,
+    item_accounts: Vec<String>,
+    match_obj: &Bound<'_, PyAny>,
+    default_expense: String,
+) -> PyResult<String> {
+    let input = extract_formatter_receipt_input(receipt, item_accounts)?;
+    let match_input = extract_enriched_match_input(match_obj)?;
+    Ok(receipt_formatter::format_enriched_transaction(
+        &input,
+        &match_input,
+        &default_expense,
+    ))
+}
+
 pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(receipt_format_parsed_receipt, module)?)?;
     module.add_function(wrap_pyfunction!(receipt_format_draft_beancount, module)?)?;
     module.add_function(wrap_pyfunction!(receipt_generate_filename, module)?)?;
+    module.add_function(wrap_pyfunction!(receipt_format_enriched_transaction, module)?)?;
     Ok(())
 }
