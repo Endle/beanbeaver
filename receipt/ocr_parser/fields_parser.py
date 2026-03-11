@@ -23,33 +23,12 @@ def _extract_merchant(
     2. Use confidence-weighted extraction from pages data (skip low-confidence lines)
     3. Fall back to first meaningful line (original behavior)
     """
-    # Strategy 1: Search for known merchants in full text
-    known_merchants = known_merchants or []
-    full_text_upper = full_text.upper()
-
-    # Sort by length descending to match longer/more specific names first
-    # Use word boundary matching to avoid matching substrings
-    for merchant in sorted(known_merchants, key=len, reverse=True):
-        pattern = r"\b" + re.escape(merchant.upper()) + r"\b"
-        if re.search(pattern, full_text_upper):
-            return merchant
-
-    # Strategy 2: Use pages data with confidence scores
-    if pages:
-        confident_merchant = _extract_merchant_with_confidence(pages)
-        if confident_merchant:
-            return confident_merchant
-
-    # Strategy 3: Fall back to first meaningful line (original behavior)
-    for line in lines[:5]:
-        # Skip lines that look like dates, numbers only, or very short
-        if len(line) > 3 and not re.match(r"^[\d/\-:]+$", line):
-            # Clean up common OCR artifacts
-            cleaned = re.sub(r"[^\w\s&\'-]", "", line).strip()
-            if len(cleaned) > 2:
-                return cleaned
-
-    return "UNKNOWN_MERCHANT"
+    return require_rust_matcher().receipt_extract_merchant(
+        lines,
+        full_text,
+        pages or [],
+        list(known_merchants) if known_merchants is not None else None,
+    )
 
 
 def _extract_merchant_with_confidence(pages: list[dict[str, Any]]) -> str | None:
