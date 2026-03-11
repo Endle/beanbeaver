@@ -2678,36 +2678,107 @@ fn format_podman_ports(ports_value: &Value) -> String {
 }
 
 fn render_detail_lines(queue: Queue, detail: &ShowReceiptResponse) -> Vec<String> {
-    let mut lines = vec![
-        format!(
-            "Merchant: {}",
-            detail.summary.merchant.as_deref().unwrap_or("UNKNOWN")
-        ),
-        format!(
-            "Date: {}",
-            detail.summary.date.as_deref().unwrap_or("UNKNOWN")
-        ),
-        format!(
-            "Total: {}",
-            detail.summary.total.as_deref().unwrap_or("UNKNOWN")
-        ),
-        format!("Receipt Dir: {}", detail.summary.receipt_dir),
-        format!("Stage File: {}", detail.summary.stage_file),
-        String::new(),
-        match queue {
-            Queue::Scanned => "Stage JSON".to_string(),
-            Queue::Approved => "Reviewed JSON".to_string(),
-        },
-    ];
-
     let document = match queue {
         Queue::Scanned => detail.document.clone(),
         Queue::Approved => effective_detail_document(&detail.document),
     };
-    match serde_json::to_string_pretty(&document) {
-        Ok(json) => lines.extend(json.lines().map(ToOwned::to_owned)),
-        Err(error) => lines.push(format!("Failed to render JSON: {error}")),
+
+    let mut lines = vec![
+        format!("Receipt Dir: {}", detail.summary.receipt_dir),
+        format!("Stage File: {}", detail.summary.stage_file),
+        String::new(),
+    ];
+    lines.extend(render_receipt_summary_lines(
+        &document,
+        match queue {
+            Queue::Scanned => "Parsed Receipt",
+            Queue::Approved => "Reviewed Receipt",
+        },
+    ));
+    lines
+}
+
+fn render_receipt_summary_lines(document: &Value, title: &str) -> Vec<String> {
+    let mut lines = vec![title.to_string(), String::new(), "Receipt".to_string()];
+
+    let receipt_fields = [
+        ("Merchant", effective_receipt_text(document, "merchant")),
+        ("Date", effective_receipt_text(document, "date")),
+        ("Currency", effective_receipt_text(document, "currency")),
+        ("Subtotal", effective_receipt_text(document, "subtotal")),
+        ("Tax", effective_receipt_text(document, "tax")),
+        ("Total", effective_receipt_text(document, "total")),
+        ("Notes", effective_receipt_text(document, "notes")),
+    ];
+    for (label, value) in receipt_fields {
+        if !value.trim().is_empty() {
+            lines.push(format!("{label}: {value}"));
+        }
     }
+
+    let visible_items: Vec<&Value> = document
+        .get("items")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter(|item| !effective_item_removed(item))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    lines.push(String::new());
+    lines.push(format!("Items ({})", visible_items.len()));
+    if visible_items.is_empty() {
+        lines.push("No items found".to_string());
+    } else {
+        for (index, item) in visible_items.iter().enumerate() {
+            let description = effective_item_text(item, "description");
+            let price = effective_item_text(item, "price");
+            let category = effective_item_category_text(item);
+            let quantity = effective_item_text(item, "quantity");
+            let notes = effective_item_text(item, "notes");
+
+            let mut item_parts = vec![format!(
+                "{:>2}. {}",
+                index + 1,
+                if description.trim().is_empty() {
+                    "<no description>"
+                } else {
+                    description.trim()
+                }
+            )];
+            if !price.trim().is_empty() {
+                item_parts.push(format!("${price}"));
+            }
+            if !category.trim().is_empty() {
+                item_parts.push(category);
+            }
+            lines.push(item_parts.join("  |  "));
+
+            if !quantity.trim().is_empty() {
+                lines.push(format!("    Qty: {quantity}"));
+            }
+            if !notes.trim().is_empty() {
+                lines.push(format!("    Notes: {notes}"));
+            }
+
+            let item_warnings = render_warning_values(item.get("warnings"));
+            for warning in item_warnings {
+                lines.push(format!("    Warning: {warning}"));
+            }
+        }
+    }
+
+    let receipt_warnings = render_warning_values(document.get("warnings"));
+    if !receipt_warnings.is_empty() {
+        lines.push(String::new());
+        lines.push("Warnings".to_string());
+        for warning in receipt_warnings {
+            lines.push(format!("- {warning}"));
+        }
+    }
+
     lines
 }
 
@@ -2780,6 +2851,31 @@ fn json_value_to_text(value: Option<&Value>) -> String {
         Some(Value::Number(number)) => number.to_string(),
         Some(Value::Bool(flag)) => flag.to_string(),
         _ => String::new(),
+    }
+}
+
+fn render_warning_values(value: Option<&Value>) -> Vec<String> {
+    match value {
+        Some(Value::Array(values)) => values
+            .iter()
+            .map(|warning| {
+                let text = json_value_to_text(Some(warning));
+                if text.is_empty() {
+                    warning.to_string()
+                } else {
+                    text
+                }
+            })
+            .collect(),
+        Some(other) => {
+            let text = json_value_to_text(Some(other));
+            if text.is_empty() {
+                vec![other.to_string()]
+            } else {
+                vec![text]
+            }
+        }
+        None => Vec::new(),
     }
 }
 
@@ -4249,4 +4345,113 @@ pub fn run(quit_after_launch: bool) -> AppResult<()> {
     })();
     restore_terminal(terminal)?;
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_detail_lines_scanned_shows_human_readable_summary() {
+        let detail = ShowReceiptResponse {
+            path: "/tmp/scanned.receipt.json".to_string(),
+            summary: ReceiptSummary {
+                path: "/tmp/scanned.receipt.json".to_string(),
+                receipt_dir: "2026-03-07_costco_466_68_ad51".to_string(),
+                stage_file: "parsed.receipt.json".to_string(),
+                merchant: Some("COSTCO".to_string()),
+                date: Some("2026-03-07".to_string()),
+                total: Some("466.68".to_string()),
+            },
+            document: serde_json::json!({
+                "receipt": {
+                    "merchant": "COSTCO",
+                    "date": "2026-03-07",
+                    "currency": "CAD",
+                    "subtotal": "460.96",
+                    "tax": "5.72",
+                    "total": "466.68"
+                },
+                "items": [
+                    {
+                        "description": "810 LCBO CARD",
+                        "price": "400.00",
+                        "quantity": 1,
+                        "classification": {"category": "alcohol"},
+                        "warnings": []
+                    }
+                ],
+                "debug": {
+                    "ocr_payload": {"detections": []}
+                }
+            }),
+        };
+
+        let lines = render_detail_lines(Queue::Scanned, &detail);
+        let rendered = lines.join("\n");
+
+        assert!(rendered.contains("Parsed Receipt"));
+        assert!(rendered.contains("Receipt"));
+        assert!(rendered.contains("Items (1)"));
+        assert!(rendered.contains("810 LCBO CARD  |  $400.00  |  alcohol"));
+        assert!(!rendered.contains("Stage JSON"));
+        assert!(!rendered.contains("\"debug\""));
+    }
+
+    #[test]
+    fn render_detail_lines_approved_applies_review_overrides() {
+        let detail = ShowReceiptResponse {
+            path: "/tmp/review_stage_1.receipt.json".to_string(),
+            summary: ReceiptSummary {
+                path: "/tmp/review_stage_1.receipt.json".to_string(),
+                receipt_dir: "2026-03-07_costco_466_68_ad51".to_string(),
+                stage_file: "review_stage_1.receipt.json".to_string(),
+                merchant: Some("COSTCO".to_string()),
+                date: Some("2026-03-07".to_string()),
+                total: Some("466.68".to_string()),
+            },
+            document: serde_json::json!({
+                "receipt": {
+                    "merchant": "COSTCO",
+                    "date": "2026-03-07",
+                    "total": "466.68"
+                },
+                "review": {
+                    "notes": "manual review"
+                },
+                "items": [
+                    {
+                        "description": "810 LCBO CARD",
+                        "price": "400.00",
+                        "classification": {"category": "uncategorized"},
+                        "review": {
+                            "description": "LCBO",
+                            "classification": {"category": "alcohol"},
+                            "notes": "gift"
+                        },
+                        "warnings": []
+                    },
+                    {
+                        "description": "REMOVE ME",
+                        "price": "1.00",
+                        "review": {"removed": true},
+                        "warnings": []
+                    }
+                ],
+                "debug": {
+                    "ocr_payload": {"detections": []}
+                }
+            }),
+        };
+
+        let lines = render_detail_lines(Queue::Approved, &detail);
+        let rendered = lines.join("\n");
+
+        assert!(rendered.contains("Reviewed Receipt"));
+        assert!(rendered.contains("Notes: manual review"));
+        assert!(rendered.contains("LCBO  |  $400.00  |  alcohol"));
+        assert!(rendered.contains("    Notes: gift"));
+        assert!(!rendered.contains("REMOVE ME"));
+        assert!(!rendered.contains("\"debug\""));
+    }
 }
