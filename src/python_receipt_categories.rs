@@ -1,7 +1,7 @@
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::receipt_categories;
 
@@ -30,6 +30,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for PyRuleEntry {
 struct PyRuleLayersInput {
     rules: Vec<PyRuleEntry>,
     exact_only_keywords: HashSet<String>,
+    account_mapping: HashMap<String, String>,
 }
 
 impl<'a, 'py> FromPyObject<'a, 'py> for PyRuleLayersInput {
@@ -42,12 +43,16 @@ impl<'a, 'py> FromPyObject<'a, 'py> for PyRuleLayersInput {
         for item in exact_obj.try_iter()? {
             exact_only_keywords.insert(item?.extract::<String>()?);
         }
-        if rules.is_empty() && exact_only_keywords.is_empty() {
+        let account_mapping = ob
+            .getattr("account_mapping")?
+            .extract::<HashMap<String, String>>()?;
+        if rules.is_empty() && exact_only_keywords.is_empty() && account_mapping.is_empty() {
             return Err(PyTypeError::new_err("invalid item category rule layers"));
         }
         Ok(Self {
             rules,
             exact_only_keywords,
+            account_mapping,
         })
     }
 }
@@ -65,6 +70,7 @@ fn to_rule_layers(input: PyRuleLayersInput) -> receipt_categories::CategoryRuleL
             })
             .collect(),
         exact_only_keywords: input.exact_only_keywords,
+        account_mapping: input.account_mapping,
     }
 }
 
@@ -102,9 +108,15 @@ fn receipt_find_item_matches(
         .collect()
 }
 
+#[pyfunction]
+fn receipt_list_item_categories(rule_layers: PyRuleLayersInput) -> Vec<(String, String)> {
+    receipt_categories::list_item_categories(&to_rule_layers(rule_layers))
+}
+
 pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(receipt_classify_item_key, module)?)?;
     module.add_function(wrap_pyfunction!(receipt_classify_item_tags, module)?)?;
     module.add_function(wrap_pyfunction!(receipt_find_item_matches, module)?)?;
+    module.add_function(wrap_pyfunction!(receipt_list_item_categories, module)?)?;
     Ok(())
 }

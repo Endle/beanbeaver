@@ -139,7 +139,9 @@ fn re_parenthetical_multibuy() -> &'static Regex {
 
 fn re_malformed_ocr_price() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(\d+[Il]\.\d{2}|\d+\.[Il]\d|\d+\.\d[Il])\s*[HhTtJj]?\s*$").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(r"(\d+[Il]\.\d{2}|\d+\.[Il]\d|\d+\.\d[Il])\s*[HhTtJj]?\s*$").unwrap()
+    })
 }
 
 fn re_count_at_price() -> &'static Regex {
@@ -267,7 +269,9 @@ fn alpha_ratio(value: &str) -> f64 {
 fn strip_leading_receipt_codes(text: &str) -> String {
     let trimmed = text.trim();
     let trimmed = Regex::new(r"^\(\d+\)\s*").unwrap().replace(trimmed, "");
-    let trimmed = Regex::new(r"^\d{6,}\s*").unwrap().replace(trimmed.as_ref(), "");
+    let trimmed = Regex::new(r"^\d{6,}\s*")
+        .unwrap()
+        .replace(trimmed.as_ref(), "");
     trimmed.trim().to_string()
 }
 
@@ -331,7 +335,10 @@ fn looks_like_onsale_marker(text: &str) -> bool {
     }
     let normalized = normalize_decimal_spacing(&text.to_ascii_uppercase());
     let without_price = re_trailing_price().replace(&normalized, "").to_string();
-    let compact: String = without_price.chars().filter(|ch| ch.is_ascii_alphanumeric()).collect();
+    let compact: String = without_price
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect();
     Regex::new(r"(?:[A-Z0-9]{0,3})?ONSAL[E]?$")
         .unwrap()
         .is_match(&compact)
@@ -340,7 +347,10 @@ fn looks_like_onsale_marker(text: &str) -> bool {
 fn is_priced_generic_item_label(left_text: &str, full_text: &str) -> bool {
     !left_text.is_empty()
         && line_has_trailing_price(full_text)
-        && matches!(left_text.trim().to_ascii_uppercase().as_str(), "MEAT" | "BAKERY")
+        && matches!(
+            left_text.trim().to_ascii_uppercase().as_str(),
+            "MEAT" | "BAKERY"
+        )
 }
 
 fn parse_quantity_modifier(line: &str) -> Option<QuantityModifier> {
@@ -388,7 +398,9 @@ fn validate_quantity_price(total_price_cents: i64, modifier: &QuantityModifier) 
     match modifier.pattern_type {
         QuantityPatternType::CountAtPrice => modifier
             .unit_price_cents
-            .map(|unit| (unit * i64::from(modifier.quantity) - total_price_cents).abs() <= tolerance)
+            .map(|unit| {
+                (unit * i64::from(modifier.quantity) - total_price_cents).abs() <= tolerance
+            })
             .unwrap_or(false),
         QuantityPatternType::MultiForPrice => modifier
             .deal_price_cents
@@ -417,8 +429,14 @@ fn looks_like_quantity_expression(text: &str) -> bool {
     }
 
     if upper.contains('@') && upper.contains("/$") {
-        let compact: String = upper.chars().filter(|ch| !ch.is_ascii_whitespace()).collect();
-        let alpha_count = compact.chars().filter(|ch| ch.is_ascii_alphabetic()).count();
+        let compact: String = upper
+            .chars()
+            .filter(|ch| !ch.is_ascii_whitespace())
+            .collect();
+        let alpha_count = compact
+            .chars()
+            .filter(|ch| ch.is_ascii_alphabetic())
+            .count();
         let digit_count = compact.chars().filter(|ch| ch.is_ascii_digit()).count();
         if digit_count >= 3 && alpha_count <= 4 {
             return true;
@@ -426,7 +444,9 @@ fn looks_like_quantity_expression(text: &str) -> bool {
     }
 
     re_negative_unit_qty().is_match(&normalized)
-        || Regex::new(r"(?i)^\d+\s*/\s*for\b").unwrap().is_match(&normalized)
+        || Regex::new(r"(?i)^\d+\s*/\s*for\b")
+            .unwrap()
+            .is_match(&normalized)
         || re_compact_offer_fragment().is_match(&normalized)
         || re_multi_for_price().is_match(&normalized)
         || re_parenthetical_offer_prefix().is_match(&normalized)
@@ -480,7 +500,10 @@ fn merge_description_context(lines: &[String], base: &str, source_idx: usize) ->
     if source_idx > 0 {
         let prev_line = lines[source_idx - 1].trim();
         let prev_clean = strip_leading_receipt_codes(prev_line);
-        if !prev_clean.is_empty() && prev_clean.ends_with('-') && is_descriptive_candidate(prev_line) {
+        if !prev_clean.is_empty()
+            && prev_clean.ends_with('-')
+            && is_descriptive_candidate(prev_line)
+        {
             merged = format!("{prev_clean} {merged}").trim().to_string();
         }
     }
@@ -502,14 +525,14 @@ fn is_weak_inline_description(text: &str) -> bool {
     re_weak_parenthetical().is_match(stripped) || re_weak_measure().is_match(stripped)
 }
 
-fn maybe_push_warning(
-    warnings: &mut Vec<TextParserWarning>,
-    items_len: usize,
-    message: String,
-) {
+fn maybe_push_warning(warnings: &mut Vec<TextParserWarning>, items_len: usize, message: String) {
     warnings.push(TextParserWarning {
         message,
-        after_item_index: if items_len > 0 { Some(items_len - 1) } else { None },
+        after_item_index: if items_len > 0 {
+            Some(items_len - 1)
+        } else {
+            None
+        },
     });
 }
 
@@ -519,7 +542,10 @@ pub(crate) fn extract_text_items(
 ) -> (Vec<ParsedTextItem>, Vec<TextParserWarning>) {
     let mut items = Vec::new();
     let mut warnings = Vec::new();
-    let normalized_lines: Vec<String> = lines.iter().map(|line| normalize_decimal_spacing(line)).collect();
+    let normalized_lines: Vec<String> = lines
+        .iter()
+        .map(|line| normalize_decimal_spacing(line))
+        .collect();
 
     let total_line_idx = normalized_lines.iter().position(|line| {
         re_total_word().is_match(line) && !line.to_ascii_uppercase().contains("SUBTOTAL")
@@ -586,24 +612,35 @@ pub(crate) fn extract_text_items(
                         .chars()
                         .filter(|ch| ch.is_ascii_alphanumeric())
                         .collect();
-                    marker = Regex::new(r"^\d+").unwrap().replace(&marker, "").to_string();
+                    marker = Regex::new(r"^\d+")
+                        .unwrap()
+                        .replace(&marker, "")
+                        .to_string();
                     if matches!(marker.as_str(), "REG" | "0REG" | "OREG" | "IREG") {
                         continue;
                     }
                 }
-                if prices.len() > 1 && i > 0 && re_trailing_price().is_match(&normalized_lines[i - 1]) {
+                if prices.len() > 1
+                    && i > 0
+                    && re_trailing_price().is_match(&normalized_lines[i - 1])
+                {
                     prefer_forward_desc = true;
                     skip_if_no_forward_desc = true;
                 }
             }
 
-            if re_compact_promo_ghost().is_match(&compact_line) && !looks_like_onsale_marker(&desc_part) {
+            if re_compact_promo_ghost().is_match(&compact_line)
+                && !looks_like_onsale_marker(&desc_part)
+            {
                 if i > 0 && line_has_trailing_price(&normalized_lines[i - 1]) {
                     continue;
                 }
             }
 
-            if line_upper.contains("TOTAL") || line_upper.contains("SUBTOTAL") || line_upper.contains("SUB TOTAL") {
+            if line_upper.contains("TOTAL")
+                || line_upper.contains("SUBTOTAL")
+                || line_upper.contains("SUB TOTAL")
+            {
                 continue;
             }
 
@@ -618,7 +655,8 @@ pub(crate) fn extract_text_items(
             }
 
             let weak_inline_desc = is_weak_inline_description(&desc_part);
-            let mut force_backward = line_upper.contains("REG$") || line_upper.contains("@REG") || weak_inline_desc;
+            let mut force_backward =
+                line_upper.contains("REG$") || line_upper.contains("@REG") || weak_inline_desc;
             if has_reg_marker
                 && force_backward
                 && i > 0
@@ -630,7 +668,10 @@ pub(crate) fn extract_text_items(
             }
 
             if !desc_part.is_empty() {
-                desc_part = Regex::new(r"^\d{8,}\s*").unwrap().replace(&desc_part, "").to_string();
+                desc_part = Regex::new(r"^\d{8,}\s*")
+                    .unwrap()
+                    .replace(&desc_part, "")
+                    .to_string();
             }
             let is_onsale_marker_desc = looks_like_onsale_marker(&desc_part);
             if is_onsale_marker_desc {
@@ -683,7 +724,11 @@ pub(crate) fn extract_text_items(
             };
 
             if is_malformed_price_marker {
-                let prev_line = if i > 0 { normalized_lines[i - 1].trim() } else { "" };
+                let prev_line = if i > 0 {
+                    normalized_lines[i - 1].trim()
+                } else {
+                    ""
+                };
                 let next_line = if i + 1 < normalized_lines.len() {
                     normalized_lines[i + 1].trim()
                 } else {
@@ -694,7 +739,8 @@ pub(crate) fn extract_text_items(
                     && !looks_like_summary_line(prev_line)
                     && !looks_like_quantity_expression(prev_line)
                     && !line_has_trailing_price(prev_line);
-                let next_supports_multi_buy = !next_line.is_empty() && looks_like_quantity_expression(next_line);
+                let next_supports_multi_buy =
+                    !next_line.is_empty() && looks_like_quantity_expression(next_line);
                 if prev_looks_like_description && next_supports_multi_buy {
                     force_backward = true;
                     desc_part.clear();
@@ -782,7 +828,9 @@ pub(crate) fn extract_text_items(
                     let lower_bound = i.saturating_sub(5);
                     for j in (lower_bound..i).rev() {
                         let prev_line = normalized_lines[j].trim();
-                        if Regex::new(r"^[\d.]+\s*[HhTtJj]?\s*$").unwrap().is_match(prev_line)
+                        if Regex::new(r"^[\d.]+\s*[HhTtJj]?\s*$")
+                            .unwrap()
+                            .is_match(prev_line)
                             || Regex::new(r"^\d{8,}$").unwrap().is_match(prev_line)
                             || re_skip_patterns().is_match(prev_line)
                         {
@@ -812,7 +860,9 @@ pub(crate) fn extract_text_items(
                         if alpha_ratio(&desc_for_ratio) < 0.5 {
                             continue;
                         }
-                        if prev_line.len() > 2 && !Regex::new(r"^[\d.]+$").unwrap().is_match(prev_line) {
+                        if prev_line.len() > 2
+                            && !Regex::new(r"^[\d.]+$").unwrap().is_match(prev_line)
+                        {
                             let cleaned_prev = strip_leading_receipt_codes(prev_line);
                             if !cleaned_prev.is_empty() {
                                 found_desc = Some(cleaned_prev);
@@ -825,10 +875,15 @@ pub(crate) fn extract_text_items(
 
                 if let Some(mut found_desc_value) = found_desc {
                     if let Some(source_idx) = found_desc_line_idx {
-                        found_desc_value = merge_description_context(&normalized_lines, &found_desc_value, source_idx);
+                        found_desc_value = merge_description_context(
+                            &normalized_lines,
+                            &found_desc_value,
+                            source_idx,
+                        );
                     }
                     if weak_inline_desc {
-                        found_desc_value = format!("{found_desc_value} {desc_part}").trim().to_string();
+                        found_desc_value =
+                            format!("{found_desc_value} {desc_part}").trim().to_string();
                     }
                     let mut quantity = 1;
                     let mut description_suffix = String::new();
@@ -859,7 +914,8 @@ pub(crate) fn extract_text_items(
                     if context.len() > 80 {
                         context.truncate(80);
                     }
-                    let mut message = format!("maybe missed item near price {}", format_cents(price_cents));
+                    let mut message =
+                        format!("maybe missed item near price {}", format_cents(price_cents));
                     if !context.is_empty() {
                         message.push_str(&format!(" (context: \"{context}\")"));
                     }

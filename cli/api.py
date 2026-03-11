@@ -74,6 +74,21 @@ def cmd_api_show_receipt(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_api_list_item_categories(args: argparse.Namespace) -> None:
+    """Return available receipt item categories as JSON."""
+    from beanbeaver.receipt.item_categories import list_item_categories
+    from beanbeaver.runtime.item_category_rules import load_item_category_rule_layers
+
+    categories = [
+        {
+            "key": key,
+            "account": account,
+        }
+        for key, account in list_item_categories(load_item_category_rule_layers())
+    ]
+    _print_json({"categories": categories})
+
+
 def cmd_api_approve_scanned(args: argparse.Namespace) -> None:
     """Approve one scanned receipt and return the new approved path."""
     from beanbeaver.application.receipts.approval import ApproveScannedReceiptRequest, run_approve_scanned_receipt
@@ -90,7 +105,7 @@ def cmd_api_approve_scanned(args: argparse.Namespace) -> None:
 
 
 def cmd_api_approve_scanned_with_review(args: argparse.Namespace) -> None:
-    """Approve one scanned receipt after applying receipt-level review overrides from stdin JSON."""
+    """Approve one scanned receipt after applying structured review overrides from stdin JSON."""
     from beanbeaver.application.receipts.approval import (
         ApproveScannedReceiptRequest,
         run_approve_scanned_receipt_with_review,
@@ -103,11 +118,15 @@ def cmd_api_approve_scanned_with_review(args: argparse.Namespace) -> None:
     review_patch = payload.get("review", {})
     if not isinstance(review_patch, dict):
         raise ValueError("Review payload field 'review' must be a JSON object")
+    item_review_patches = payload.get("items", [])
+    if not isinstance(item_review_patches, list):
+        raise ValueError("Review payload field 'items' must be a JSON array")
 
     target_path = _resolve_stage_path(args.path)
     result = run_approve_scanned_receipt_with_review(
         ApproveScannedReceiptRequest(target_path=target_path),
         review_patch=review_patch,
+        item_review_patches=item_review_patches,
     )
     _print_json(
         {

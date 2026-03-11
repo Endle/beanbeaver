@@ -154,6 +154,26 @@ def test_api_show_receipt_returns_document(
     assert captured["document"] == document
 
 
+def test_api_list_item_categories_returns_category_options(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    _configure_temp_root(tmp_path, monkeypatch)
+
+    exit_code = unified_cli.main(["api", "list-item-categories"])
+
+    captured = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert any(
+        category == {
+            "key": "grocery_dairy",
+            "account": "Expenses:Food:Grocery:Dairy",
+        }
+        for category in captured["categories"]
+    )
+
+
 def test_api_approve_scanned_moves_receipt_and_creates_review_stage(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -222,6 +242,92 @@ def test_api_approve_scanned_with_review_applies_receipt_overrides(
         "merchant": "Better Market",
         "date": "2026-03-05",
         "total": "11.25",
+    }
+
+
+def test_api_approve_scanned_with_review_applies_item_overrides(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    paths = _configure_temp_root(tmp_path, monkeypatch)
+    scanned_dir = paths.receipts_json_scanned / "2026-03-04_costco_221_97_feed"
+    stage_path = scanned_dir / "parsed.receipt.json"
+    save_stage_document(
+        stage_path,
+        {
+            **_stage_document(
+                merchant="COSTCO",
+                receipt_date="2026-03-04",
+                total="221.97",
+                stage="parsed",
+                stage_index=0,
+            ),
+            "items": [
+                {
+                    "id": "item-0001",
+                    "description": "COKE ZERO",
+                    "price": "17.19",
+                    "quantity": 1,
+                    "classification": {"category": "grocery_drink_cocacola"},
+                    "warnings": [],
+                    "meta": {"source": "parser"},
+                },
+                {
+                    "id": "item-0002",
+                    "description": "DOORDASH2X50",
+                    "price": "79.99",
+                    "quantity": 1,
+                    "classification": {"category": "restaurant_gift_card"},
+                    "warnings": [],
+                    "meta": {"source": "parser"},
+                },
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "review": {"notes": "Verified against Costco receipt"},
+                    "items": [
+                        {
+                            "id": "item-0001",
+                            "review": {
+                                "description": "COKE ZERO 35PK",
+                                "price": "18.49",
+                                "notes": "Promo pack confirmed in warehouse",
+                                "category": "Expenses:Food:Grocery:Drink:CocaCola",
+                            },
+                        },
+                        {
+                            "id": "item-0002",
+                            "review": {
+                                "removed": True,
+                            },
+                        },
+                    ],
+                }
+            )
+        ),
+    )
+
+    exit_code = unified_cli.main(["api", "approve-scanned-with-review", str(stage_path)])
+
+    captured = json.loads(capsys.readouterr().out)
+    approved_path = Path(captured["approved_path"])
+    approved_document = json.loads(approved_path.read_text())
+    assert exit_code == 0
+    assert approved_document["review"]["notes"] == "Verified against Costco receipt"
+    assert approved_document["items"][0]["review"] == {
+        "description": "COKE ZERO 35PK",
+        "price": "18.49",
+        "notes": "Promo pack confirmed in warehouse",
+        "classification": {"category": "grocery_drink_cocacola"},
+    }
+    assert approved_document["items"][1]["review"] == {
+        "removed": True,
     }
 
 

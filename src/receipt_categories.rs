@@ -1,6 +1,6 @@
 use regex::Regex;
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 const FUZZY_THRESHOLD_SHORT: f64 = 0.75;
@@ -19,6 +19,7 @@ pub(crate) struct CategoryRule {
 pub(crate) struct CategoryRuleLayers {
     pub(crate) rules: Vec<CategoryRule>,
     pub(crate) exact_only_keywords: HashSet<String>,
+    pub(crate) account_mapping: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
@@ -194,7 +195,10 @@ fn fuzzy_contains(keyword: &str, description: &str, threshold: Option<f64>) -> (
     }
 }
 
-pub(crate) fn find_all_matches(description: &str, rule_layers: &CategoryRuleLayers) -> Vec<RuleMatch> {
+pub(crate) fn find_all_matches(
+    description: &str,
+    rule_layers: &CategoryRuleLayers,
+) -> Vec<RuleMatch> {
     let mut matches = Vec::new();
 
     for (rule_index, rule) in rule_layers.rules.iter().enumerate() {
@@ -244,7 +248,10 @@ pub(crate) fn classify_item_key(
     best.and_then(|matched| matched.category).or(default)
 }
 
-pub(crate) fn classify_item_tags(description: &str, rule_layers: &CategoryRuleLayers) -> Vec<String> {
+pub(crate) fn classify_item_tags(
+    description: &str,
+    rule_layers: &CategoryRuleLayers,
+) -> Vec<String> {
     let matches = find_all_matches(description, rule_layers);
     let mut tags = Vec::new();
     let mut seen = HashSet::new();
@@ -260,7 +267,42 @@ pub(crate) fn classify_item_tags(description: &str, rule_layers: &CategoryRuleLa
     tags
 }
 
-pub(crate) fn sorted_matches_for_debug(description: &str, rule_layers: &CategoryRuleLayers) -> Vec<RuleMatch> {
+pub(crate) fn list_item_categories(rule_layers: &CategoryRuleLayers) -> Vec<(String, String)> {
+    let mut categories = HashSet::new();
+
+    categories.extend(rule_layers.account_mapping.keys().cloned());
+    for rule in &rule_layers.rules {
+        if let Some(category) = &rule.category {
+            categories.insert(category.clone());
+        }
+    }
+
+    let mut sorted = categories.into_iter().collect::<Vec<_>>();
+    sorted.sort();
+    sorted
+        .into_iter()
+        .map(|category| {
+            let account = rule_layers
+                .account_mapping
+                .get(&category)
+                .cloned()
+                .or_else(|| {
+                    if category.starts_with("Expenses:") {
+                        Some(category.clone())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default();
+            (category, account)
+        })
+        .collect()
+}
+
+pub(crate) fn sorted_matches_for_debug(
+    description: &str,
+    rule_layers: &CategoryRuleLayers,
+) -> Vec<RuleMatch> {
     let mut matches = find_all_matches(description, rule_layers);
     matches.sort_by(|left, right| compare_match_rank(right, left));
     matches

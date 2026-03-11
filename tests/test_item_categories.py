@@ -7,6 +7,7 @@ from beanbeaver.receipt.item_categories import (
     account_for_category_key,
     categorize_item,
     classify_item_semantic,
+    list_item_categories,
 )
 from beanbeaver.runtime.item_category_rules import load_item_category_rule_layers, load_receipt_structuring_rule_layers
 
@@ -195,6 +196,37 @@ grocery_staple = "Expenses:Food:Grocery:Staple"
         )
         == "Expenses:Food:Grocery:Staple"
     )
+
+
+def test_list_item_categories_returns_sorted_key_account_pairs(tmp_path: Path) -> None:
+    classifier = tmp_path / "item_classifier.toml"
+    classifier.write_text(
+        """
+[[rules]]
+id = "custom_direct_account"
+keywords = ["CUSTOM DIRECT ACCOUNT"]
+category = "Expenses:Project:Custom"
+""".strip()
+    )
+
+    account_map = tmp_path / "item_category_accounts.toml"
+    account_map.write_text(
+        """
+[accounts]
+zzz_custom = "Expenses:Project:Zzz"
+""".strip()
+    )
+
+    categories = list_item_categories(
+        load_item_category_rule_layers(
+            classifier_paths=(str(classifier),),
+            account_paths=(str(account_map),),
+        )
+    )
+
+    assert categories == sorted(categories, key=lambda entry: entry[0])
+    assert ("Expenses:Project:Custom", "Expenses:Project:Custom") in categories
+    assert ("zzz_custom", "Expenses:Project:Zzz") in categories
 
 
 def test_legacy_direct_icecream_account_alias_maps_to_frozen_icecream() -> None:

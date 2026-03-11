@@ -8,11 +8,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from beanbeaver.runtime import get_logger
-
-logger = get_logger(__name__)
-
-
 def cmd_serve(args: argparse.Namespace) -> None:
     """Start the FastAPI server for receiving receipt uploads."""
     import uvicorn
@@ -24,78 +19,6 @@ def cmd_serve(args: argparse.Namespace) -> None:
     print("Press Ctrl+C to stop")
 
     uvicorn.run(server.app, host=args.host, port=args.port)
-
-
-def cmd_scan(args: argparse.Namespace) -> None:
-    """Scan a receipt image, allow manual edit, then stage JSON to approved/."""
-    # TODO: add CLI tests that cover cmd_scan status handling and exit codes.
-    from beanbeaver.application.receipts.scan import ReceiptScanRequest, run_receipt_scan
-
-    receipt_path = Path(args.image)
-    result = run_receipt_scan(
-        ReceiptScanRequest(
-            image_path=receipt_path,
-            ocr_url=args.ocr_url,
-            no_edit=args.no_edit,
-            resolve_editor_cmd=_resolve_editor,
-        )
-    )
-
-    if result.status == "file_not_found":
-        logger.error("%s", result.error)
-        print(f"Error: {result.error}")
-        sys.exit(1)
-
-    if result.status == "ocr_unavailable":
-        logger.error("%s", result.error)
-        print(f"OCR service unavailable: {result.error}")
-        print("Make sure the OCR service is running before scanning receipts.")
-        sys.exit(1)
-
-    receipt = result.receipt
-    if receipt is None or result.scanned_path is None:
-        print("Scan failed: missing receipt output.")
-        sys.exit(1)
-
-    # Display parsed items for review
-    print("\n" + "=" * 60)
-    print("PARSED RECEIPT")
-    print("=" * 60)
-    print(f"Merchant: {receipt.merchant}")
-    date_str = receipt.date.isoformat() if not receipt.date_is_placeholder else "UNKNOWN"
-    print(f"Date: {date_str}")
-    print(f"Total: ${receipt.total:.2f}")
-    if receipt.tax:
-        print(f"Tax: ${receipt.tax:.2f}")
-    print(f"\nItems ({len(receipt.items)}):")
-    for i, item in enumerate(receipt.items, 1):
-        qty_str = f" x{item.quantity}" if item.quantity > 1 else ""
-        cat_str = f" [{item.category}]" if item.category else ""
-        print(f"  {i}. {item.description}{qty_str} - ${item.price:.2f}{cat_str}")
-    print("=" * 60)
-
-    print(f"\nSaved draft to: {result.scanned_path}")
-
-    if result.status == "scanned_saved":
-        print("Draft left in receipts/json/scanned/ (edit manually, then move to approved/).")
-        return
-
-    if result.status == "editor_not_found":
-        editor_cmd = result.editor_cmd or []
-        print(f"Editor not found: {' '.join(editor_cmd)}")
-        print("Draft left in receipts/json/scanned/ (edit manually, then move to approved/).")
-        return
-
-    if result.status == "editor_failed":
-        print(f"Editor exited with code {result.editor_returncode}. Draft left in receipts/json/scanned/.")
-        return
-
-    if result.status == "approved_staged" and result.approved_path is not None:
-        print(f"\nStaged to receipts/json/approved/: {result.approved_path}")
-    else:
-        print("Draft left in receipts/json/scanned/ (edit manually, then move to approved/).")
-        return
-    print("This receipt is ready for matching (bb match or CC import).")
 
 
 def _default_editor_command() -> list[str]:

@@ -371,8 +371,7 @@ fn is_summary_line(text: &str) -> bool {
     if re_tax_tokens().is_match(&upper) {
         return true;
     }
-    upper.starts_with("H=")
-        && re_tax_tokens().is_match(&upper)
+    upper.starts_with("H=") && re_tax_tokens().is_match(&upper)
 }
 
 fn trailing_price_scaled(text: &str) -> Option<i64> {
@@ -824,7 +823,8 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
         let mut chosen_line_index = None;
         let mut chosen_distance = f64::INFINITY;
         let selection_anchor_y = source_line.line_y;
-        let source_line_is_quantity_expression = looks_like_quantity_expression(&source_line.left_text);
+        let source_line_is_quantity_expression =
+            looks_like_quantity_expression(&source_line.left_text);
 
         if source_line_is_quantity_expression {
             let source_modifier = parse_quantity_modifier(&source_line.left_text);
@@ -857,12 +857,20 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
                 }
             }
 
-            chosen_line_index = match (nearest_unpriced_above, nearest_unpriced_below, source_modifier) {
+            chosen_line_index = match (
+                nearest_unpriced_above,
+                nearest_unpriced_below,
+                source_modifier,
+            ) {
                 (Some((index, distance)), Some(_), true) => {
                     chosen_distance = distance;
                     Some(index)
                 }
-                (Some((above_index, above_distance)), Some((below_index, below_distance)), false) => {
+                (
+                    Some((above_index, above_distance)),
+                    Some((below_index, below_distance)),
+                    false,
+                ) => {
                     if above_distance <= below_distance {
                         chosen_distance = above_distance;
                         Some(above_index)

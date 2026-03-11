@@ -450,6 +450,11 @@ def classify_item_tags(
     return list(require_rust_matcher().receipt_classify_item_tags(description, rule_layers))
 
 
+def list_item_categories(rule_layers: ItemCategoryRuleLayers) -> list[tuple[str, str]]:
+    """Return deterministic category options as (semantic_key, beancount_account)."""
+    return list(require_rust_matcher().receipt_list_item_categories(rule_layers))
+
+
 def classify_item_semantic(
     description: str,
     rule_layers: ItemCategoryRuleLayers,

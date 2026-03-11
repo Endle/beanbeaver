@@ -73,13 +73,6 @@ podman run --replace --name beanbeaver-ocr --network=slirp4netns -p 8001:8000 gh
 ```
 
 #### 2. Load receipt
-If the receipt is on computer, run
-
-```bash
-bb scan <image>        # opens editor, then stages to approved/
-bb scan <image> --no-edit
-```
-
 If the receipt is on the mobile, we can run
 ```
 bb serve

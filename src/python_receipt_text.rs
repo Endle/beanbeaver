@@ -15,8 +15,16 @@ fn receipt_extract_text_items(
     let summary_amounts = summary_amounts_cents.into_iter().collect::<HashSet<_>>();
     let (items, warnings) = receipt_text::extract_text_items(&lines, &summary_amounts);
     (
-        items.into_iter()
-            .map(|item| (item.description, item.category_source, item.price_cents, item.quantity))
+        items
+            .into_iter()
+            .map(|item| {
+                (
+                    item.description,
+                    item.category_source,
+                    item.price_cents,
+                    item.quantity,
+                )
+            })
             .collect(),
         warnings
             .into_iter()
