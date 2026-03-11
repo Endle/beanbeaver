@@ -16,7 +16,7 @@ use crossterm::terminal::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Text};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Tabs, Wrap};
 use ratatui::Terminal;
 use serde::Deserialize;
@@ -540,6 +540,61 @@ struct TextInputState {
     target: ReviewEditTarget,
     label: String,
     value: String,
+    cursor: usize,
+}
+
+impl TextInputState {
+    fn with_value(target: ReviewEditTarget, label: String, value: String) -> Self {
+        let cursor = value.chars().count();
+        Self {
+            target,
+            label,
+            value,
+            cursor,
+        }
+    }
+
+    fn move_left(&mut self) {
+        self.cursor = self.cursor.saturating_sub(1);
+    }
+
+    fn move_right(&mut self) {
+        self.cursor = (self.cursor + 1).min(self.value.chars().count());
+    }
+
+    fn move_home(&mut self) {
+        self.cursor = 0;
+    }
+
+    fn move_end(&mut self) {
+        self.cursor = self.value.chars().count();
+    }
+
+    fn insert_char(&mut self, ch: char) {
+        let idx = char_to_byte_index(&self.value, self.cursor);
+        self.value.insert(idx, ch);
+        self.cursor += 1;
+    }
+
+    fn backspace(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let end = char_to_byte_index(&self.value, self.cursor);
+        let start = char_to_byte_index(&self.value, self.cursor - 1);
+        self.value.replace_range(start..end, "");
+        self.cursor -= 1;
+    }
+
+    fn delete(&mut self) {
+        let len = self.value.chars().count();
+        if self.cursor >= len {
+            return;
+        }
+        let start = char_to_byte_index(&self.value, self.cursor);
+        let end = char_to_byte_index(&self.value, self.cursor + 1);
+        self.value.replace_range(start..end, "");
+    }
 }
 
 struct ReviewState {
@@ -773,11 +828,11 @@ impl ReviewState {
             return;
         };
         if let Some(field) = self.fields.get(index) {
-            self.text_input = Some(TextInputState {
-                target: ReviewEditTarget::ReceiptField(index),
-                label: field.field.label().to_string(),
-                value: field.value.clone(),
-            });
+            self.text_input = Some(TextInputState::with_value(
+                ReviewEditTarget::ReceiptField(index),
+                field.field.label().to_string(),
+                field.value.clone(),
+            ));
         }
     }
 
@@ -786,11 +841,11 @@ impl ReviewState {
             return;
         };
         if let Some(item) = self.items.get(index) {
-            self.text_input = Some(TextInputState {
-                target: ReviewEditTarget::ItemDescription(index),
-                label: format!("Item Description ({})", item.id),
-                value: item.description.clone(),
-            });
+            self.text_input = Some(TextInputState::with_value(
+                ReviewEditTarget::ItemDescription(index),
+                format!("Item Description ({})", item.id),
+                item.description.clone(),
+            ));
         }
     }
 
@@ -799,11 +854,11 @@ impl ReviewState {
             return;
         };
         if let Some(item) = self.items.get(index) {
-            self.text_input = Some(TextInputState {
-                target: ReviewEditTarget::ItemCategory(index),
-                label: format!("Item Category ({})", item.id),
-                value: item.category.clone(),
-            });
+            self.text_input = Some(TextInputState::with_value(
+                ReviewEditTarget::ItemCategory(index),
+                format!("Item Category ({})", item.id),
+                item.category.clone(),
+            ));
         }
     }
 
@@ -2325,6 +2380,13 @@ fn json_value_to_text(value: Option<&Value>) -> String {
     }
 }
 
+fn char_to_byte_index(text: &str, char_idx: usize) -> usize {
+    text.char_indices()
+        .nth(char_idx)
+        .map(|(index, _)| index)
+        .unwrap_or(text.len())
+}
+
 fn effective_receipt_text(document: &Value, key: &str) -> String {
     if let Some(value) = document
         .get("review")
@@ -2817,23 +2879,36 @@ fn render_text_input_modal(frame: &mut ratatui::Frame<'_>, text_input: &TextInpu
             Constraint::Min(1),
         ])
         .split(popup);
-    let value = if text_input.value.is_empty() {
-        "<empty>".to_string()
+    let chars = text_input.value.chars().collect::<Vec<_>>();
+    let cursor = text_input.cursor.min(chars.len());
+    let before = chars.iter().take(cursor).collect::<String>();
+    let current = chars
+        .get(cursor)
+        .map(char::to_string)
+        .unwrap_or_else(|| " ".to_string());
+    let after = if cursor < chars.len() {
+        chars.iter().skip(cursor + 1).collect::<String>()
     } else {
-        text_input.value.clone()
+        String::new()
     };
-    let input = Paragraph::new(value)
-        .block(Block::default().borders(Borders::ALL).title("Value"))
-        .style(
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        )
-        .wrap(Wrap { trim: false });
+    let input = Paragraph::new(Line::from(vec![
+        Span::raw(before),
+        Span::styled(current, Style::default().bg(Color::Yellow).fg(Color::Black)),
+        Span::raw(after),
+    ]))
+    .block(Block::default().borders(Borders::ALL).title("Value"))
+    .style(
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    )
+    .wrap(Wrap { trim: false });
     frame.render_widget(input, rows[0]);
 
-    let help =
-        Paragraph::new("Enter apply  |  Esc cancel  |  Backspace delete").wrap(Wrap { trim: true });
+    let help = Paragraph::new(
+        "Enter apply  |  Esc cancel  |  Left/Right move  |  Home/End  |  Backspace/Delete",
+    )
+    .wrap(Wrap { trim: true });
     frame.render_widget(help, rows[1]);
 }
 
@@ -3097,11 +3172,26 @@ fn run_app(
                             review_state.commit_text_input();
                             status_message = Some("Applied edit to review state".to_string());
                         }
+                        KeyCode::Left => {
+                            text_input.move_left();
+                        }
+                        KeyCode::Right => {
+                            text_input.move_right();
+                        }
+                        KeyCode::Home => {
+                            text_input.move_home();
+                        }
+                        KeyCode::End => {
+                            text_input.move_end();
+                        }
                         KeyCode::Backspace => {
-                            text_input.value.pop();
+                            text_input.backspace();
+                        }
+                        KeyCode::Delete => {
+                            text_input.delete();
                         }
                         KeyCode::Char(ch) => {
-                            text_input.value.push(ch);
+                            text_input.insert_char(ch);
                         }
                         _ => {}
                     }
