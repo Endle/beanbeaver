@@ -64,6 +64,9 @@ impl<'a, 'py> FromPyObject<'a, 'py> for PyStageRuleLayersInput {
 }
 
 fn to_stage_rule_layers(input: PyStageRuleLayersInput) -> receipt_staged_json::StageRuleLayers {
+    let account_mapping = input.account_mapping;
+    let category_account_mapping = account_mapping.iter().cloned().collect();
+
     receipt_staged_json::StageRuleLayers {
         category_rules: receipt_categories::CategoryRuleLayers {
             rules: input
@@ -77,8 +80,9 @@ fn to_stage_rule_layers(input: PyStageRuleLayersInput) -> receipt_staged_json::S
                 })
                 .collect(),
             exact_only_keywords: input.exact_only_keywords,
+            account_mapping: category_account_mapping,
         },
-        account_mapping: input.account_mapping,
+        account_mapping,
     }
 }
 

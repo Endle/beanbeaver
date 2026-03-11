@@ -64,6 +64,9 @@ impl<'a, 'py> FromPyObject<'a, 'py> for PyRuleLayersInput {
 }
 
 fn to_rule_layers(input: PyRuleLayersInput) -> receipt_parser::ParserRuleLayers {
+    let account_mapping = input.account_mapping;
+    let category_account_mapping = account_mapping.iter().cloned().collect();
+
     receipt_parser::ParserRuleLayers {
         category_rules: receipt_categories::CategoryRuleLayers {
             rules: input
@@ -77,8 +80,9 @@ fn to_rule_layers(input: PyRuleLayersInput) -> receipt_parser::ParserRuleLayers 
                 })
                 .collect(),
             exact_only_keywords: input.exact_only_keywords,
+            account_mapping: category_account_mapping,
         },
-        account_mapping: input.account_mapping,
+        account_mapping,
     }
 }
 
