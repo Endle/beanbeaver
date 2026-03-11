@@ -282,6 +282,7 @@ const FAVA_HOST: &str = "127.0.0.1";
 const FAVA_PORT: u16 = 5000;
 const OCR_CONTAINER_NAME: &str = "beanbeaver-ocr";
 const MAX_RUNTIME_LOG_LINES: usize = 400;
+const RECEIPTS_REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 const SERVE_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const FAVA_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const OCR_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
@@ -1368,6 +1369,7 @@ struct App {
     serve_state: ServePageState,
     fava_state: FavaPageState,
     ocr_state: OcrPageState,
+    last_receipts_refresh: Option<Instant>,
     last_serve_refresh: Option<Instant>,
     last_fava_refresh: Option<Instant>,
     last_ocr_refresh: Option<Instant>,
@@ -1409,6 +1411,7 @@ impl App {
             serve_state: ServePageState::new(),
             fava_state: FavaPageState::new(),
             ocr_state: OcrPageState::new(),
+            last_receipts_refresh: None,
             last_serve_refresh: None,
             last_fava_refresh: None,
             last_ocr_refresh: None,
@@ -1466,6 +1469,13 @@ impl App {
             .and_then(|index| receipts.get(index))
     }
 
+    fn selected_path_for_queue(&self, queue: Queue) -> Option<String> {
+        let receipts = self.receipts(queue);
+        self.selected_index(queue)
+            .and_then(|index| receipts.get(index))
+            .map(|receipt| receipt.path.clone())
+    }
+
     fn sync_selection(&mut self, queue: Queue) {
         let len = self.receipts(queue).len();
         let state = self.list_state_mut(queue);
@@ -1475,6 +1485,20 @@ impl App {
                 let current = state.selected().unwrap_or(0);
                 state.select(Some(current.min(len - 1)));
             }
+        }
+    }
+
+    fn sync_selection_to_path(&mut self, queue: Queue, preferred_path: Option<&str>) {
+        let selected_index = preferred_path.and_then(|path| {
+            self.receipts(queue)
+                .iter()
+                .position(|receipt| receipt.path == path)
+        });
+
+        match (self.receipts(queue).len(), selected_index) {
+            (0, _) => self.list_state_mut(queue).select(None),
+            (_, Some(index)) => self.list_state_mut(queue).select(Some(index)),
+            (_, None) => self.list_state_mut(queue).select(Some(0)),
         }
     }
 
@@ -1582,8 +1606,9 @@ impl App {
     fn refresh(&mut self) -> AppResult<()> {
         self.config = backend_get_config()?;
         self.reload_receipts()?;
+        self.last_receipts_refresh = Some(Instant::now());
         self.load_detail()?;
-        self.refresh_runtime_pages(true)?;
+        self.refresh_runtime_pages(false)?;
         self.set_status(format!(
             "Loaded {} scanned / {} approved receipt(s)",
             self.scanned.len(),
@@ -1593,10 +1618,43 @@ impl App {
     }
 
     fn reload_receipts(&mut self) -> AppResult<()> {
+        let selected_scanned = self.selected_path_for_queue(Queue::Scanned);
+        let selected_approved = self.selected_path_for_queue(Queue::Approved);
         self.scanned = backend_list_receipts(Queue::Scanned)?;
         self.approved = backend_list_receipts(Queue::Approved)?;
-        self.sync_selection(Queue::Scanned);
-        self.sync_selection(Queue::Approved);
+        self.sync_selection_to_path(Queue::Scanned, selected_scanned.as_deref());
+        self.sync_selection_to_path(Queue::Approved, selected_approved.as_deref());
+        Ok(())
+    }
+
+    fn refresh_receipts_page(&mut self, force: bool) -> AppResult<()> {
+        if self.active_page != Page::Receipts
+            || self.review_state.is_some()
+            || self.config_state.is_some()
+            || self.match_state.is_some()
+        {
+            return Ok(());
+        }
+
+        let now = Instant::now();
+        if !force
+            && self
+                .last_receipts_refresh
+                .is_some_and(|last| now.duration_since(last) < RECEIPTS_REFRESH_INTERVAL)
+        {
+            return Ok(());
+        }
+
+        let active_path_before = self.selected_path_for_queue(self.active_queue);
+        let detail_path_before = self.detail_path.clone();
+        self.reload_receipts()?;
+        self.last_receipts_refresh = Some(now);
+
+        let active_path_after = self.selected_path_for_queue(self.active_queue);
+        if force || active_path_before != active_path_after || detail_path_before != active_path_after {
+            self.load_detail()?;
+        }
+
         Ok(())
     }
 
@@ -1848,6 +1906,7 @@ impl App {
     }
 
     fn refresh_runtime_pages(&mut self, force: bool) -> AppResult<()> {
+        self.refresh_receipts_page(force)?;
         self.poll_serve_process()?;
         self.poll_fava_process()?;
         let now = Instant::now();
@@ -4453,5 +4512,66 @@ mod tests {
         assert!(rendered.contains("    Notes: gift"));
         assert!(!rendered.contains("REMOVE ME"));
         assert!(!rendered.contains("\"debug\""));
+    }
+
+    #[test]
+    fn sync_selection_to_path_preserves_selected_receipt_across_insertions() {
+        let mut app = App::new();
+        app.scanned = vec![
+            ReceiptSummary {
+                path: "/tmp/older.receipt.json".to_string(),
+                receipt_dir: "older".to_string(),
+                stage_file: "parsed.receipt.json".to_string(),
+                merchant: Some("OLDER".to_string()),
+                date: Some("2026-03-09".to_string()),
+                total: Some("10.00".to_string()),
+            },
+            ReceiptSummary {
+                path: "/tmp/current.receipt.json".to_string(),
+                receipt_dir: "current".to_string(),
+                stage_file: "parsed.receipt.json".to_string(),
+                merchant: Some("CURRENT".to_string()),
+                date: Some("2026-03-10".to_string()),
+                total: Some("20.00".to_string()),
+            },
+        ];
+        app.scanned_state.select(Some(1));
+
+        let selected_path = app.selected_path_for_queue(Queue::Scanned);
+
+        app.scanned = vec![
+            ReceiptSummary {
+                path: "/tmp/newest.receipt.json".to_string(),
+                receipt_dir: "newest".to_string(),
+                stage_file: "parsed.receipt.json".to_string(),
+                merchant: Some("NEWEST".to_string()),
+                date: Some("2026-03-11".to_string()),
+                total: Some("30.00".to_string()),
+            },
+            ReceiptSummary {
+                path: "/tmp/older.receipt.json".to_string(),
+                receipt_dir: "older".to_string(),
+                stage_file: "parsed.receipt.json".to_string(),
+                merchant: Some("OLDER".to_string()),
+                date: Some("2026-03-09".to_string()),
+                total: Some("10.00".to_string()),
+            },
+            ReceiptSummary {
+                path: "/tmp/current.receipt.json".to_string(),
+                receipt_dir: "current".to_string(),
+                stage_file: "parsed.receipt.json".to_string(),
+                merchant: Some("CURRENT".to_string()),
+                date: Some("2026-03-10".to_string()),
+                total: Some("20.00".to_string()),
+            },
+        ];
+
+        app.sync_selection_to_path(Queue::Scanned, selected_path.as_deref());
+
+        assert_eq!(app.scanned_state.selected(), Some(2));
+        assert_eq!(
+            app.selected_path_for_queue(Queue::Scanned).as_deref(),
+            Some("/tmp/current.receipt.json")
+        );
     }
 }
