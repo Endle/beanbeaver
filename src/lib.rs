@@ -1,5 +1,8 @@
+mod match_domain;
+mod match_service;
 mod matcher;
 mod python_ledger_access;
+mod python_match_service;
 mod python_receipt_categories;
 mod python_receipt_fields;
 mod python_receipt_formatter;
@@ -176,6 +179,7 @@ fn _rust_matcher(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(merchant_similarity, module)?)?;
     module.add_function(wrap_pyfunction!(match_receipt_to_transactions, module)?)?;
     module.add_function(wrap_pyfunction!(match_transaction_to_receipts, module)?)?;
+    python_match_service::register(module)?;
     python_ledger_access::register(module)?;
     python_receipt_categories::register(module)?;
     python_receipt_formatter::register(module)?;

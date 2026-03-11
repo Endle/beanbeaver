@@ -213,56 +213,31 @@ def list_match_candidates_for_receipt(
     ledger_path: Path | None = None,
 ) -> MatchCandidatesResult:
     """Return candidate matches for one approved receipt."""
-    from beanbeaver.receipt.matcher import format_match_for_display
-    from beanbeaver.runtime.receipt_storage import parse_receipt_from_stage_json
+    from beanbeaver.application import match_service
 
-    resolved_ledger_path = ledger_path if ledger_path is not None else get_paths().main_beancount
-    if not resolved_ledger_path.exists():
-        return MatchCandidatesResult(
-            ledger_path=resolved_ledger_path,
-            candidates=[],
-            errors=[f"Ledger file not found: {resolved_ledger_path}"],
-        )
-
-    snapshot, errors = _load_ledger_transactions(resolved_ledger_path)
-    if errors:
-        return MatchCandidatesResult(
-            ledger_path=resolved_ledger_path,
-            candidates=[],
-            errors=errors,
-        )
-
-    receipt = parse_receipt_from_stage_json(approved_receipt_path)
-    merchant_families = load_merchant_families()
-    resolved_matches = _resolve_receipt_match_candidates(
-        receipt,
-        snapshot.transactions,
-        merchant_families=merchant_families,
+    plan = match_service.plan_receipt_match(
+        approved_receipt_path,
+        ledger_path=ledger_path,
     )
     candidates = [
         MatchCandidate(
-            file_path=match.file_path,
-            line_number=match.line_number,
-            confidence=match.confidence,
-            display=format_match_for_display(match).strip(),
-            payee=match.transaction.payee,
-            narration=match.transaction.narration,
-            date=match.transaction.date,
-            amount=transaction_charge_amount(match),
+            file_path=candidate.file_path,
+            line_number=candidate.line_number,
+            confidence=candidate.confidence,
+            display=candidate.display.strip(),
+            payee=candidate.payee,
+            narration=candidate.narration,
+            date=candidate.date,
+            amount=candidate.amount,
         )
-        for match in resolved_matches.matches
+        for candidate in plan.candidates
     ]
 
-    warning = resolved_matches.warning
-    if receipt.total is None:
-        total_warning = "No total found in the latest stage"
-        warning = f"{warning} {total_warning}".strip() if warning else total_warning
-
     return MatchCandidatesResult(
-        ledger_path=resolved_ledger_path,
+        ledger_path=plan.ledger_path,
         candidates=candidates,
-        errors=[],
-        warning=warning,
+        errors=plan.errors,
+        warning=plan.warning,
     )
 
 
@@ -274,95 +249,20 @@ def apply_match_for_receipt(
     ledger_path: Path | None = None,
 ) -> ApplyMatchResult:
     """Apply one selected candidate match for an approved receipt."""
-    from beanbeaver.receipt.beancount_rendering import format_enriched_transaction
-    from beanbeaver.runtime.receipt_storage import move_to_matched, parse_receipt_from_stage_json
+    from beanbeaver.application import match_service
 
-    resolved_ledger_path = ledger_path if ledger_path is not None else get_paths().main_beancount
-    if not resolved_ledger_path.exists():
-        return ApplyMatchResult(
-            status="ledger_missing",
-            ledger_path=resolved_ledger_path,
-            message=f"Ledger file not found: {resolved_ledger_path}",
-        )
-
-    snapshot, errors = _load_ledger_transactions(resolved_ledger_path)
-    if errors:
-        return ApplyMatchResult(
-            status="ledger_errors",
-            ledger_path=resolved_ledger_path,
-            message="; ".join(errors),
-        )
-
-    receipt = parse_receipt_from_stage_json(approved_receipt_path)
-    merchant_families = load_merchant_families()
-    resolved_matches = _resolve_receipt_match_candidates(
-        receipt,
-        snapshot.transactions,
-        merchant_families=merchant_families,
+    result = match_service.apply_receipt_match(
+        approved_receipt_path,
+        candidate_file_path=candidate_file_path,
+        candidate_line_number=candidate_line_number,
+        ledger_path=ledger_path,
     )
-    selected_match = next(
-        (
-            match
-            for match in resolved_matches.matches
-            if match.file_path == candidate_file_path and match.line_number == candidate_line_number
-        ),
-        None,
-    )
-    if selected_match is None:
-        return ApplyMatchResult(
-            status="candidate_missing",
-            ledger_path=resolved_ledger_path,
-            message="Selected match candidate is no longer available.",
-        )
-
-    matched_file = Path(selected_match.file_path)
-    if str(matched_file) == "unknown" or not matched_file.exists():
-        return ApplyMatchResult(
-            status="target_missing",
-            ledger_path=resolved_ledger_path,
-            message=f"Match target file missing: {selected_match.file_path}",
-        )
-
-    expected_total = transaction_charge_amount(selected_match)
-    itemized_total = itemized_receipt_total(receipt)
-    if expected_total is not None:
-        delta = expected_total - itemized_total
-        if delta < Decimal("-0.01"):
-            return ApplyMatchResult(
-                status="receipt_total_exceeds_transaction",
-                ledger_path=resolved_ledger_path,
-                message=(
-                    "Itemized receipt total "
-                    f"(${itemized_total:.2f}) exceeds card transaction (${expected_total:.2f}) "
-                    f"by ${abs(delta):.2f}. Re-edit receipt first."
-                ),
-            )
-
-    receipt_name = _receipt_chain_name(approved_receipt_path)
-    enriched = format_enriched_transaction(receipt, selected_match)
-    enriched_dir = matched_file.parent / "_enriched"
-    enriched_dir.mkdir(parents=True, exist_ok=True)
-    enriched_path = enriched_dir / f"{receipt_name}.beancount"
-    include_rel = enriched_path.relative_to(matched_file.parent).as_posix()
-
-    status = apply_receipt_match(
-        ledger_path=resolved_ledger_path,
-        statement_path=matched_file,
-        line_number=selected_match.line_number,
-        include_rel_path=include_rel,
-        receipt_name=receipt_name,
-        enriched_path=enriched_path,
-        enriched_content=enriched,
-    )
-    matched_receipt_path = move_to_matched(approved_receipt_path)
-    action_msg = "already applied; receipt archived" if status == "already_applied" else "applied"
     return ApplyMatchResult(
-        status=status,
-        ledger_path=resolved_ledger_path,
-        matched_receipt_path=matched_receipt_path,
-        enriched_path=enriched_path,
-        message=("Weak candidate applied after relaxed fallback. " if resolved_matches.used_relaxed_threshold else "")
-        + f"Transaction {action_msg}. Enriched file: {enriched_path}",
+        status=result.status,
+        ledger_path=result.ledger_path,
+        matched_receipt_path=result.matched_receipt_path,
+        enriched_path=result.enriched_path,
+        message=result.message,
     )
 
 

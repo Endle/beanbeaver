@@ -6,6 +6,32 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
+#[derive(Clone, Debug)]
+pub(crate) struct NativeLedgerPosting {
+    pub(crate) account: String,
+    pub(crate) number_str: Option<String>,
+    pub(crate) currency: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct NativeLedgerTransaction {
+    pub(crate) date_ordinal: i32,
+    pub(crate) date_iso: String,
+    pub(crate) payee: Option<String>,
+    pub(crate) narration: Option<String>,
+    pub(crate) postings: Vec<NativeLedgerPosting>,
+    pub(crate) file_path: String,
+    pub(crate) line_number: i32,
+}
+
+#[derive(Debug)]
+pub(crate) struct NativeLedgerSnapshot {
+    pub(crate) path: String,
+    pub(crate) transactions: Vec<NativeLedgerTransaction>,
+    pub(crate) errors: Vec<String>,
+    pub(crate) options: HashMap<String, Py<PyAny>>,
+}
+
 fn load_file_result<'py>(
     py: Python<'py>,
     ledger_path: &str,
@@ -24,6 +50,10 @@ fn date_to_ordinal(value: &Bound<'_, PyAny>) -> PyResult<i32> {
     value.call_method0("toordinal")?.extract()
 }
 
+fn date_to_iso(value: &Bound<'_, PyAny>) -> PyResult<String> {
+    value.call_method0("isoformat")?.extract()
+}
+
 fn is_instance_of(entry: &Bound<'_, PyAny>, class_name: &str) -> PyResult<bool> {
     let py = entry.py();
     let data = PyModule::import(py, "beancount.core.data")?;
@@ -38,6 +68,87 @@ fn ledger_errors(py: Python<'_>, ledger_path: &str) -> PyResult<Vec<String>> {
         rendered.push(py_string(&error?)?);
     }
     Ok(rendered)
+}
+
+pub(crate) fn list_transactions_native(
+    py: Python<'_>,
+    ledger_path: &str,
+) -> PyResult<NativeLedgerSnapshot> {
+    let (entries, errors, options) = load_file_result(py, ledger_path)?;
+    let mut transactions = Vec::new();
+
+    for entry in entries.try_iter()? {
+        let entry = entry?;
+        if !is_instance_of(&entry, "Transaction")? {
+            continue;
+        }
+
+        let meta = entry.getattr("meta")?;
+        let file_path = if meta.is_none() {
+            "unknown".to_string()
+        } else {
+            py_string(&meta.call_method1("get", ("filename", "unknown"))?)?
+        };
+        let line_number = if meta.is_none() {
+            0
+        } else {
+            meta.call_method1("get", ("lineno", 0))?
+                .extract::<i64>()
+                .unwrap_or(0) as i32
+        };
+
+        let mut postings = Vec::new();
+        for posting in entry.getattr("postings")?.try_iter()? {
+            let posting = posting?;
+            let units = posting.getattr("units")?;
+            let (number_str, currency) = if units.is_none() {
+                (None, None)
+            } else {
+                let number = units.getattr("number")?;
+                let currency = units.getattr("currency")?;
+                if number.is_none() || currency.is_none() {
+                    (None, None)
+                } else {
+                    (Some(py_string(&number)?), Some(py_string(&currency)?))
+                }
+            };
+
+            postings.push(NativeLedgerPosting {
+                account: posting.getattr("account")?.extract::<String>()?,
+                number_str,
+                currency,
+            });
+        }
+
+        let date = entry.getattr("date")?;
+        transactions.push(NativeLedgerTransaction {
+            date_ordinal: date_to_ordinal(&date)?,
+            date_iso: date_to_iso(&date)?,
+            payee: entry.getattr("payee")?.extract::<Option<String>>()?,
+            narration: entry.getattr("narration")?.extract::<Option<String>>()?,
+            postings,
+            file_path,
+            line_number,
+        });
+    }
+
+    let mut rendered_errors = Vec::new();
+    for error in errors.try_iter()? {
+        rendered_errors.push(py_string(&error?)?);
+    }
+
+    let mut rendered_options = HashMap::new();
+    for item in options.cast::<PyDict>()?.iter() {
+        let (key, value) = item;
+        rendered_options.insert(key.str()?.extract::<String>()?, value.unbind());
+    }
+
+    Ok(NativeLedgerSnapshot {
+        path: ledger_path.to_string(),
+        transactions,
+        errors: rendered_errors,
+        options: rendered_options,
+    })
 }
 
 fn is_account_open_as_of(
@@ -225,73 +336,39 @@ fn ledger_access_list_transactions(
     py: Python<'_>,
     ledger_path: &str,
 ) -> PyResult<(String, Vec<Py<PyDict>>, Vec<String>, Py<PyDict>)> {
-    let (entries, errors, options) = load_file_result(py, ledger_path)?;
+    let snapshot = list_transactions_native(py, ledger_path)?;
     let mut transactions = Vec::new();
-
-    for entry in entries.try_iter()? {
-        let entry = entry?;
-        if !is_instance_of(&entry, "Transaction")? {
-            continue;
-        }
-
-        let txn = PyDict::new(py);
-        txn.set_item("date_ordinal", date_to_ordinal(&entry.getattr("date")?)?)?;
-        txn.set_item("payee", entry.getattr("payee")?)?;
-        txn.set_item("narration", entry.getattr("narration")?)?;
-
-        let meta = entry.getattr("meta")?;
-        let file_path = if meta.is_none() {
-            "unknown".to_string()
-        } else {
-            py_string(&meta.call_method1("get", ("filename", "unknown"))?)?
-        };
-        let line_number = if meta.is_none() {
-            0
-        } else {
-            meta.call_method1("get", ("lineno", 0))?
-                .extract::<i64>()
-                .unwrap_or(0)
-        };
-        txn.set_item("file_path", file_path)?;
-        txn.set_item("line_number", line_number)?;
+    for txn in snapshot.transactions {
+        let payload = PyDict::new(py);
+        payload.set_item("date_ordinal", txn.date_ordinal)?;
+        payload.set_item("date_iso", txn.date_iso)?;
+        payload.set_item("payee", txn.payee)?;
+        payload.set_item("narration", txn.narration)?;
+        payload.set_item("file_path", txn.file_path)?;
+        payload.set_item("line_number", txn.line_number)?;
 
         let mut postings = Vec::new();
-        for posting in entry.getattr("postings")?.try_iter()? {
-            let posting = posting?;
-            let payload = PyDict::new(py);
-            payload.set_item("account", posting.getattr("account")?)?;
-
-            let units = posting.getattr("units")?;
-            if units.is_none() {
-                payload.set_item("number_str", py.None())?;
-                payload.set_item("currency", py.None())?;
-            } else {
-                let number = units.getattr("number")?;
-                let currency = units.getattr("currency")?;
-                if number.is_none() || currency.is_none() {
-                    payload.set_item("number_str", py.None())?;
-                    payload.set_item("currency", py.None())?;
-                } else {
-                    payload.set_item("number_str", py_string(&number)?)?;
-                    payload.set_item("currency", py_string(&currency)?)?;
-                }
-            }
-            postings.push(payload.unbind());
+        for posting in txn.postings {
+            let posting_payload = PyDict::new(py);
+            posting_payload.set_item("account", posting.account)?;
+            posting_payload.set_item("number_str", posting.number_str)?;
+            posting_payload.set_item("currency", posting.currency)?;
+            postings.push(posting_payload.unbind());
         }
-        txn.set_item("postings", postings)?;
-        transactions.push(txn.unbind());
+        payload.set_item("postings", postings)?;
+        transactions.push(payload.unbind());
     }
 
-    let mut rendered_errors = Vec::new();
-    for error in errors.try_iter()? {
-        rendered_errors.push(py_string(&error?)?);
+    let options = PyDict::new(py);
+    for (key, value) in snapshot.options {
+        options.set_item(key, value)?;
     }
 
     Ok((
-        ledger_path.to_string(),
+        snapshot.path,
         transactions,
-        rendered_errors,
-        options.cast::<PyDict>()?.clone().unbind(),
+        snapshot.errors,
+        options.unbind(),
     ))
 }
 
@@ -520,6 +597,28 @@ fn ledger_access_apply_receipt_match(
     }
 
     result
+}
+
+pub(crate) fn apply_receipt_match_native(
+    py: Python<'_>,
+    ledger_path: &str,
+    statement_path: &str,
+    line_number: usize,
+    include_rel_path: &str,
+    receipt_name: &str,
+    enriched_path: &str,
+    enriched_content: &str,
+) -> PyResult<String> {
+    ledger_access_apply_receipt_match(
+        py,
+        ledger_path,
+        statement_path,
+        line_number,
+        include_rel_path,
+        receipt_name,
+        enriched_path,
+        enriched_content,
+    )
 }
 
 pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
