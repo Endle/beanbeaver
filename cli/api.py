@@ -74,6 +74,21 @@ def cmd_api_show_receipt(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_api_list_item_categories(args: argparse.Namespace) -> None:
+    """Return available receipt item categories as JSON."""
+    from beanbeaver.receipt.item_categories import list_item_categories
+    from beanbeaver.runtime.item_category_rules import load_item_category_rule_layers
+
+    categories = [
+        {
+            "key": key,
+            "account": account,
+        }
+        for key, account in list_item_categories(load_item_category_rule_layers())
+    ]
+    _print_json({"categories": categories})
+
+
 def cmd_api_approve_scanned(args: argparse.Namespace) -> None:
     """Approve one scanned receipt and return the new approved path."""
     from beanbeaver.application.receipts.approval import ApproveScannedReceiptRequest, run_approve_scanned_receipt

@@ -12,12 +12,6 @@ from types import ModuleType
 
 
 def load_rust_matcher() -> ModuleType | None:
-    for module_name in ("beanbeaver._rust_matcher", "_rust_matcher"):
-        try:
-            return importlib.import_module(module_name)
-        except ImportError:
-            continue
-
     project_root = Path(__file__).resolve().parents[1]
     suffixes = list(importlib.machinery.EXTENSION_SUFFIXES)
     if ".dylib" not in suffixes:
@@ -26,14 +20,34 @@ def load_rust_matcher() -> ModuleType | None:
         suffixes.append(".dll")
     patterns = [f"{stem}*{suffix}" for stem in ("_rust_matcher", "lib_rust_matcher") for suffix in suffixes]
 
-    directories = [
-        project_root / "target" / "maturin",
+    local_directories = [
         project_root / "target" / "debug",
         project_root / "target" / "release",
+        project_root / "target" / "maturin",
         project_root / "target",
+    ]
+
+    if module := _load_extension_from_directories(project_root, local_directories, patterns):
+        return module
+
+    for module_name in ("beanbeaver._rust_matcher", "_rust_matcher"):
+        try:
+            return importlib.import_module(module_name)
+        except ImportError:
+            continue
+
+    directories = [
         *(Path(base) for base in site.getsitepackages()),
         *(Path(base) for base in sys.path if base),
     ]
+    return _load_extension_from_directories(project_root, directories, patterns)
+
+
+def _load_extension_from_directories(
+    project_root: Path,
+    directories: list[Path],
+    patterns: list[str],
+) -> ModuleType | None:
     site_roots = {Path(base) for base in site.getsitepackages()}
     seen: set[Path] = set()
     for directory in directories:
@@ -48,13 +62,20 @@ def load_rust_matcher() -> ModuleType | None:
         matcher = directory.rglob if directory == project_root / "target" or directory in site_roots else directory.glob
         for pattern in patterns:
             for candidate in sorted(matcher(pattern)):
-                loader = importlib.machinery.ExtensionFileLoader("beanbeaver._rust_matcher", str(candidate))
-                spec = importlib.util.spec_from_file_location("beanbeaver._rust_matcher", candidate, loader=loader)
-                if spec is None:
+                try:
+                    loader = importlib.machinery.ExtensionFileLoader("beanbeaver._rust_matcher", str(candidate))
+                    spec = importlib.util.spec_from_file_location(
+                        "beanbeaver._rust_matcher",
+                        candidate,
+                        loader=loader,
+                    )
+                    if spec is None:
+                        continue
+                    module = importlib.util.module_from_spec(spec)
+                    loader.exec_module(module)
+                    return module
+                except ImportError:
                     continue
-                module = importlib.util.module_from_spec(spec)
-                loader.exec_module(module)
-                return module
 
     return None
 

@@ -154,6 +154,26 @@ def test_api_show_receipt_returns_document(
     assert captured["document"] == document
 
 
+def test_api_list_item_categories_returns_category_options(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    _configure_temp_root(tmp_path, monkeypatch)
+
+    exit_code = unified_cli.main(["api", "list-item-categories"])
+
+    captured = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert any(
+        category == {
+            "key": "grocery_dairy",
+            "account": "Expenses:Food:Grocery:Dairy",
+        }
+        for category in captured["categories"]
+    )
+
+
 def test_api_approve_scanned_moves_receipt_and_creates_review_stage(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

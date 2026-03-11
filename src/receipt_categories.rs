@@ -1,6 +1,6 @@
 use regex::Regex;
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 const FUZZY_THRESHOLD_SHORT: f64 = 0.75;
@@ -19,6 +19,7 @@ pub(crate) struct CategoryRule {
 pub(crate) struct CategoryRuleLayers {
     pub(crate) rules: Vec<CategoryRule>,
     pub(crate) exact_only_keywords: HashSet<String>,
+    pub(crate) account_mapping: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
@@ -264,6 +265,38 @@ pub(crate) fn classify_item_tags(
     }
 
     tags
+}
+
+pub(crate) fn list_item_categories(rule_layers: &CategoryRuleLayers) -> Vec<(String, String)> {
+    let mut categories = HashSet::new();
+
+    categories.extend(rule_layers.account_mapping.keys().cloned());
+    for rule in &rule_layers.rules {
+        if let Some(category) = &rule.category {
+            categories.insert(category.clone());
+        }
+    }
+
+    let mut sorted = categories.into_iter().collect::<Vec<_>>();
+    sorted.sort();
+    sorted
+        .into_iter()
+        .map(|category| {
+            let account = rule_layers
+                .account_mapping
+                .get(&category)
+                .cloned()
+                .or_else(|| {
+                    if category.starts_with("Expenses:") {
+                        Some(category.clone())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default();
+            (category, account)
+        })
+        .collect()
 }
 
 pub(crate) fn sorted_matches_for_debug(

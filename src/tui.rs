@@ -376,6 +376,29 @@ struct ShowReceiptResponse {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+struct CategoryOption {
+    key: String,
+    account: String,
+}
+
+impl CategoryOption {
+    fn display_label(&self) -> String {
+        if self.key.is_empty() {
+            "<empty>".to_string()
+        } else if self.account.is_empty() || self.account == self.key {
+            self.key.clone()
+        } else {
+            format!("{}  ->  {}", self.key, self.account)
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct CategoryListResponse {
+    categories: Vec<CategoryOption>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 struct ApproveReceiptResponse {
     status: String,
     source_path: String,
@@ -536,7 +559,6 @@ enum ReviewEditTarget {
     ReceiptField(usize),
     ItemDescription(usize),
     ItemPrice(usize),
-    ItemCategory(usize),
     ItemNotes(usize),
 }
 
@@ -608,6 +630,35 @@ impl ItemEditorState {
             .position(|candidate| *candidate == field)
             .unwrap_or(0);
         self.field_state.select(Some(index));
+    }
+}
+
+#[derive(Clone, Debug)]
+struct CategoryPickerState {
+    item_index: usize,
+    category_state: ListState,
+}
+
+impl CategoryPickerState {
+    const PAGE_STEP: isize = 8;
+
+    fn new(item_index: usize, selected_index: usize) -> Self {
+        let mut category_state = ListState::default();
+        category_state.select(Some(selected_index));
+        Self {
+            item_index,
+            category_state,
+        }
+    }
+
+    fn move_selection(&mut self, delta: isize, len: usize) {
+        if len == 0 {
+            self.category_state.select(None);
+            return;
+        }
+        let current = self.category_state.selected().unwrap_or(0) as isize;
+        let next = (current + delta).clamp(0, (len - 1) as isize) as usize;
+        self.category_state.select(Some(next));
     }
 }
 
@@ -685,7 +736,9 @@ struct ReviewState {
     field_state: ListState,
     items: Vec<ReviewItemState>,
     item_state: ListState,
+    category_options: Vec<CategoryOption>,
     item_editor: Option<ItemEditorState>,
+    category_picker: Option<CategoryPickerState>,
     text_input: Option<TextInputState>,
 }
 
@@ -824,7 +877,7 @@ impl MatchState {
 }
 
 impl ReviewState {
-    fn from_detail(detail: &ShowReceiptResponse) -> Self {
+    fn from_detail(detail: &ShowReceiptResponse, category_options: Vec<CategoryOption>) -> Self {
         let mut field_state = ListState::default();
         field_state.select(Some(0));
         let mut item_state = ListState::default();
@@ -891,7 +944,9 @@ impl ReviewState {
             field_state,
             items,
             item_state,
+            category_options,
             item_editor: None,
+            category_picker: None,
             text_input: None,
         }
     }
@@ -923,16 +978,6 @@ impl ReviewState {
                 ReviewEditTarget::ItemDescription(index),
                 format!("Item Description ({})", item.id),
                 item.description.clone(),
-            ));
-        }
-    }
-
-    fn start_item_category_edit(&mut self, index: usize) {
-        if let Some(item) = self.items.get(index) {
-            self.text_input = Some(TextInputState::with_value(
-                ReviewEditTarget::ItemCategory(index),
-                format!("Item Category ({})", item.id),
-                item.category.clone(),
             ));
         }
     }
@@ -973,6 +1018,33 @@ impl ReviewState {
         }
     }
 
+    fn open_selected_category_picker(&mut self) {
+        let Some(index) = self.selected_item_index() else {
+            return;
+        };
+        self.open_category_picker(index);
+    }
+
+    fn open_category_picker_from_item_editor(&mut self) {
+        let Some(index) = self.item_editor.as_ref().map(|editor| editor.item_index) else {
+            return;
+        };
+        self.open_category_picker(index);
+    }
+
+    fn open_category_picker(&mut self, index: usize) {
+        let selected_index = self
+            .items
+            .get(index)
+            .and_then(|item| {
+                self.category_options
+                    .iter()
+                    .position(|option| option.key == item.category)
+            })
+            .unwrap_or(0);
+        self.category_picker = Some(CategoryPickerState::new(index, selected_index));
+    }
+
     fn toggle_item_removed(&mut self, index: usize) -> Option<String> {
         let item = self.items.get_mut(index)?;
         item.removed = !item.removed;
@@ -992,6 +1064,29 @@ impl ReviewState {
         self.toggle_item_removed(item_index)
     }
 
+    fn apply_selected_category(&mut self) -> Option<String> {
+        let (item_index, category_index) = {
+            let picker = self.category_picker.as_ref()?;
+            (
+                picker.item_index,
+                picker.category_state.selected().unwrap_or(0),
+            )
+        };
+        let selected = self.category_options.get(category_index)?;
+        let item = self.items.get_mut(item_index)?;
+        item.category = selected.key.clone();
+        self.category_picker = None;
+        Some(format!(
+            "{} category set to {}",
+            item.id,
+            if selected.key.is_empty() {
+                "<empty>"
+            } else {
+                selected.key.as_str()
+            }
+        ))
+    }
+
     fn activate_item_editor_selection(&mut self) -> Option<String> {
         let (item_index, field) = {
             let editor = self.item_editor.as_ref()?;
@@ -1007,8 +1102,8 @@ impl ReviewState {
                 Some("Editing item price".to_string())
             }
             ItemEditorField::Category => {
-                self.start_item_category_edit(item_index);
-                Some("Editing item category".to_string())
+                self.open_category_picker(item_index);
+                Some("Selecting item category".to_string())
             }
             ItemEditorField::Notes => {
                 self.start_item_notes_edit(item_index);
@@ -1036,11 +1131,6 @@ impl ReviewState {
             ReviewEditTarget::ItemPrice(index) => {
                 if let Some(item) = self.items.get_mut(index) {
                     item.price = input.value;
-                }
-            }
-            ReviewEditTarget::ItemCategory(index) => {
-                if let Some(item) = self.items.get_mut(index) {
-                    item.category = input.value;
                 }
             }
             ReviewEditTarget::ItemNotes(index) => {
@@ -1388,6 +1478,18 @@ impl App {
         }
     }
 
+    fn select_receipt_by_path(&mut self, queue: Queue, path: &str) -> bool {
+        let Some(index) = self
+            .receipts(queue)
+            .iter()
+            .position(|receipt| receipt.path == path)
+        else {
+            return false;
+        };
+        self.list_state_mut(queue).select(Some(index));
+        true
+    }
+
     fn move_selection(&mut self, delta: isize) {
         let len = self.receipts(self.active_queue).len();
         if len == 0 {
@@ -1587,12 +1689,24 @@ impl App {
             return;
         }
         match backend_show_receipt(&receipt.path) {
-            Ok(detail) => {
-                self.review_state = Some(ReviewState::from_detail(&detail));
-                self.set_status(
-                    "Review receipt: h/l switch pane | Enter item editor | v price | n notes | c edit category | x toggle removed | p preview | a approve | Esc cancel",
-                );
-            }
+            Ok(detail) => match backend_list_item_categories() {
+                Ok(categories) => {
+                    let mut category_options = vec![CategoryOption {
+                        key: String::new(),
+                        account: String::new(),
+                    }];
+                    category_options.extend(categories);
+                    self.review_state = Some(ReviewState::from_detail(&detail, category_options));
+                    self.set_status(
+                            "Review receipt: h/l switch pane | Enter item editor | v price | n notes | c choose category | x toggle removed | p preview | a approve | Esc cancel",
+                        );
+                }
+                Err(error) => {
+                    self.set_error(format!(
+                        "Failed to load category options for receipt review: {error}"
+                    ));
+                }
+            },
             Err(error) => self.set_error(format!("Failed to load receipt review state: {error}")),
         }
     }
@@ -1606,6 +1720,12 @@ impl App {
         let result = backend_approve_scanned_with_review(&review_state.path, &payload)?;
         self.review_state = None;
         self.refresh()?;
+        self.active_queue = Queue::Approved;
+        if !self.select_receipt_by_path(Queue::Approved, &result.approved_path) {
+            self.sync_selection(Queue::Approved);
+        }
+        self.focus = PaneFocus::List;
+        self.load_detail()?;
         self.set_status(format!(
             "Approved {} -> {}",
             result.source_path, result.approved_path
@@ -2087,6 +2207,12 @@ fn backend_list_receipts(queue: Queue) -> AppResult<Vec<ReceiptSummary>> {
 fn backend_show_receipt(path: &str) -> AppResult<ShowReceiptResponse> {
     let stdout = run_backend(&["api", "show-receipt", path])?;
     Ok(serde_json::from_str(&stdout)?)
+}
+
+fn backend_list_item_categories() -> AppResult<Vec<CategoryOption>> {
+    let stdout = run_backend(&["api", "list-item-categories"])?;
+    let response: CategoryListResponse = serde_json::from_str(&stdout)?;
+    Ok(response.categories)
 }
 
 fn backend_approve_scanned(path: &str) -> AppResult<ApproveReceiptResponse> {
@@ -3069,13 +3195,16 @@ fn render_review_screen(
     frame.render_widget(preview, right[1]);
 
     let help = Paragraph::new(
-        "h/l pane  |  j/k move  |  Enter open item editor / edit field  |  v price  |  n notes  |  c category  |  x toggle removed  |  p preview tab  |  a approve  |  Esc cancel",
+        "h/l pane  |  j/k move  |  Enter open item editor / edit field  |  v price  |  n notes  |  c category picker  |  x toggle removed  |  p preview tab  |  a approve  |  Esc cancel",
     )
     .wrap(Wrap { trim: true });
     frame.render_widget(help, rows[2]);
 
     if review_state.item_editor.is_some() {
         render_item_editor_modal(frame, review_state);
+    }
+    if review_state.category_picker.is_some() {
+        render_category_picker_modal(frame, review_state);
     }
     if let Some(text_input) = &review_state.text_input {
         render_text_input_modal(frame, text_input);
@@ -3162,10 +3291,63 @@ fn render_item_editor_modal(frame: &mut ratatui::Frame<'_>, review_state: &mut R
     }
 
     let help = Paragraph::new(
-        "Up/Down select  |  Enter edit or toggle removed  |  x / Space toggle removed  |  Esc close",
+        "Up/Down select  |  Enter edit or open category picker  |  x / Space toggle removed  |  Esc close",
     )
     .style(popup_style())
     .wrap(Wrap { trim: true });
+    frame.render_widget(help, rows[1]);
+}
+
+fn render_category_picker_modal(frame: &mut ratatui::Frame<'_>, review_state: &mut ReviewState) {
+    let Some(item_index) = review_state
+        .category_picker
+        .as_ref()
+        .map(|picker| picker.item_index)
+    else {
+        return;
+    };
+    let Some(item) = review_state.items.get(item_index) else {
+        return;
+    };
+
+    let popup = centered_rect(78, 14, frame.area());
+    frame.render_widget(Clear, popup);
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(format!("Select Category ({})", item.id))
+            .style(popup_style()),
+        popup,
+    );
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(8), Constraint::Length(2)])
+        .split(popup);
+
+    let options = review_state
+        .category_options
+        .iter()
+        .map(|option| ListItem::new(Line::from(option.display_label())))
+        .collect::<Vec<_>>();
+    let list = List::new(options)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Categories")
+                .style(popup_style()),
+        )
+        .style(popup_style())
+        .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+        .highlight_symbol(">> ");
+    if let Some(picker) = review_state.category_picker.as_mut() {
+        frame.render_stateful_widget(list, rows[0], &mut picker.category_state);
+    }
+
+    let help =
+        Paragraph::new("Up/Down select  |  PageUp/PageDown jump  |  Enter apply  |  Esc cancel")
+            .style(popup_style())
+            .wrap(Wrap { trim: true });
     frame.render_widget(help, rows[1]);
 }
 
@@ -3493,6 +3675,41 @@ fn run_app(
                         }
                         _ => {}
                     }
+                } else if review_state.category_picker.is_some() {
+                    match key.code {
+                        KeyCode::Esc => {
+                            review_state.category_picker = None;
+                            status_message = Some("Cancelled category selection".to_string());
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            let len = review_state.category_options.len();
+                            if let Some(picker) = review_state.category_picker.as_mut() {
+                                picker.move_selection(1, len);
+                            }
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            let len = review_state.category_options.len();
+                            if let Some(picker) = review_state.category_picker.as_mut() {
+                                picker.move_selection(-1, len);
+                            }
+                        }
+                        KeyCode::PageDown => {
+                            let len = review_state.category_options.len();
+                            if let Some(picker) = review_state.category_picker.as_mut() {
+                                picker.move_selection(CategoryPickerState::PAGE_STEP, len);
+                            }
+                        }
+                        KeyCode::PageUp => {
+                            let len = review_state.category_options.len();
+                            if let Some(picker) = review_state.category_picker.as_mut() {
+                                picker.move_selection(-CategoryPickerState::PAGE_STEP, len);
+                            }
+                        }
+                        KeyCode::Enter => {
+                            status_message = review_state.apply_selected_category();
+                        }
+                        _ => {}
+                    }
                 } else if review_state.item_editor.is_some() {
                     match key.code {
                         KeyCode::Esc => {
@@ -3514,6 +3731,10 @@ fn run_app(
                         }
                         KeyCode::Char('x') | KeyCode::Char(' ') => {
                             status_message = review_state.toggle_item_editor_removed();
+                        }
+                        KeyCode::Char('c') => {
+                            review_state.open_category_picker_from_item_editor();
+                            status_message = Some("Selecting item category".to_string());
                         }
                         _ => {}
                     }
@@ -3602,8 +3823,8 @@ fn run_app(
                         },
                         (KeyCode::Char('c'), _) => {
                             if review_state.pane == ReviewPane::Items {
-                                review_state.item_editor_select_field(ItemEditorField::Category);
-                                status_message = review_state.activate_item_editor_selection();
+                                review_state.open_selected_category_picker();
+                                status_message = Some("Selecting item category".to_string());
                             }
                         }
                         (KeyCode::Char('v'), _) => {

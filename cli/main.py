@@ -101,6 +101,7 @@ Notes:
 
     api_subparsers.add_parser("list-scanned", help="List scanned receipts as JSON")
     api_subparsers.add_parser("list-approved", help="List approved receipts as JSON")
+    api_subparsers.add_parser("list-item-categories", help="List available item categories as JSON")
     api_subparsers.add_parser("get-config", help="Get TUI/backend config as JSON")
     api_subparsers.add_parser("set-config", help="Persist TUI/backend config from stdin JSON")
 
@@ -218,6 +219,7 @@ Notes:
             cmd_api_approve_scanned_with_review,
             cmd_api_get_config,
             cmd_api_list_approved,
+            cmd_api_list_item_categories,
             cmd_api_list_scanned,
             cmd_api_match_candidates,
             cmd_api_re_edit_approved_with_review,
@@ -229,6 +231,8 @@ Notes:
             return _run_legacy_command(cmd_api_list_scanned, args)
         if args.api_command == "list-approved":
             return _run_legacy_command(cmd_api_list_approved, args)
+        if args.api_command == "list-item-categories":
+            return _run_legacy_command(cmd_api_list_item_categories, args)
         if args.api_command == "show-receipt":
             return _run_legacy_command(cmd_api_show_receipt, args)
         if args.api_command == "approve-scanned":
