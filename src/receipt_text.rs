@@ -578,7 +578,12 @@ fn extract_trailing_noisy_price(line: &str) -> Option<(String, String, i64, usiz
     let fraction = captures.get(2)?.as_str().to_string();
     let whole_dollars = whole.parse::<i64>().ok()?;
     let start = captures.get(1)?.start();
-    Some((format!("{whole}.{fraction}"), fraction, whole_dollars, start))
+    Some((
+        format!("{whole}.{fraction}"),
+        fraction,
+        whole_dollars,
+        start,
+    ))
 }
 
 fn build_malformed_price_candidate(line: &str) -> Option<MalformedTrailingPriceCandidate> {
@@ -639,7 +644,9 @@ fn levenshtein_distance(left: &str, right: &str) -> usize {
     prev[right_chars.len()]
 }
 
-fn malformed_candidate_price_options(candidate: &MalformedTrailingPriceCandidate) -> Vec<CandidatePriceOption> {
+fn malformed_candidate_price_options(
+    candidate: &MalformedTrailingPriceCandidate,
+) -> Vec<CandidatePriceOption> {
     let mut best_by_price: HashMap<i64, usize> = HashMap::new();
 
     for cents in 0..=99i64 {
@@ -732,7 +739,9 @@ fn reconcile_malformed_price_candidates(
                                     ambiguous: state.ambiguous,
                                 };
                             } else if next_score == existing.score
-                                && (existing.prices != next_prices || existing.ambiguous || state.ambiguous)
+                                && (existing.prices != next_prices
+                                    || existing.ambiguous
+                                    || state.ambiguous)
                             {
                                 existing.ambiguous = true;
                             }
@@ -780,7 +789,9 @@ fn reconcile_malformed_price_candidates(
         return None;
     }
 
-    Some(ReconciledMalformedPrices { prices: best_prices })
+    Some(ReconciledMalformedPrices {
+        prices: best_prices,
+    })
 }
 
 pub(crate) fn extract_text_items(
@@ -1165,9 +1176,9 @@ pub(crate) fn extract_text_items(
         } else if let Some(captures) = re_malformed_ocr_price().captures(line) {
             let token = captures.get(1).map(|m| m.as_str()).unwrap_or("");
             let context = truncated_context(line);
-            deferred.push(DeferredTextOutcome::Warning(
-                format!("maybe missed item with malformed OCR price \"{token}\" (context: \"{context}\")"),
-            ));
+            deferred.push(DeferredTextOutcome::Warning(format!(
+                "maybe missed item with malformed OCR price \"{token}\" (context: \"{context}\")"
+            )));
         } else if line.to_ascii_lowercase().contains("/for")
             && re_tail_token().is_match(line)
             && re_tail_token()

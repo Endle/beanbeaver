@@ -96,7 +96,7 @@ def _validate_item_review_patches(
     item_review_patches: list[dict[str, Any]],
     *,
     known_item_ids: set[str],
-) -> dict[str, dict[str, Any]]:
+) -> list[dict[str, Any]]:
     normalized: dict[str, dict[str, Any]] = {}
     for index, item_patch in enumerate(item_review_patches, start=1):
         if not isinstance(item_patch, dict):
@@ -105,7 +105,12 @@ def _validate_item_review_patches(
         item_id = _normalize_optional_text(item_patch.get("id"))
         if item_id is None:
             raise ValueError(f"Item review patch #{index} is missing 'id'")
-        if item_id not in known_item_ids:
+        create = item_patch.get("create", False)
+        if not isinstance(create, bool):
+            raise ValueError(f"Item review patch '{item_id}' field 'create' must be a boolean")
+        if create and item_id in known_item_ids:
+            raise ValueError(f"New item review patch id already exists: {item_id}")
+        if not create and item_id not in known_item_ids:
             raise ValueError(f"Unknown item review patch id: {item_id}")
 
         review_patch = item_patch.get("review", {})
@@ -132,16 +137,20 @@ def _validate_item_review_patches(
                 raise ValueError(f"Item review patch '{item_id}' field 'removed' must be a boolean")
             item_review["removed"] = removed
 
-        normalized[item_id] = item_review
+        normalized[item_id] = {
+            "id": item_id,
+            "create": create,
+            "review": item_review,
+        }
 
-    return normalized
+    return list(normalized.values())
 
 
 def _apply_review_patches(
     document: dict[str, Any],
     *,
     review_patch: dict[str, str | None],
-    item_review_patches: dict[str, dict[str, Any]],
+    item_review_patches: list[dict[str, Any]],
 ) -> None:
     if review_patch:
         review = dict(document.get("review") or {})
@@ -151,15 +160,21 @@ def _apply_review_patches(
     if not item_review_patches:
         return
 
+    existing_item_patches = {
+        str(item_patch["id"]): dict(item_patch.get("review") or {})
+        for item_patch in item_review_patches
+        if not bool(item_patch.get("create"))
+    }
+
     for item in document.get("items") or []:
         if not isinstance(item, dict):
             continue
         item_id = _normalize_optional_text(item.get("id"))
-        if item_id is None or item_id not in item_review_patches:
+        if item_id is None or item_id not in existing_item_patches:
             continue
 
         next_review = dict(item.get("review") or {})
-        patch = dict(item_review_patches[item_id])
+        patch = dict(existing_item_patches[item_id])
         classification_patch = patch.pop("classification", None)
         if classification_patch is not None:
             merged_classification = dict(next_review.get("classification") or {})
@@ -167,6 +182,36 @@ def _apply_review_patches(
             next_review["classification"] = merged_classification
         next_review.update(patch)
         item["review"] = next_review
+
+    items = document.get("items")
+    if not isinstance(items, list):
+        items = []
+        document["items"] = items
+
+    for item_patch in item_review_patches:
+        if not bool(item_patch.get("create")):
+            continue
+
+        patch = dict(item_patch.get("review") or {})
+        classification_patch = patch.pop("classification", None)
+        removed = patch.pop("removed", None)
+
+        new_item: dict[str, Any] = {
+            "id": str(item_patch["id"]),
+            "quantity": 1,
+            "warnings": [],
+            "meta": {"source": "tui_review"},
+        }
+        for field in ("description", "price", "notes"):
+            value = patch.get(field)
+            if value is not None:
+                new_item[field] = value
+        if classification_patch is not None:
+            new_item["classification"] = classification_patch
+        if removed is not None:
+            new_item["review"] = {"removed": removed}
+
+        items.append(new_item)
 
 
 def run_approve_scanned_receipt(request: ApproveScannedReceiptRequest) -> ApproveScannedReceiptResult:

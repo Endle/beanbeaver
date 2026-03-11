@@ -4,7 +4,9 @@ use pyo3::wrap_pyfunction;
 use crate::receipt_formatter;
 
 fn fixed_decimal_string(value: &Bound<'_, PyAny>) -> PyResult<String> {
-    value.call_method1("__format__", (".2f",))?.extract::<String>()
+    value
+        .call_method1("__format__", (".2f",))?
+        .extract::<String>()
 }
 
 fn optional_fixed_decimal_string(value: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
@@ -72,7 +74,9 @@ fn optional_string_from_obj(value: &Bound<'_, PyAny>) -> PyResult<Option<String>
     Ok(Some(value.extract::<String>()?))
 }
 
-fn extract_enriched_match_input(match_obj: &Bound<'_, PyAny>) -> PyResult<receipt_formatter::EnrichedMatchInput> {
+fn extract_enriched_match_input(
+    match_obj: &Bound<'_, PyAny>,
+) -> PyResult<receipt_formatter::EnrichedMatchInput> {
     let txn = match_obj.getattr("transaction")?;
     let postings_any = txn.getattr("postings")?;
     let mut postings = Vec::new();
@@ -172,6 +176,9 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(receipt_format_parsed_receipt, module)?)?;
     module.add_function(wrap_pyfunction!(receipt_format_draft_beancount, module)?)?;
     module.add_function(wrap_pyfunction!(receipt_generate_filename, module)?)?;
-    module.add_function(wrap_pyfunction!(receipt_format_enriched_transaction, module)?)?;
+    module.add_function(wrap_pyfunction!(
+        receipt_format_enriched_transaction,
+        module
+    )?)?;
     Ok(())
 }

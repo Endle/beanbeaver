@@ -551,6 +551,7 @@ struct ReceiptFieldState {
 #[derive(Clone, Debug)]
 struct ReviewItemState {
     id: String,
+    is_new: bool,
     original_description: String,
     description: String,
     original_price: String,
@@ -562,6 +563,56 @@ struct ReviewItemState {
     notes: String,
     original_removed: bool,
     removed: bool,
+}
+
+impl ReviewItemState {
+    fn from_document(item: &Value) -> Option<Self> {
+        let item_id = item.get("id")?;
+        let id = json_value_to_text(Some(item_id));
+        if id.is_empty() {
+            return None;
+        }
+        Some(Self {
+            id,
+            is_new: false,
+            original_description: effective_item_text(item, "description"),
+            description: effective_item_text(item, "description"),
+            original_price: effective_item_text(item, "price"),
+            price: effective_item_text(item, "price"),
+            quantity: effective_item_text(item, "quantity"),
+            original_category: effective_item_category_text(item),
+            category: effective_item_category_text(item),
+            original_notes: effective_item_text(item, "notes"),
+            notes: effective_item_text(item, "notes"),
+            original_removed: effective_item_removed(item),
+            removed: effective_item_removed(item),
+        })
+    }
+
+    fn new_added(id: String) -> Self {
+        Self {
+            id,
+            is_new: true,
+            original_description: String::new(),
+            description: String::new(),
+            original_price: String::new(),
+            price: String::new(),
+            quantity: "1".to_string(),
+            original_category: String::new(),
+            category: String::new(),
+            original_notes: String::new(),
+            notes: String::new(),
+            original_removed: false,
+            removed: false,
+        }
+    }
+
+    fn has_meaningful_content(&self) -> bool {
+        !self.description.trim().is_empty()
+            || !self.price.trim().is_empty()
+            || !self.category.trim().is_empty()
+            || !self.notes.trim().is_empty()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -751,6 +802,7 @@ struct ReviewState {
     item_editor: Option<ItemEditorState>,
     category_picker: Option<CategoryPickerState>,
     text_input: Option<TextInputState>,
+    next_added_item_number: usize,
 }
 
 struct ConfigState {
@@ -920,27 +972,9 @@ impl ReviewState {
         let mut items = Vec::new();
         if let Some(item_docs) = document.get("items").and_then(Value::as_array) {
             for item in item_docs {
-                let Some(item_id) = item.get("id") else {
-                    continue;
-                };
-                let id = json_value_to_text(Some(item_id));
-                if id.is_empty() {
-                    continue;
+                if let Some(review_item) = ReviewItemState::from_document(item) {
+                    items.push(review_item);
                 }
-                items.push(ReviewItemState {
-                    id,
-                    original_description: effective_item_text(item, "description"),
-                    description: effective_item_text(item, "description"),
-                    original_price: effective_item_text(item, "price"),
-                    price: effective_item_text(item, "price"),
-                    quantity: effective_item_text(item, "quantity"),
-                    original_category: effective_item_category_text(item),
-                    category: effective_item_category_text(item),
-                    original_notes: effective_item_text(item, "notes"),
-                    notes: effective_item_text(item, "notes"),
-                    original_removed: effective_item_removed(item),
-                    removed: effective_item_removed(item),
-                });
             }
         }
         if !items.is_empty() {
@@ -964,6 +998,7 @@ impl ReviewState {
             item_editor: None,
             category_picker: None,
             text_input: None,
+            next_added_item_number: 1,
         }
     }
 
@@ -1075,6 +1110,25 @@ impl ReviewState {
         self.category_picker = Some(CategoryPickerState::new(index, selected_index));
     }
 
+    fn next_added_item_id(&mut self) -> String {
+        loop {
+            let candidate = format!("item-added-{:04}", self.next_added_item_number);
+            self.next_added_item_number += 1;
+            if self.items.iter().all(|item| item.id != candidate) {
+                return candidate;
+            }
+        }
+    }
+
+    fn add_item(&mut self) -> String {
+        let id = self.next_added_item_id();
+        self.items.push(ReviewItemState::new_added(id.clone()));
+        let index = self.items.len().saturating_sub(1);
+        self.item_state.select(Some(index));
+        self.item_editor = Some(ItemEditorState::new(index));
+        id
+    }
+
     fn toggle_item_removed(&mut self, index: usize) -> Option<String> {
         let item = self.items.get_mut(index)?;
         item.removed = !item.removed;
@@ -1184,6 +1238,37 @@ impl ReviewState {
 
         let mut items = Vec::new();
         for item in &self.items {
+            if item.is_new {
+                if !item.has_meaningful_content() {
+                    continue;
+                }
+                let mut item_review = serde_json::Map::new();
+                if !item.description.trim().is_empty() {
+                    item_review.insert(
+                        "description".to_string(),
+                        Value::String(item.description.clone()),
+                    );
+                }
+                if !item.price.trim().is_empty() {
+                    item_review.insert("price".to_string(), Value::String(item.price.clone()));
+                }
+                if !item.category.trim().is_empty() {
+                    item_review
+                        .insert("category".to_string(), Value::String(item.category.clone()));
+                }
+                if !item.notes.trim().is_empty() {
+                    item_review.insert("notes".to_string(), Value::String(item.notes.clone()));
+                }
+                if item.removed {
+                    item_review.insert("removed".to_string(), Value::Bool(true));
+                }
+                items.push(serde_json::json!({
+                    "id": item.id.clone(),
+                    "create": true,
+                    "review": Value::Object(item_review),
+                }));
+                continue;
+            }
             let mut item_review = serde_json::Map::new();
             if item.description != item.original_description {
                 item_review.insert(
@@ -1248,10 +1333,12 @@ impl ReviewState {
             } else {
                 item.quantity.as_str()
             };
+            let new_item = if item.is_new { " [new]" } else { "" };
             lines.push(format!(
-                "{:>2}. {}  x{}  ${}  [{}]",
+                "{:>2}. {}{}  x{}  ${}  [{}]",
                 index + 1,
                 item.description,
+                new_item,
                 quantity,
                 if item.price.is_empty() {
                     "0.00"
@@ -1293,6 +1380,35 @@ impl ReviewState {
             }
         }
         for item in &self.items {
+            if item.is_new {
+                if !item.has_meaningful_content() {
+                    continue;
+                }
+                let description = if item.description.trim().is_empty() {
+                    "<empty>"
+                } else {
+                    item.description.as_str()
+                };
+                let price = if item.price.trim().is_empty() {
+                    "<empty>"
+                } else {
+                    item.price.as_str()
+                };
+                let category = if item.category.trim().is_empty() {
+                    "<empty>"
+                } else {
+                    item.category.as_str()
+                };
+                let removed = if item.removed { " [removed]" } else { "" };
+                lines.push(format!(
+                    "{} added: {} | {} | {}{}",
+                    item.id, description, price, category, removed
+                ));
+                if !item.notes.trim().is_empty() {
+                    lines.push(format!("{} notes: <empty> -> {}", item.id, item.notes));
+                }
+                continue;
+            }
             if item.description != item.original_description {
                 lines.push(format!(
                     "{} description: {} -> {}",
@@ -1680,7 +1796,10 @@ impl App {
         self.last_receipts_refresh = Some(now);
 
         let active_path_after = self.selected_path_for_queue(self.active_queue);
-        if force || active_path_before != active_path_after || detail_path_before != active_path_after {
+        if force
+            || active_path_before != active_path_after
+            || detail_path_before != active_path_after
+        {
             self.load_detail()?;
         }
 
@@ -1785,7 +1904,7 @@ impl App {
                         category_options,
                     ));
                     self.set_status(
-                            "Review receipt: h/l switch pane | Enter item editor | v price | n notes | c choose category | x toggle removed | p preview | a submit | Esc cancel",
+                            "Review receipt: h/l switch pane | Enter item editor | i add item | v price | n notes | c choose category | x toggle removed | p preview | a submit | Esc cancel",
                         );
                 }
                 Err(error) => {
@@ -1813,7 +1932,8 @@ impl App {
             }
             Queue::Approved => {
                 let result = backend_re_edit_approved_with_review(&source_path, &payload)?;
-                result.updated_path
+                result
+                    .updated_path
                     .ok_or_else(|| "missing updated path from approved re-edit".to_string())?
             }
         };
@@ -1830,7 +1950,10 @@ impl App {
         self.load_detail()?;
         self.set_status(match source_queue {
             Queue::Scanned => format!("Approved {} -> {}", source_path, result_path),
-            Queue::Approved => format!("Saved approved review stage {} -> {}", source_path, result_path),
+            Queue::Approved => format!(
+                "Saved approved review stage {} -> {}",
+                source_path, result_path
+            ),
         });
         Ok(())
     }
@@ -2344,21 +2467,21 @@ fn backend_re_edit_approved_with_review(
     path: &str,
     payload: &str,
 ) -> AppResult<ReEditApprovedResponse> {
-    let stdout =
-        run_backend_with_input(&["api", "re-edit-approved-with-review", path], Some(payload))?;
+    let stdout = run_backend_with_input(
+        &["api", "re-edit-approved-with-review", path],
+        Some(payload),
+    )?;
     let response: ReEditApprovedResponse = serde_json::from_str(&stdout)?;
     if response.status != "updated" {
-        return Err(
-            format!(
-                "unexpected re-edit status: {} ({})",
-                response.status,
-                response
-                    .normalize_error
-                    .as_deref()
-                    .unwrap_or("no normalize error provided")
-            )
-            .into(),
-        );
+        return Err(format!(
+            "unexpected re-edit status: {} ({})",
+            response.status,
+            response
+                .normalize_error
+                .as_deref()
+                .unwrap_or("no normalize error provided")
+        )
+        .into());
     }
     Ok(response)
 }
@@ -3413,6 +3536,7 @@ fn render_review_screen(
         .iter()
         .map(|item| {
             let removed = if item.removed { " [removed]" } else { "" };
+            let new_item = if item.is_new { " [new]" } else { "" };
             let notes = if item.notes.trim().is_empty() {
                 ""
             } else {
@@ -3424,8 +3548,9 @@ fn render_review_screen(
                 item.category.as_str()
             };
             ListItem::new(Line::from(format!(
-                "{}  ${}  {}{}{}",
+                "{}{}  ${}  {}{}{}",
                 item.description,
+                new_item,
                 if item.price.is_empty() {
                     "0.00"
                 } else {
@@ -3511,7 +3636,7 @@ fn render_review_screen(
     frame.render_widget(preview, right[1]);
 
     let help = Paragraph::new(format!(
-        "h/l pane  |  j/k move  |  Enter open item editor / edit field  |  v price  |  n notes  |  c category picker  |  x toggle removed  |  p preview tab  |  a {}  |  Esc cancel",
+        "h/l pane  |  j/k move  |  Enter open item editor / edit field  |  i add item  |  v price  |  n notes  |  c category picker  |  x toggle removed  |  p preview tab  |  a {}  |  Esc cancel",
         review_state.submit_label()
     ))
     .wrap(Wrap { trim: true });
@@ -3545,7 +3670,11 @@ fn render_item_editor_modal(frame: &mut ratatui::Frame<'_>, review_state: &mut R
     frame.render_widget(
         Block::default()
             .borders(Borders::ALL)
-            .title(format!("Edit Item ({})", item.id))
+            .title(if item.is_new {
+                format!("Edit New Item ({})", item.id)
+            } else {
+                format!("Edit Item ({})", item.id)
+            })
             .style(popup_style()),
         popup,
     );
@@ -4138,6 +4267,14 @@ fn run_app(
                             ReviewPane::Fields => review_state.start_selected_field_edit(),
                             ReviewPane::Preview => {}
                         },
+                        (KeyCode::Char('i'), _) => {
+                            if review_state.pane == ReviewPane::Items {
+                                let item_id = review_state.add_item();
+                                status_message = Some(format!(
+                                    "Added {item_id}; blank new items are ignored on submit"
+                                ));
+                            }
+                        }
                         (KeyCode::Char('c'), _) => {
                             if review_state.pane == ReviewPane::Items {
                                 review_state.open_selected_category_picker();
@@ -4448,6 +4585,31 @@ pub fn run(quit_after_launch: bool) -> AppResult<()> {
 mod tests {
     use super::*;
 
+    fn sample_review_detail() -> ShowReceiptResponse {
+        ShowReceiptResponse {
+            path: "/tmp/review_stage_1.receipt.json".to_string(),
+            summary: ReceiptSummary {
+                path: "/tmp/review_stage_1.receipt.json".to_string(),
+                receipt_dir: "2026-03-07_costco_466_68_ad51".to_string(),
+                stage_file: "review_stage_1.receipt.json".to_string(),
+                merchant: Some("COSTCO".to_string()),
+                date: Some("2026-03-07".to_string()),
+                total: Some("466.68".to_string()),
+            },
+            document: serde_json::json!({
+                "receipt": {
+                    "merchant": "COSTCO",
+                    "date": "2026-03-07",
+                    "total": "466.68"
+                },
+                "items": [],
+                "debug": {
+                    "ocr_payload": {"detections": []}
+                }
+            }),
+        }
+    }
+
     #[test]
     fn render_detail_lines_scanned_shows_human_readable_summary() {
         let detail = ShowReceiptResponse {
@@ -4550,6 +4712,54 @@ mod tests {
         assert!(rendered.contains("    Notes: gift"));
         assert!(!rendered.contains("REMOVE ME"));
         assert!(!rendered.contains("\"debug\""));
+    }
+
+    #[test]
+    fn review_payload_includes_create_patch_for_added_items() {
+        let detail = sample_review_detail();
+        let mut review_state = ReviewState::from_detail(Queue::Approved, &detail, Vec::new());
+
+        review_state.add_item();
+        let item = review_state.items.get_mut(0).expect("new item");
+        item.description = "BANANAS".to_string();
+        item.price = "3.99".to_string();
+        item.category = "Expenses:Food:Grocery:Fruit".to_string();
+        item.notes = "manual add".to_string();
+
+        assert_eq!(
+            review_state.payload(),
+            serde_json::json!({
+                "review": {},
+                "items": [
+                    {
+                        "id": "item-added-0001",
+                        "create": true,
+                        "review": {
+                            "description": "BANANAS",
+                            "price": "3.99",
+                            "category": "Expenses:Food:Grocery:Fruit",
+                            "notes": "manual add",
+                        }
+                    }
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn review_payload_ignores_blank_added_item_drafts() {
+        let detail = sample_review_detail();
+        let mut review_state = ReviewState::from_detail(Queue::Approved, &detail, Vec::new());
+
+        review_state.add_item();
+
+        assert_eq!(
+            review_state.payload(),
+            serde_json::json!({
+                "review": {},
+                "items": []
+            })
+        );
     }
 
     #[test]

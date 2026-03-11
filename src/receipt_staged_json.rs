@@ -164,9 +164,16 @@ fn make_warning(message: &str, source: &str, stage: &str) -> StructuredWarning {
     }
 }
 
-fn semantic_category_from_legacy_target(target: Option<&str>, rule_layers: &StageRuleLayers) -> Option<String> {
+fn semantic_category_from_legacy_target(
+    target: Option<&str>,
+    rule_layers: &StageRuleLayers,
+) -> Option<String> {
     let cleaned = target.map(str::trim).filter(|value| !value.is_empty())?;
-    if rule_layers.account_mapping.iter().any(|(key, _)| key == cleaned) {
+    if rule_layers
+        .account_mapping
+        .iter()
+        .any(|(key, _)| key == cleaned)
+    {
         return Some(cleaned.to_string());
     }
     for (key, account) in &rule_layers.account_mapping {
@@ -270,7 +277,8 @@ pub(crate) fn build_parsed_receipt_stage(
             created_at: created_at.to_string(),
             created_by: created_by.to_string(),
             pass_name: pass_name.to_string(),
-            image_filename: (!receipt.image_filename.is_empty()).then(|| receipt.image_filename.clone()),
+            image_filename: (!receipt.image_filename.is_empty())
+                .then(|| receipt.image_filename.clone()),
             image_sha256,
             ocr_json_path,
         },
@@ -292,7 +300,9 @@ pub(crate) fn build_parsed_receipt_stage(
     }
 }
 
-pub(crate) fn get_stage_summary(document: &StageDocumentInput) -> (Option<String>, Option<String>, Option<String>) {
+pub(crate) fn get_stage_summary(
+    document: &StageDocumentInput,
+) -> (Option<String>, Option<String>, Option<String>) {
     (
         document.merchant.clone(),
         document.date_iso.clone(),

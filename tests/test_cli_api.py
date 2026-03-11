@@ -368,6 +368,78 @@ def test_api_re_edit_approved_with_review_applies_receipt_overrides(
     }
 
 
+def test_api_re_edit_approved_with_review_appends_new_item(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    paths = _configure_temp_root(tmp_path, monkeypatch)
+    approved_dir = paths.receipts_json_approved / "2026-03-04_market_10_00_feed"
+    stage_path = approved_dir / "review_stage_1.receipt.json"
+    save_stage_document(
+        stage_path,
+        {
+            **_stage_document(
+                merchant="Market",
+                receipt_date="2026-03-04",
+                total="10.00",
+                stage="review_stage_1",
+                stage_index=1,
+            ),
+            "items": [
+                {
+                    "id": "item-0001",
+                    "description": "MILK",
+                    "price": "4.99",
+                    "quantity": 1,
+                    "classification": {"category": "grocery_drink_cocacola"},
+                    "warnings": [],
+                    "meta": {"source": "parser"},
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": "item-added-0001",
+                            "create": True,
+                            "review": {
+                                "description": "BANANAS",
+                                "price": "3.99",
+                                "notes": "manually added from receipt edge",
+                                "category": "grocery_drink_cocacola",
+                            },
+                        }
+                    ]
+                }
+            )
+        ),
+    )
+
+    exit_code = unified_cli.main(["api", "re-edit-approved-with-review", str(stage_path)])
+
+    captured = json.loads(capsys.readouterr().out)
+    updated_path = Path(captured["updated_path"])
+    updated_document = json.loads(updated_path.read_text())
+    assert exit_code == 0
+    assert captured["status"] == "updated"
+    assert updated_document["items"][-1] == {
+        "id": "item-added-0001",
+        "description": "BANANAS",
+        "price": "3.99",
+        "quantity": 1,
+        "classification": {"category": "grocery_drink_cocacola"},
+        "notes": "manually added from receipt edge",
+        "warnings": [],
+        "meta": {"source": "tui_review"},
+    }
+
+
 def test_api_match_candidates_and_apply_match_for_approved_receipt(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
