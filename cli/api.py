@@ -138,7 +138,7 @@ def cmd_api_approve_scanned_with_review(args: argparse.Namespace) -> None:
 
 
 def cmd_api_re_edit_approved_with_review(args: argparse.Namespace) -> None:
-    """Update one approved receipt after applying receipt-level review overrides from stdin JSON."""
+    """Update one approved receipt after applying structured review overrides from stdin JSON."""
     from beanbeaver.application.receipts.review import (
         ReEditApprovedReceiptRequest,
         run_re_edit_approved_receipt_with_review,
@@ -151,6 +151,9 @@ def cmd_api_re_edit_approved_with_review(args: argparse.Namespace) -> None:
     review_patch = payload.get("review", {})
     if not isinstance(review_patch, dict):
         raise ValueError("Review payload field 'review' must be a JSON object")
+    item_review_patches = payload.get("items", [])
+    if not isinstance(item_review_patches, list):
+        raise ValueError("Review payload field 'items' must be a JSON array")
 
     target_path = _resolve_stage_path(args.path)
     result = run_re_edit_approved_receipt_with_review(
@@ -159,6 +162,7 @@ def cmd_api_re_edit_approved_with_review(args: argparse.Namespace) -> None:
             resolve_editor_cmd=lambda: [],
         ),
         review_patch=review_patch,
+        item_review_patches=item_review_patches,
     )
     _print_json(
         {

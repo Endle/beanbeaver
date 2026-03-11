@@ -407,6 +407,15 @@ struct ApproveReceiptResponse {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+struct ReEditApprovedResponse {
+    status: String,
+    #[serde(rename = "source_path")]
+    _source_path: String,
+    updated_path: Option<String>,
+    normalize_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 struct ConfigResponse {
     config_path: String,
     project_root: String,
@@ -726,6 +735,7 @@ impl TextInputState {
 }
 
 struct ReviewState {
+    source_queue: Queue,
     path: String,
     receipt_dir: String,
     stage_file: String,
@@ -878,7 +888,11 @@ impl MatchState {
 }
 
 impl ReviewState {
-    fn from_detail(detail: &ShowReceiptResponse, category_options: Vec<CategoryOption>) -> Self {
+    fn from_detail(
+        source_queue: Queue,
+        detail: &ShowReceiptResponse,
+        category_options: Vec<CategoryOption>,
+    ) -> Self {
         let mut field_state = ListState::default();
         field_state.select(Some(0));
         let mut item_state = ListState::default();
@@ -934,6 +948,7 @@ impl ReviewState {
         }
 
         Self {
+            source_queue,
             path: detail.path.clone(),
             receipt_dir: detail.summary.receipt_dir.clone(),
             stage_file: detail.summary.stage_file.clone(),
@@ -949,6 +964,20 @@ impl ReviewState {
             item_editor: None,
             category_picker: None,
             text_input: None,
+        }
+    }
+
+    fn mode_label(&self) -> &'static str {
+        match self.source_queue {
+            Queue::Scanned => "Review Scanned Receipt",
+            Queue::Approved => "Review Approved Receipt",
+        }
+    }
+
+    fn submit_label(&self) -> &'static str {
+        match self.source_queue {
+            Queue::Scanned => "approve",
+            Queue::Approved => "save",
         }
     }
 
@@ -1742,10 +1771,6 @@ impl App {
             self.set_status("No receipt selected");
             return;
         };
-        if self.active_queue == Queue::Approved {
-            self.set_status("Approved receipts are re-edited in the external editor");
-            return;
-        }
         match backend_show_receipt(&receipt.path) {
             Ok(detail) => match backend_list_item_categories() {
                 Ok(categories) => {
@@ -1754,9 +1779,13 @@ impl App {
                         account: String::new(),
                     }];
                     category_options.extend(categories);
-                    self.review_state = Some(ReviewState::from_detail(&detail, category_options));
+                    self.review_state = Some(ReviewState::from_detail(
+                        self.active_queue,
+                        &detail,
+                        category_options,
+                    ));
                     self.set_status(
-                            "Review receipt: h/l switch pane | Enter item editor | v price | n notes | c choose category | x toggle removed | p preview | a approve | Esc cancel",
+                            "Review receipt: h/l switch pane | Enter item editor | v price | n notes | c choose category | x toggle removed | p preview | a submit | Esc cancel",
                         );
                 }
                 Err(error) => {
@@ -1775,19 +1804,34 @@ impl App {
             return Ok(());
         };
         let payload = serde_json::to_string(&review_state.payload())?;
-        let result = backend_approve_scanned_with_review(&review_state.path, &payload)?;
+        let source_queue = review_state.source_queue;
+        let source_path = review_state.path.clone();
+        let result_path = match source_queue {
+            Queue::Scanned => {
+                let result = backend_approve_scanned_with_review(&source_path, &payload)?;
+                result.approved_path
+            }
+            Queue::Approved => {
+                let result = backend_re_edit_approved_with_review(&source_path, &payload)?;
+                result.updated_path
+                    .ok_or_else(|| "missing updated path from approved re-edit".to_string())?
+            }
+        };
         self.review_state = None;
         self.refresh()?;
-        self.active_queue = Queue::Approved;
-        if !self.select_receipt_by_path(Queue::Approved, &result.approved_path) {
-            self.sync_selection(Queue::Approved);
+        self.active_queue = match source_queue {
+            Queue::Scanned => Queue::Approved,
+            Queue::Approved => Queue::Approved,
+        };
+        if !self.select_receipt_by_path(self.active_queue, &result_path) {
+            self.sync_selection(self.active_queue);
         }
         self.focus = PaneFocus::List;
         self.load_detail()?;
-        self.set_status(format!(
-            "Approved {} -> {}",
-            result.source_path, result.approved_path
-        ));
+        self.set_status(match source_queue {
+            Queue::Scanned => format!("Approved {} -> {}", source_path, result_path),
+            Queue::Approved => format!("Saved approved review stage {} -> {}", source_path, result_path),
+        });
         Ok(())
     }
 
@@ -2292,6 +2336,29 @@ fn backend_approve_scanned_with_review(
     let response: ApproveReceiptResponse = serde_json::from_str(&stdout)?;
     if response.status != "approved" {
         return Err(format!("unexpected approve status: {}", response.status).into());
+    }
+    Ok(response)
+}
+
+fn backend_re_edit_approved_with_review(
+    path: &str,
+    payload: &str,
+) -> AppResult<ReEditApprovedResponse> {
+    let stdout =
+        run_backend_with_input(&["api", "re-edit-approved-with-review", path], Some(payload))?;
+    let response: ReEditApprovedResponse = serde_json::from_str(&stdout)?;
+    if response.status != "updated" {
+        return Err(
+            format!(
+                "unexpected re-edit status: {} ({})",
+                response.status,
+                response
+                    .normalize_error
+                    .as_deref()
+                    .unwrap_or("no normalize error provided")
+            )
+            .into(),
+        );
     }
     Ok(response)
 }
@@ -3323,8 +3390,10 @@ fn render_review_screen(
         .split(area);
 
     let header = Paragraph::new(format!(
-        "Review Scanned Receipt  |  {} / {}",
-        review_state.receipt_dir, review_state.stage_file
+        "{}  |  {} / {}",
+        review_state.mode_label(),
+        review_state.receipt_dir,
+        review_state.stage_file
     ))
     .block(Block::default().borders(Borders::ALL).title("Review Mode"))
     .wrap(Wrap { trim: true });
@@ -3441,9 +3510,10 @@ fn render_review_screen(
     .wrap(Wrap { trim: false });
     frame.render_widget(preview, right[1]);
 
-    let help = Paragraph::new(
-        "h/l pane  |  j/k move  |  Enter open item editor / edit field  |  v price  |  n notes  |  c category picker  |  x toggle removed  |  p preview tab  |  a approve  |  Esc cancel",
-    )
+    let help = Paragraph::new(format!(
+        "h/l pane  |  j/k move  |  Enter open item editor / edit field  |  v price  |  n notes  |  c category picker  |  x toggle removed  |  p preview tab  |  a {}  |  Esc cancel",
+        review_state.submit_label()
+    ))
     .wrap(Wrap { trim: true });
     frame.render_widget(help, rows[2]);
 
@@ -4256,39 +4326,7 @@ fn run_app(
                         }
                     }
                     (KeyCode::Char('e'), _) => {
-                        if app.active_queue == Queue::Approved {
-                            let Some(path) =
-                                app.selected_receipt().map(|receipt| receipt.path.clone())
-                            else {
-                                app.set_status("No approved receipt selected");
-                                continue;
-                            };
-                            suspend_terminal(terminal)?;
-                            let reedit_result = run_backend_interactive(&["re-edit", &path]);
-                            resume_terminal(terminal)?;
-                            match reedit_result {
-                                Ok(0) => {
-                                    if let Err(error) = app.refresh() {
-                                        app.set_error(error.to_string());
-                                        continue;
-                                    }
-                                    app.show_status_log();
-                                    app.set_status(format!("Returned from external editor for approved receipt: {path}"));
-                                }
-                                Ok(exit_code) => {
-                                    app.show_status_log();
-                                    app.set_error(format!(
-                                        "`bb re-edit` exited with code {exit_code}."
-                                    ));
-                                }
-                                Err(error) => {
-                                    app.show_status_log();
-                                    app.set_error(format!("Failed to run `bb re-edit`: {error}"));
-                                }
-                            }
-                        } else {
-                            app.begin_edit_selected();
-                        }
+                        app.begin_edit_selected();
                     }
                     (KeyCode::Char('m'), KeyModifiers::NONE) => {
                         if let Err(error) = app.begin_match_selected_approved() {
