@@ -8,6 +8,22 @@ from beanbeaver.receipt.receipt_structuring import parse_receipt
 from beanbeaver.runtime.item_category_rules import load_receipt_structuring_rule_layers
 
 
+def test_parse_receipt_parses_simple_text_receipt() -> None:
+    receipt = parse_receipt(
+        {
+            "full_text": "TEST SHOP\nMILK 2.50\nTOTAL 2.50",
+            "pages": [],
+        },
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
+    )
+
+    assert receipt.merchant == "TEST SHOP"
+    assert str(receipt.total) == "2.50"
+    assert len(receipt.items) == 1
+    assert receipt.items[0].description == "MILK"
+    assert str(receipt.items[0].price) == "2.50"
+
+
 def test_parse_receipt_raises_when_spatial_backend_is_unavailable(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(ocr_result_parser, "_extract_items_with_bbox", _raise_missing_spatial_backend)
     monkeypatch.setattr(ocr_result_parser, "_extract_items", _unexpected_text_fallback)
