@@ -12,29 +12,36 @@ from beanbeaver.domain.beancount_dates import extract_dates_from_beancount
 from beanbeaver.runtime import get_logger, get_paths
 
 logger = get_logger(__name__)
-_paths = get_paths()
 
 
 def downloads_display_path(downloads_dir: Path | None = None) -> str:
     """Render the effective Downloads directory for user-facing messages."""
-    downloads = downloads_dir or _paths.downloads
+    downloads = downloads_dir or get_paths().downloads
     return str(downloads)
 
 
 def check_uncommitted_changes() -> bool:
     """Check if there are uncommitted changes in the repository."""
+    paths = get_paths()
     result = subprocess.run(
         ["git", "status", "--porcelain"],
-        cwd=_paths.root,
+        cwd=paths.root,
         capture_output=True,
         text=True,
     )
     return bool(result.stdout.strip())
 
 
-def confirm_uncommitted_changes() -> bool:
+def confirm_uncommitted_changes(allow_when_dirty: bool | None = None) -> bool:
     """Warn user about uncommitted changes and ask for confirmation."""
     if not check_uncommitted_changes():
+        return True
+
+    if allow_when_dirty is not None:
+        if not allow_when_dirty:
+            logger.info("Aborted due to uncommitted changes")
+            return False
+        logger.warning("Continuing despite uncommitted changes in the repository.")
         return True
 
     logger.warning("There are uncommitted changes in the repository.")
@@ -57,7 +64,7 @@ def detect_csv_files(
 
     Returns selected filename, or None if no match found.
     """
-    downloads = downloads_dir or _paths.downloads
+    downloads = downloads_dir or get_paths().downloads
     if not downloads.exists():
         return None
 
@@ -164,7 +171,7 @@ def copy_statement_csv(
 
     If allow_absolute is true, falls back to interpreting csv_file as a path.
     """
-    downloads = downloads_dir or _paths.downloads
+    downloads = downloads_dir or get_paths().downloads
     source_path = downloads / csv_file
     if not source_path.exists() and allow_absolute:
         source_path = Path(csv_file)

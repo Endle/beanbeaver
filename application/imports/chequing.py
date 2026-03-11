@@ -65,6 +65,8 @@ class ChequingImportRequest:
     """Inputs for chequing statement import workflow."""
 
     csv_file: str | None = None
+    selected_account: str | None = None
+    allow_uncommitted: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -79,6 +81,16 @@ class ChequingImportResult:
     start_date: str | None = None
     end_date: str | None = None
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class ChequingAccountOptions:
+    """Resolved account options for one chequing CSV import."""
+
+    chequing_type: str
+    account_label: str
+    account_options: list[str]
+    as_of: datetime.date | None = None
 
 
 def detect_chequing_csv() -> str | None:
@@ -117,10 +129,16 @@ def _select_chequing_account(
     *,
     label: str,
     as_of: datetime.date | None,
+    selected_account: str | None = None,
 ) -> str:
     matches = find_open_accounts(patterns, as_of=as_of)
     if not matches:
         raise RuntimeError(f"No open {label} accounts found in main ledger.")
+    if selected_account is not None:
+        if selected_account not in matches:
+            options = ", ".join(matches)
+            raise RuntimeError(f"Selected {label} account not available: {selected_account}. Options: {options}")
+        return selected_account
 
     return select_interactive_option(
         matches,
@@ -141,7 +159,7 @@ def parse_chequing_request(argv: Sequence[str] | None = None) -> ChequingImportR
 
 def run_chequing_import(request: ChequingImportRequest) -> ChequingImportResult:
     """Run chequing import workflow and return structured result."""
-    if not confirm_uncommitted_changes():
+    if not confirm_uncommitted_changes(request.allow_uncommitted):
         return ChequingImportResult(status="aborted")
 
     csv_file = request.csv_file
@@ -193,6 +211,7 @@ def run_chequing_import(request: ChequingImportRequest) -> ChequingImportResult:
             EQBANK_ACCOUNT_PATTERNS,
             label="EQ Bank chequing",
             as_of=as_of,
+            selected_account=request.selected_account,
         )
         from beanbeaver.importers.eqbank import EQBankChequingImporter
 
@@ -204,6 +223,7 @@ def run_chequing_import(request: ChequingImportRequest) -> ChequingImportResult:
             SCOTIA_ACCOUNT_PATTERNS,
             label="Scotia chequing",
             as_of=as_of,
+            selected_account=request.selected_account,
         )
         from beanbeaver.importers.scotia_chequing import ScotiaChequingImporter
 
@@ -249,22 +269,28 @@ def run_chequing_import(request: ChequingImportRequest) -> ChequingImportResult:
     cc_cache: dict[str, str | None] = {}
     transfer_cache: dict[str, str | None] = {}
     for date, description, amount_val, _balance_val in parsed_rows:
-        cc_account = resolve_cc_payment_account(
-            description,
-            as_of=as_of,
-            cache=cc_cache,
-            txn_date=date,
-            amount=f"{amount_val} CAD",
-        )
+        try:
+            cc_account = resolve_cc_payment_account(
+                description,
+                as_of=as_of,
+                cache=cc_cache,
+                txn_date=date,
+                amount=f"{amount_val} CAD",
+            )
+        except RuntimeError as exc:
+            return ChequingImportResult(status="error", error=str(exc))
         if cc_account:
             expense_account = cc_account
         else:
-            transfer_account = resolve_bank_transfer_account(
-                description,
-                as_of=as_of,
-                source_account=account,
-                cache=transfer_cache,
-            )
+            try:
+                transfer_account = resolve_bank_transfer_account(
+                    description,
+                    as_of=as_of,
+                    source_account=account,
+                    cache=transfer_cache,
+                )
+            except RuntimeError as exc:
+                return ChequingImportResult(status="error", error=str(exc))
             if transfer_account:
                 expense_account = transfer_account
             else:
@@ -337,6 +363,42 @@ def main(argv: Sequence[str] | None = None) -> int:
     for line in result.error.splitlines():
         logger.error(line)
     return 1
+
+
+def resolve_chequing_account_options(csv_file: str) -> ChequingAccountOptions:
+    target_file_name = TMPDIR / "chequing.csv"
+    copy_statement_csv(
+        csv_file=csv_file,
+        target_path=target_file_name,
+        downloads_dir=DOWNLOADED_CSV_BASE_PATH,
+        allow_absolute=True,
+    )
+    chequing_type = detect_chequing_type(target_file_name)
+
+    import csv
+
+    with open(target_file_name, encoding="utf-8-sig") as csvfile:
+        reader = csv.DictReader(csvfile)
+        rows = list(reader)
+
+    if chequing_type == "eqbank":
+        parsed_rows = parse_eqbank_rows(rows)
+        as_of = latest_date(parsed_rows)
+        return ChequingAccountOptions(
+            chequing_type=chequing_type,
+            account_label="EQ Bank chequing",
+            account_options=find_open_accounts(EQBANK_ACCOUNT_PATTERNS, as_of=as_of),
+            as_of=as_of,
+        )
+
+    parsed_rows = parse_scotia_rows(rows)
+    as_of = latest_date(parsed_rows)
+    return ChequingAccountOptions(
+        chequing_type=chequing_type,
+        account_label="Scotia chequing",
+        account_options=find_open_accounts(SCOTIA_ACCOUNT_PATTERNS, as_of=as_of),
+        as_of=as_of,
+    )
 
 
 if __name__ == "__main__":

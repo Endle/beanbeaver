@@ -19,6 +19,16 @@ def _print_json(payload: object) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True, default=_json_default))
 
 
+def _load_optional_stdin_json() -> dict[str, Any]:
+    raw = sys.stdin.read().strip()
+    if not raw:
+        return {}
+    payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise ValueError("Payload must be a JSON object")
+    return payload
+
+
 def _resolve_stage_path(raw_path: str) -> Path:
     return Path(raw_path).expanduser().resolve()
 
@@ -231,6 +241,139 @@ def cmd_api_apply_match(args: argparse.Namespace) -> None:
             "matched_receipt_path": str(result.matched_receipt_path) if result.matched_receipt_path else None,
             "enriched_path": str(result.enriched_path) if result.enriched_path else None,
             "message": result.message,
+        }
+    )
+
+
+def cmd_api_plan_import(args: argparse.Namespace) -> None:
+    """Plan statement import from stdin JSON."""
+    from beanbeaver.application.imports.service import plan_import
+
+    payload = _load_optional_stdin_json()
+    import_type = payload.get("import_type")
+    csv_file = payload.get("csv_file")
+    if import_type is not None and import_type not in {"cc", "chequing"}:
+        raise ValueError("Import payload field 'import_type' must be 'cc' or 'chequing'")
+    if csv_file is not None and not isinstance(csv_file, str):
+        raise ValueError("Import payload field 'csv_file' must be a string")
+
+    result = plan_import(
+        import_type=import_type,
+        csv_file=csv_file,
+    )
+    _print_json(
+        {
+            "status": result.status,
+            "has_uncommitted_changes": result.has_uncommitted_changes,
+            "error": result.error,
+            "route": None
+            if result.route is None
+            else {
+                "csv_file": result.route.csv_file,
+                "source_path": str(result.route.source_path),
+                "import_type": result.route.import_type,
+                "importer_id": result.route.importer_id,
+                "rule_id": result.route.rule_id,
+                "stage": result.route.stage,
+            },
+            "route_options": [
+                {
+                    "csv_file": option.csv_file,
+                    "source_path": str(option.source_path),
+                    "import_type": option.import_type,
+                    "importer_id": option.importer_id,
+                    "rule_id": option.rule_id,
+                    "stage": option.stage,
+                }
+                for option in (result.route_options or [])
+            ],
+        }
+    )
+
+
+def cmd_api_resolve_import_accounts(args: argparse.Namespace) -> None:
+    """Return candidate ledger accounts for one import route from stdin JSON."""
+    from beanbeaver.application.imports.service import resolve_import_accounts
+
+    payload = _load_optional_stdin_json()
+    import_type = payload.get("import_type")
+    csv_file = payload.get("csv_file")
+    importer_id = payload.get("importer_id")
+    if import_type not in {"cc", "chequing"}:
+        raise ValueError("Import payload field 'import_type' must be 'cc' or 'chequing'")
+    if not isinstance(csv_file, str):
+        raise ValueError("Import payload field 'csv_file' must be a string")
+    if importer_id is not None and not isinstance(importer_id, str):
+        raise ValueError("Import payload field 'importer_id' must be a string")
+
+    result = resolve_import_accounts(
+        import_type=import_type,
+        csv_file=csv_file,
+        importer_id=importer_id,
+    )
+    _print_json(
+        {
+            "status": result.status,
+            "import_type": result.import_type,
+            "csv_file": result.csv_file,
+            "importer_id": result.importer_id,
+            "account_label": result.account_label,
+            "account_options": result.account_options,
+            "as_of": result.as_of,
+            "error": result.error,
+        }
+    )
+
+
+def cmd_api_apply_import(args: argparse.Namespace) -> None:
+    """Apply one statement import from stdin JSON."""
+    from beanbeaver.application.imports.service import ApplyImportRequest, apply_import
+
+    payload = _load_optional_stdin_json()
+    import_type = payload.get("import_type")
+    csv_file = payload.get("csv_file")
+    importer_id = payload.get("importer_id")
+    selected_account = payload.get("selected_account")
+    start_date = payload.get("start_date")
+    end_date = payload.get("end_date")
+    allow_uncommitted = payload.get("allow_uncommitted")
+
+    if import_type not in {"cc", "chequing"}:
+        raise ValueError("Import payload field 'import_type' must be 'cc' or 'chequing'")
+    if not isinstance(csv_file, str):
+        raise ValueError("Import payload field 'csv_file' must be a string")
+    if importer_id is not None and not isinstance(importer_id, str):
+        raise ValueError("Import payload field 'importer_id' must be a string")
+    if selected_account is not None and not isinstance(selected_account, str):
+        raise ValueError("Import payload field 'selected_account' must be a string")
+    if start_date is not None and not isinstance(start_date, str):
+        raise ValueError("Import payload field 'start_date' must be a string")
+    if end_date is not None and not isinstance(end_date, str):
+        raise ValueError("Import payload field 'end_date' must be a string")
+    if allow_uncommitted is not None and not isinstance(allow_uncommitted, bool):
+        raise ValueError("Import payload field 'allow_uncommitted' must be a boolean")
+
+    result = apply_import(
+        ApplyImportRequest(
+            import_type=import_type,
+            csv_file=csv_file,
+            importer_id=importer_id,
+            selected_account=selected_account,
+            start_date=start_date,
+            end_date=end_date,
+            allow_uncommitted=allow_uncommitted,
+        )
+    )
+    _print_json(
+        {
+            "status": result.status,
+            "import_type": result.import_type,
+            "result_file_path": str(result.result_file_path) if result.result_file_path is not None else None,
+            "result_file_name": result.result_file_name,
+            "account": result.account,
+            "start_date": result.start_date,
+            "end_date": result.end_date,
+            "error": result.error,
         }
     )
 
