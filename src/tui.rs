@@ -520,10 +520,13 @@ struct ReviewItemState {
     id: String,
     original_description: String,
     description: String,
+    original_price: String,
     price: String,
     quantity: String,
     original_category: String,
     category: String,
+    original_notes: String,
+    notes: String,
     original_removed: bool,
     removed: bool,
 }
@@ -532,7 +535,9 @@ struct ReviewItemState {
 enum ReviewEditTarget {
     ReceiptField(usize),
     ItemDescription(usize),
+    ItemPrice(usize),
     ItemCategory(usize),
+    ItemNotes(usize),
 }
 
 #[derive(Clone, Debug)]
@@ -786,10 +791,13 @@ impl ReviewState {
                     id,
                     original_description: effective_item_text(item, "description"),
                     description: effective_item_text(item, "description"),
+                    original_price: effective_item_text(item, "price"),
                     price: effective_item_text(item, "price"),
                     quantity: effective_item_text(item, "quantity"),
                     original_category: effective_item_category_text(item),
                     category: effective_item_category_text(item),
+                    original_notes: effective_item_text(item, "notes"),
+                    notes: effective_item_text(item, "notes"),
                     original_removed: effective_item_removed(item),
                     removed: effective_item_removed(item),
                 });
@@ -862,6 +870,32 @@ impl ReviewState {
         }
     }
 
+    fn start_selected_item_price_edit(&mut self) {
+        let Some(index) = self.selected_item_index() else {
+            return;
+        };
+        if let Some(item) = self.items.get(index) {
+            self.text_input = Some(TextInputState::with_value(
+                ReviewEditTarget::ItemPrice(index),
+                format!("Item Price ({})", item.id),
+                item.price.clone(),
+            ));
+        }
+    }
+
+    fn start_selected_item_notes_edit(&mut self) {
+        let Some(index) = self.selected_item_index() else {
+            return;
+        };
+        if let Some(item) = self.items.get(index) {
+            self.text_input = Some(TextInputState::with_value(
+                ReviewEditTarget::ItemNotes(index),
+                format!("Item Notes ({})", item.id),
+                item.notes.clone(),
+            ));
+        }
+    }
+
     fn commit_text_input(&mut self) {
         let Some(input) = self.text_input.take() else {
             return;
@@ -877,9 +911,19 @@ impl ReviewState {
                     item.description = input.value;
                 }
             }
+            ReviewEditTarget::ItemPrice(index) => {
+                if let Some(item) = self.items.get_mut(index) {
+                    item.price = input.value;
+                }
+            }
             ReviewEditTarget::ItemCategory(index) => {
                 if let Some(item) = self.items.get_mut(index) {
                     item.category = input.value;
+                }
+            }
+            ReviewEditTarget::ItemNotes(index) => {
+                if let Some(item) = self.items.get_mut(index) {
+                    item.notes = input.value;
                 }
             }
         }
@@ -905,8 +949,14 @@ impl ReviewState {
                     Value::String(item.description.clone()),
                 );
             }
+            if item.price != item.original_price {
+                item_review.insert("price".to_string(), Value::String(item.price.clone()));
+            }
             if item.category != item.original_category {
                 item_review.insert("category".to_string(), Value::String(item.category.clone()));
+            }
+            if item.notes != item.original_notes {
+                item_review.insert("notes".to_string(), Value::String(item.notes.clone()));
             }
             if item.removed != item.original_removed {
                 item_review.insert("removed".to_string(), Value::Bool(item.removed));
@@ -968,6 +1018,9 @@ impl ReviewState {
                 },
                 category,
             ));
+            if !item.notes.trim().is_empty() {
+                lines.push(format!("     notes: {}", item.notes));
+            }
         }
         let removed = self.items.iter().filter(|item| item.removed).count();
         if removed > 0 {
@@ -1004,6 +1057,22 @@ impl ReviewState {
                     item.id, item.original_description, item.description
                 ));
             }
+            if item.price != item.original_price {
+                lines.push(format!(
+                    "{} price: {} -> {}",
+                    item.id,
+                    if item.original_price.is_empty() {
+                        "<empty>"
+                    } else {
+                        item.original_price.as_str()
+                    },
+                    if item.price.is_empty() {
+                        "<empty>"
+                    } else {
+                        item.price.as_str()
+                    },
+                ));
+            }
             if item.category != item.original_category {
                 lines.push(format!(
                     "{} category: {} -> {}",
@@ -1017,6 +1086,22 @@ impl ReviewState {
                         "<empty>"
                     } else {
                         item.category.as_str()
+                    },
+                ));
+            }
+            if item.notes != item.original_notes {
+                lines.push(format!(
+                    "{} notes: {} -> {}",
+                    item.id,
+                    if item.original_notes.is_empty() {
+                        "<empty>"
+                    } else {
+                        item.original_notes.as_str()
+                    },
+                    if item.notes.is_empty() {
+                        "<empty>"
+                    } else {
+                        item.notes.as_str()
                     },
                 ));
             }
@@ -1383,7 +1468,7 @@ impl App {
             Ok(detail) => {
                 self.review_state = Some(ReviewState::from_detail(&detail));
                 self.set_status(
-                    "Review receipt: h/l switch pane | Enter edit | c edit category | x toggle removed | p preview | a approve | Esc cancel",
+                    "Review receipt: h/l switch pane | Enter edit | v price | n notes | c edit category | x toggle removed | p preview | a approve | Esc cancel",
                 );
             }
             Err(error) => self.set_error(format!("Failed to load receipt review state: {error}")),
@@ -2758,13 +2843,18 @@ fn render_review_screen(
         .iter()
         .map(|item| {
             let removed = if item.removed { " [removed]" } else { "" };
+            let notes = if item.notes.trim().is_empty() {
+                ""
+            } else {
+                " [note]"
+            };
             let category = if item.category.trim().is_empty() {
                 "<uncategorized>"
             } else {
                 item.category.as_str()
             };
             ListItem::new(Line::from(format!(
-                "{}  ${}  {}{}",
+                "{}  ${}  {}{}{}",
                 item.description,
                 if item.price.is_empty() {
                     "0.00"
@@ -2772,6 +2862,7 @@ fn render_review_screen(
                     item.price.as_str()
                 },
                 category,
+                notes,
                 removed,
             )))
         })
@@ -2850,7 +2941,7 @@ fn render_review_screen(
     frame.render_widget(preview, right[1]);
 
     let help = Paragraph::new(
-        "h/l pane  |  j/k move  |  Enter edit field/description  |  c edit category  |  x toggle removed  |  p preview tab  |  a approve  |  Esc cancel",
+        "h/l pane  |  j/k move  |  Enter edit description/field  |  v edit price  |  n edit item notes  |  c edit category  |  x toggle removed  |  p preview tab  |  a approve  |  Esc cancel",
     )
     .wrap(Wrap { trim: true });
     frame.render_widget(help, rows[2]);
@@ -2861,7 +2952,7 @@ fn render_review_screen(
 }
 
 fn render_text_input_modal(frame: &mut ratatui::Frame<'_>, text_input: &TextInputState) {
-    let popup = centered_rect(64, 7, frame.area());
+    let popup = centered_rect(64, 6, frame.area());
     frame.render_widget(Clear, popup);
     frame.render_widget(
         Block::default()
@@ -2873,11 +2964,7 @@ fn render_text_input_modal(frame: &mut ratatui::Frame<'_>, text_input: &TextInpu
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Length(2),
-            Constraint::Min(1),
-        ])
+        .constraints([Constraint::Length(3), Constraint::Length(1)])
         .split(popup);
     let chars = text_input.value.chars().collect::<Vec<_>>();
     let cursor = text_input.cursor.min(chars.len());
@@ -2896,7 +2983,7 @@ fn render_text_input_modal(frame: &mut ratatui::Frame<'_>, text_input: &TextInpu
         Span::styled(current, Style::default().bg(Color::Yellow).fg(Color::Black)),
         Span::raw(after),
     ]))
-    .block(Block::default().borders(Borders::ALL).title("Value"))
+    .block(Block::default().borders(Borders::ALL).title("Edit"))
     .style(
         Style::default()
             .fg(Color::Yellow)
@@ -3283,6 +3370,16 @@ fn run_app(
                         (KeyCode::Char('c'), _) => {
                             if review_state.pane == ReviewPane::Items {
                                 review_state.start_selected_item_category_edit();
+                            }
+                        }
+                        (KeyCode::Char('v'), _) => {
+                            if review_state.pane == ReviewPane::Items {
+                                review_state.start_selected_item_price_edit();
+                            }
+                        }
+                        (KeyCode::Char('n'), _) => {
+                            if review_state.pane == ReviewPane::Items {
+                                review_state.start_selected_item_notes_edit();
                             }
                         }
                         (KeyCode::Char('x'), _) => {

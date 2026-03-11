@@ -276,6 +276,8 @@ def test_api_approve_scanned_with_review_applies_item_overrides(
                             "id": "item-0001",
                             "review": {
                                 "description": "COKE ZERO 35PK",
+                                "price": "18.49",
+                                "notes": "Promo pack confirmed in warehouse",
                                 "category": "Expenses:Food:Grocery:Drink:CocaCola",
                             },
                         },
@@ -300,6 +302,8 @@ def test_api_approve_scanned_with_review_applies_item_overrides(
     assert approved_document["review"]["notes"] == "Verified against Costco receipt"
     assert approved_document["items"][0]["review"] == {
         "description": "COKE ZERO 35PK",
+        "price": "18.49",
+        "notes": "Promo pack confirmed in warehouse",
         "classification": {"category": "grocery_drink_cocacola"},
     }
     assert approved_document["items"][1]["review"] == {

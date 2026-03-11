@@ -42,6 +42,8 @@ def test_receipt_stage_resolves_review_overrides_and_removed_items() -> None:
     document["review"] = {"merchant": "NO FRILLS", "total": "46.56"}
     document["items"][0]["review"] = {
         "description": "Napa cabbage",
+        "price": "3.99",
+        "notes": "Picked the fresher head",
         "classification": {"tags": ["grocery", "vegetable", "fresh", "cabbage"]},
     }
     document["items"][1]["review"] = {"removed": True}
@@ -50,6 +52,7 @@ def test_receipt_stage_resolves_review_overrides_and_removed_items() -> None:
 
     assert resolved.merchant == "NO FRILLS"
     assert [item.description for item in resolved.items] == ["Napa cabbage"]
+    assert resolved.items[0].price == Decimal("3.99")
     assert resolved.items[0].category == "Expenses:Food:Grocery:Vegetable"
     assert resolved.warnings[0].message == "parser warning"
 
