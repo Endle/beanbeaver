@@ -81,6 +81,8 @@ class ChequingImportResult:
     start_date: str | None = None
     end_date: str | None = None
     error: str | None = None
+    warnings: tuple[str, ...] = ()
+    validation_errors: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -157,7 +159,7 @@ def parse_chequing_request(argv: Sequence[str] | None = None) -> ChequingImportR
     return ChequingImportRequest(csv_file=args.csv_file)
 
 
-def run_chequing_import(request: ChequingImportRequest) -> ChequingImportResult:
+def run_chequing_import(request: ChequingImportRequest, *, emit_console_output: bool = True) -> ChequingImportResult:
     """Run chequing import workflow and return structured result."""
     if not confirm_uncommitted_changes(request.allow_uncommitted):
         return ChequingImportResult(status="aborted")
@@ -330,16 +332,24 @@ def run_chequing_import(request: ChequingImportRequest) -> ChequingImportResult:
 
     logger.info("Validating ledger...")
     validation_errors = validate_ledger(ledger_path=MAIN_BEANCOUNT_PATH)
+    warnings: tuple[str, ...] = ()
     if validation_errors:
         logger.error("Ledger validation found errors:")
         for err in validation_errors[:20]:
-            print(err)
+            logger.error(err)
         if len(validation_errors) > 20:
-            print(f"... and {len(validation_errors) - 20} more")
+            logger.error("... and %d more", len(validation_errors) - 20)
+        warnings = ("Ledger validation found errors after import.",)
+        if emit_console_output:
+            for err in validation_errors[:20]:
+                print(err)
+            if len(validation_errors) > 20:
+                print(f"... and {len(validation_errors) - 20} more")
     else:
         logger.info("Validation passed!")
 
-    print(f"\nImport complete: {result_file_path}")
+    if emit_console_output:
+        print(f"\nImport complete: {result_file_path}")
     return ChequingImportResult(
         status="ok",
         result_file_path=result_file_path,
@@ -348,6 +358,8 @@ def run_chequing_import(request: ChequingImportRequest) -> ChequingImportResult:
         chequing_type=chequing_type,
         start_date=start_date,
         end_date=end_date,
+        warnings=warnings,
+        validation_errors=tuple(validation_errors),
     )
 
 

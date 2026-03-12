@@ -698,6 +698,74 @@ option "operating_currency" "CAD"
     assert 'include "' + result_path.name + '"' in paths.yearly_summary.read_text(encoding="utf-8")
 
 
+def test_api_import_apply_chequing_returns_json_only_with_validation_details(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    paths = _configure_temp_root(tmp_path, monkeypatch)
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    monkeypatch.setenv("XDG_DOWNLOAD_DIR", str(downloads))
+    runtime_paths.reset_paths()
+    importlib.reload(credit_card_import)
+    importlib.reload(chequing_import)
+    importlib.reload(import_service)
+
+    paths.records_current_year.mkdir(parents=True, exist_ok=True)
+    _write(
+        paths.main_beancount,
+        """
+option "operating_currency" "CAD"
+2026-01-01 open Assets:Bank:Chequing:Scotia:Primary CAD
+2026-01-01 open Expenses:Uncategorized CAD
+""".lstrip(),
+    )
+    _write(
+        paths.chequing_rules,
+        """
+[[rules]]
+pattern = "DEPOSIT"
+account = "Income:Unknown"
+""".lstrip(),
+    )
+    (downloads / "Preferred_Package_foo.csv").write_text(
+        "Date,Description,Type of Transaction,Sub-description,Amount,Balance\n"
+        "2026-03-04,Deposit,Deposit,,100.00,100.00\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        chequing_import,
+        "validate_ledger",
+        lambda ledger_path: ["Validation error 1", "Validation error 2"],
+    )
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "import_type": "chequing",
+                    "csv_file": "Preferred_Package_foo.csv",
+                    "selected_account": "Assets:Bank:Chequing:Scotia:Primary",
+                    "allow_uncommitted": True,
+                }
+            )
+        ),
+    )
+
+    exit_code = unified_cli.main(["api", "import-apply"])
+
+    captured = json.loads(capsys.readouterr().out)
+    result_path = Path(captured["result_file_path"])
+    assert exit_code == 0
+    assert captured["status"] == "ok"
+    assert captured["account"] == "Assets:Bank:Chequing:Scotia:Primary"
+    assert captured["warnings"] == ["Ledger validation found errors after import."]
+    assert captured["validation_errors"] == ["Validation error 1", "Validation error 2"]
+    assert captured["summary"].startswith("Import complete: ")
+    assert result_path.exists()
+
+
 def test_api_get_config_returns_resolved_project_root(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

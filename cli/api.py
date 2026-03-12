@@ -378,6 +378,62 @@ def cmd_api_apply_import(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_api_import_apply(args: argparse.Namespace) -> None:
+    """Apply one statement import with a JSON-only response."""
+    from beanbeaver.application.imports.service import ApplyImportRequest, apply_import_machine_readable
+
+    payload = _load_optional_stdin_json()
+    import_type = payload.get("import_type")
+    csv_file = payload.get("csv_file")
+    importer_id = payload.get("importer_id")
+    selected_account = payload.get("selected_account")
+    start_date = payload.get("start_date")
+    end_date = payload.get("end_date")
+    allow_uncommitted = payload.get("allow_uncommitted")
+
+    if import_type not in {"cc", "chequing"}:
+        raise ValueError("Import payload field 'import_type' must be 'cc' or 'chequing'")
+    if not isinstance(csv_file, str):
+        raise ValueError("Import payload field 'csv_file' must be a string")
+    if importer_id is not None and not isinstance(importer_id, str):
+        raise ValueError("Import payload field 'importer_id' must be a string")
+    if selected_account is not None and not isinstance(selected_account, str):
+        raise ValueError("Import payload field 'selected_account' must be a string")
+    if start_date is not None and not isinstance(start_date, str):
+        raise ValueError("Import payload field 'start_date' must be a string")
+    if end_date is not None and not isinstance(end_date, str):
+        raise ValueError("Import payload field 'end_date' must be a string")
+    if allow_uncommitted is not None and not isinstance(allow_uncommitted, bool):
+        raise ValueError("Import payload field 'allow_uncommitted' must be a boolean")
+
+    result = apply_import_machine_readable(
+        ApplyImportRequest(
+            import_type=import_type,
+            csv_file=csv_file,
+            importer_id=importer_id,
+            selected_account=selected_account,
+            start_date=start_date,
+            end_date=end_date,
+            allow_uncommitted=allow_uncommitted,
+        )
+    )
+    _print_json(
+        {
+            "status": result.status,
+            "import_type": result.import_type,
+            "result_file_path": str(result.result_file_path) if result.result_file_path is not None else None,
+            "result_file_name": result.result_file_name,
+            "account": result.account,
+            "start_date": result.start_date,
+            "end_date": result.end_date,
+            "error": result.error,
+            "warnings": list(result.warnings),
+            "validation_errors": list(result.validation_errors),
+            "summary": result.summary,
+        }
+    )
+
+
 def cmd_api_get_config(args: argparse.Namespace) -> None:
     """Return TUI/backend configuration as JSON."""
     from beanbeaver.runtime import bootstrap_tui_config_path, get_paths

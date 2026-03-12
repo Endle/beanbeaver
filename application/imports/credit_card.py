@@ -82,6 +82,8 @@ class CreditCardImportResult:
     start_date: str | None = None
     end_date: str | None = None
     error: str | None = None
+    warnings: tuple[str, ...] = ()
+    validation_errors: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

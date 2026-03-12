@@ -69,6 +69,9 @@ class ApplyImportResult:
     start_date: str | None = None
     end_date: str | None = None
     error: str | None = None
+    warnings: tuple[str, ...] = ()
+    validation_errors: tuple[str, ...] = ()
+    summary: str | None = None
 
 
 def _resolve_source_path(csv_file: str) -> Path:
@@ -234,4 +237,55 @@ def apply_import(request: ApplyImportRequest) -> ApplyImportResult:
         start_date=result.start_date,
         end_date=result.end_date,
         error=result.error,
+    )
+
+
+def apply_import_machine_readable(request: ApplyImportRequest) -> ApplyImportResult:
+    if request.import_type == "cc":
+        result = credit_card_import.run_credit_card_import(
+            credit_card_import.CreditCardImportRequest(
+                csv_file=request.csv_file,
+                start_date=request.start_date,
+                end_date=request.end_date,
+                importer_id=None if request.importer_id is None else request.importer_id,  # type: ignore[arg-type]
+                selected_account=request.selected_account,
+                allow_uncommitted=request.allow_uncommitted,
+            )
+        )
+        summary = None if result.result_file_path is None else f"Import complete: {result.result_file_path}"
+        return ApplyImportResult(
+            status=result.status,
+            import_type=request.import_type,
+            result_file_path=result.result_file_path,
+            result_file_name=result.result_file_name,
+            account=result.card_account,
+            start_date=result.start_date,
+            end_date=result.end_date,
+            error=result.error,
+            warnings=result.warnings,
+            validation_errors=result.validation_errors,
+            summary=summary,
+        )
+
+    result = chequing_import.run_chequing_import(
+        chequing_import.ChequingImportRequest(
+            csv_file=request.csv_file,
+            selected_account=request.selected_account,
+            allow_uncommitted=request.allow_uncommitted,
+        ),
+        emit_console_output=False,
+    )
+    summary = None if result.result_file_path is None else f"Import complete: {result.result_file_path}"
+    return ApplyImportResult(
+        status=result.status,
+        import_type=request.import_type,
+        result_file_path=result.result_file_path,
+        result_file_name=result.result_file_name,
+        account=result.account,
+        start_date=result.start_date,
+        end_date=result.end_date,
+        error=result.error,
+        warnings=result.warnings,
+        validation_errors=result.validation_errors,
+        summary=summary,
     )
