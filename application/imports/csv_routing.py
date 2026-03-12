@@ -24,6 +24,7 @@ logger = get_logger(__name__)
 _paths = get_paths()
 
 _MBNA_MONTHLY_EXPORT_RE = re.compile(r"^[A-Za-z]+20\d{2}_\d{4}\.csv$")
+_TRANSACTIONS_DOWNLOAD_RE = re.compile(r"^transactions(?: \(\d+\))?\.csv$")
 
 ImportType = Literal["cc", "chequing"]
 
@@ -63,9 +64,9 @@ class Stage1Rule:
         if self.rule_id == "cc-pcf":
             return lower == "report.csv"
         if self.rule_id == "cc-transactions-rogers":
-            return lower == "transactions.csv"
+            return bool(_TRANSACTIONS_DOWNLOAD_RE.match(lower))
         if self.rule_id == "cc-transactions-ctfs":
-            return lower == "transactions.csv"
+            return bool(_TRANSACTIONS_DOWNLOAD_RE.match(lower))
         if self.rule_id == "cc-rogers-history":
             return lower.startswith("transaction history_") and lower.endswith(".csv")
         if self.rule_id == "cc-scotia":
