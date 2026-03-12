@@ -87,6 +87,14 @@ mod process_util {
         run_interactive_full_command(&base, args)
     }
 
+    pub(super) fn view_csv_file(path: &str) -> io::Result<ExitStatus> {
+        run_program_status("less", ["-N", "-S", path])
+    }
+
+    pub(super) fn trash_file(path: &str) -> io::Result<Output> {
+        run_program_output("trash", [path])
+    }
+
     pub(super) fn podman_start_ocr() -> io::Result<Output> {
         run_program_output("podman", ["start", OCR_CONTAINER_NAME])
     }
@@ -226,6 +234,19 @@ mod process_util {
         S: AsRef<OsStr>,
     {
         Command::new(program).args(args).output()
+    }
+
+    fn run_program_status<I, S>(program: &str, args: I) -> io::Result<ExitStatus>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        Command::new(program)
+            .args(args)
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
     }
 
     fn run_capture_full_command(
@@ -1898,7 +1919,7 @@ impl App {
                 "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | s start container | x stop container | R restart container | r refresh podman status/logs | q quit"
             }
             Page::Imports => {
-                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | r load routes | h/l or Tab switch pane | j/k move | Enter reload accounts | a apply import | u toggle allow-uncommitted | q quit"
+                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | r load routes | h/l or Tab switch pane | j/k move | Enter reload accounts | v view csv | x trash csv | a apply import | u toggle allow-uncommitted | q quit"
             }
         }
     }
@@ -2450,6 +2471,40 @@ impl App {
         self.imports_state.last_result = Some(response);
         self.refresh_imports_page()?;
         self.set_status(status);
+        Ok(())
+    }
+
+    fn selected_import_source_path(&mut self) -> AppResult<Option<String>> {
+        let Some(route) = self.imports_state.selected_route().cloned() else {
+            self.set_status("No import route selected. Press `r` to load statement routes.");
+            return Ok(None);
+        };
+        if Path::new(&route.source_path).exists() {
+            return Ok(Some(route.source_path));
+        }
+        self.refresh_imports_page()?;
+        self.set_status("Selected import file changed on disk; refreshed statement routes");
+        Ok(None)
+    }
+
+    fn trash_selected_import_csv(&mut self) -> AppResult<()> {
+        let Some(path) = self.selected_import_source_path()? else {
+            return Ok(());
+        };
+        let output = process_util::trash_file(&path)?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            return Err(format!(
+                "trash failed for {}\nstdout:\n{}\nstderr:\n{}",
+                path,
+                stdout.trim(),
+                stderr.trim()
+            )
+            .into());
+        }
+        self.refresh_imports_page()?;
+        self.set_status(format!("Moved {} to Trash", path));
         Ok(())
     }
 
@@ -5188,6 +5243,40 @@ fn run_app(
                     }
                     (KeyCode::Char('a'), _) => {
                         if let Err(error) = app.apply_selected_import() {
+                            app.set_error(error.to_string());
+                        }
+                    }
+                    (KeyCode::Char('v'), KeyModifiers::NONE) => {
+                        match app.selected_import_source_path() {
+                            Ok(Some(path)) => {
+                                suspend_terminal(terminal)?;
+                                let view_result = process_util::view_csv_file(&path);
+                                resume_terminal(terminal)?;
+                                match view_result {
+                                    Ok(status) if status.success() => {
+                                        app.set_status(format!("Viewed {}", path));
+                                    }
+                                    Ok(status) => {
+                                        app.set_error(format!(
+                                            "CSV viewer exited with code {} for {}",
+                                            status
+                                                .code()
+                                                .map(|code| code.to_string())
+                                                .unwrap_or_else(|| "signal".to_string()),
+                                            path
+                                        ));
+                                    }
+                                    Err(error) => {
+                                        app.set_error(format!("Failed to view {}: {}", path, error))
+                                    }
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(error) => app.set_error(error.to_string()),
+                        }
+                    }
+                    (KeyCode::Char('x'), KeyModifiers::NONE) => {
+                        if let Err(error) = app.trash_selected_import_csv() {
                             app.set_error(error.to_string());
                         }
                     }
