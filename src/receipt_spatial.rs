@@ -124,7 +124,7 @@ fn re_footer_address_patterns() -> &'static Regex {
 
 fn re_count_at_price() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"^\d+\s*@\s*\$?-?\d+\.\d{2}\b").unwrap())
+    RE.get_or_init(|| Regex::new(r"(?i)^\d+\s*@\s*\$?-?\d+\.\d{2}").unwrap())
 }
 
 fn re_weight_at_price() -> &'static Regex {
@@ -921,16 +921,9 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
             && !used_line_indices[price_candidate.source_line_index]
         {
             let source_distance = (source_line.line_y - price_y).abs();
-            let source_left_is_header = is_section_header_text(&source_line.left_text)
-                && !is_priced_generic_item_label(&source_line.left_text, &source_line.full_text);
             if source_distance <= Y_TOLERANCE
-                && !source_line.left_text.is_empty()
+                && is_valid_item_line(source_line, total_line_y)
                 && !looks_like_quantity_expression(&source_line.left_text)
-                && !is_summary_line(&source_line.left_text)
-                && !is_summary_line(&source_line.full_text)
-                && !source_left_is_header
-                && !is_section_header_text(&source_line.full_text)
-                && !footer_address_like(&source_line.full_text)
             {
                 chosen_line_index = Some(price_candidate.source_line_index);
                 chosen_distance = source_distance;
@@ -1177,6 +1170,50 @@ mod tests {
                 ("S & B Wasabi".to_string(), 19_800),
                 ("Hot Kid Honey Flavour Bal".to_string(), 45_900),
             ]
+        );
+    }
+
+    #[test]
+    fn quantity_price_row_with_ea_suffix_uses_item_above() {
+        let page = PageInput {
+            lines: vec![
+                LineInput {
+                    text: "FF SHEPHERDS PURSE FILLING".to_string(),
+                    words: vec![word(
+                        "FF SHEPHERDS PURSE FILLING",
+                        0.05,
+                        0.700,
+                        0.40,
+                        0.712,
+                    )],
+                },
+                LineInput {
+                    text: "2 @ $3.49ea. W $6.98".to_string(),
+                    words: vec![
+                        word("2 @ $3.49ea.", 0.07, 0.723, 0.23, 0.735),
+                        word("W $6.98", 0.88, 0.723, 0.95, 0.735),
+                    ],
+                },
+                LineInput {
+                    text: "TOTAL 6.98".to_string(),
+                    words: vec![
+                        word("TOTAL", 0.10, 0.900, 0.18, 0.912),
+                        word("6.98", 0.88, 0.900, 0.93, 0.912),
+                    ],
+                },
+            ],
+        };
+
+        let outcome = extract_spatial_items(vec![page]);
+        let observed = outcome
+            .items
+            .into_iter()
+            .map(|item| (item.description, item.price_scaled))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            observed,
+            vec![("FF SHEPHERDS PURSE FILLING".to_string(), 69_800)]
         );
     }
 }
