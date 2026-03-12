@@ -73,6 +73,11 @@ class MerchantFamily:
     aliases: tuple[str, ...]
 
 
+def rust_backend_loaded() -> bool:
+    """Return whether the native matcher backend is available."""
+    return _rust_matcher is not None
+
+
 def _merchant_family_payload(
     merchant_families: Sequence[MerchantFamily] | None,
 ) -> list[dict[str, object]]:
