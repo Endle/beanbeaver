@@ -105,6 +105,7 @@ Notes:
     api_subparsers.add_parser("get-config", help="Get TUI/backend config as JSON")
     api_subparsers.add_parser("set-config", help="Persist TUI/backend config from stdin JSON")
     api_subparsers.add_parser("plan-import", help="Plan statement import from stdin JSON")
+    api_subparsers.add_parser("refresh-import-page", help="Refresh the Imports page from stdin JSON")
     api_subparsers.add_parser("resolve-import-accounts", help="List candidate import accounts from stdin JSON")
     api_subparsers.add_parser("apply-import", help="Apply one statement import from stdin JSON")
     api_subparsers.add_parser("import-apply", help="Apply one statement import with a JSON-only response")
@@ -229,6 +230,7 @@ Notes:
             cmd_api_list_scanned,
             cmd_api_match_candidates,
             cmd_api_plan_import,
+            cmd_api_refresh_import_page,
             cmd_api_re_edit_approved_with_review,
             cmd_api_resolve_import_accounts,
             cmd_api_set_config,
@@ -255,6 +257,8 @@ Notes:
             return _run_legacy_command(cmd_api_apply_match, args)
         if args.api_command == "plan-import":
             return _run_legacy_command(cmd_api_plan_import, args)
+        if args.api_command == "refresh-import-page":
+            return _run_legacy_command(cmd_api_refresh_import_page, args)
         if args.api_command == "resolve-import-accounts":
             return _run_legacy_command(cmd_api_resolve_import_accounts, args)
         if args.api_command == "apply-import":

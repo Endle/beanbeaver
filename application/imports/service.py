@@ -49,6 +49,16 @@ class ResolveImportAccountsResult:
 
 
 @dataclass(frozen=True)
+class RefreshImportPageResult:
+    planner_status: Literal["ready", "needs_selection", "error"]
+    has_uncommitted_changes: bool
+    routes: list[ImportRouteOption]
+    planner_error: str | None = None
+    selected_source_path: str | None = None
+    account_resolution: ResolveImportAccountsResult | None = None
+
+
+@dataclass(frozen=True)
 class ApplyImportRequest:
     import_type: ImportType
     csv_file: str
@@ -94,6 +104,14 @@ def _route_option(route: CsvRoute, *, source_path: Path | None = None) -> Import
         rule_id=route.rule_id,
         stage=route.stage,
     )
+
+
+def _collect_route_options(plan: PlanImportResult) -> list[ImportRouteOption]:
+    routes: list[ImportRouteOption] = []
+    if plan.route is not None:
+        routes.append(plan.route)
+    routes.extend(plan.route_options or [])
+    return routes
 
 
 def plan_import(*, import_type: ImportType | None = None, csv_file: str | None = None) -> PlanImportResult:
@@ -196,6 +214,40 @@ def resolve_import_accounts(
             importer_id=importer_id or "",
             error=str(exc),
         )
+
+
+def refresh_import_page(*, preferred_source_path: str | None = None) -> RefreshImportPageResult:
+    plan = plan_import()
+    routes = _collect_route_options(plan)
+    if not routes:
+        return RefreshImportPageResult(
+            planner_status=plan.status,
+            has_uncommitted_changes=plan.has_uncommitted_changes,
+            routes=[],
+            planner_error=plan.error,
+        )
+
+    selected_route = None
+    if preferred_source_path is not None:
+        selected_route = next(
+            (route for route in routes if str(route.source_path) == preferred_source_path),
+            None,
+        )
+    if selected_route is None:
+        selected_route = routes[0]
+
+    return RefreshImportPageResult(
+        planner_status=plan.status,
+        has_uncommitted_changes=plan.has_uncommitted_changes,
+        routes=routes,
+        planner_error=plan.error,
+        selected_source_path=str(selected_route.source_path),
+        account_resolution=resolve_import_accounts(
+            import_type=selected_route.import_type,
+            csv_file=selected_route.csv_file,
+            importer_id=selected_route.importer_id,
+        ),
+    )
 
 
 def apply_import(request: ApplyImportRequest) -> ApplyImportResult:

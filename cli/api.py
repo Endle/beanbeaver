@@ -20,6 +20,8 @@ def _print_json(payload: object) -> None:
 
 
 def _load_optional_stdin_json() -> dict[str, Any]:
+    if sys.stdin.isatty():
+        return {}
     raw = sys.stdin.read().strip()
     if not raw:
         return {}
@@ -287,6 +289,49 @@ def cmd_api_plan_import(args: argparse.Namespace) -> None:
                 }
                 for option in (result.route_options or [])
             ],
+        }
+    )
+
+
+def cmd_api_refresh_import_page(args: argparse.Namespace) -> None:
+    """Return one atomic Imports-page refresh payload from stdin JSON."""
+    from beanbeaver.application.imports.service import refresh_import_page
+
+    payload = _load_optional_stdin_json()
+    preferred_source_path = payload.get("preferred_source_path")
+    if preferred_source_path is not None and not isinstance(preferred_source_path, str):
+        raise ValueError("Import payload field 'preferred_source_path' must be a string")
+
+    result = refresh_import_page(preferred_source_path=preferred_source_path)
+    _print_json(
+        {
+            "planner_status": result.planner_status,
+            "has_uncommitted_changes": result.has_uncommitted_changes,
+            "planner_error": result.planner_error,
+            "routes": [
+                {
+                    "csv_file": option.csv_file,
+                    "source_path": str(option.source_path),
+                    "import_type": option.import_type,
+                    "importer_id": option.importer_id,
+                    "rule_id": option.rule_id,
+                    "stage": option.stage,
+                }
+                for option in result.routes
+            ],
+            "selected_source_path": result.selected_source_path,
+            "account_resolution": None
+            if result.account_resolution is None
+            else {
+                "status": result.account_resolution.status,
+                "import_type": result.account_resolution.import_type,
+                "csv_file": result.account_resolution.csv_file,
+                "importer_id": result.account_resolution.importer_id,
+                "account_label": result.account_resolution.account_label,
+                "account_options": result.account_resolution.account_options,
+                "as_of": result.account_resolution.as_of,
+                "error": result.account_resolution.error,
+            },
         }
     )
 

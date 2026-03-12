@@ -600,6 +600,61 @@ def test_api_plan_import_lists_multiple_route_options(
     assert captured["has_uncommitted_changes"] is False
 
 
+def test_api_refresh_import_page_returns_routes_and_selected_account_resolution(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    paths = _configure_temp_root(tmp_path, monkeypatch)
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    monkeypatch.setenv("XDG_DOWNLOAD_DIR", str(downloads))
+    runtime_paths.reset_paths()
+    importlib.reload(credit_card_import)
+    importlib.reload(chequing_import)
+    importlib.reload(import_service)
+
+    paths.records_current_year.mkdir(parents=True, exist_ok=True)
+    _write(
+        paths.main_beancount,
+        """
+option "operating_currency" "CAD"
+2026-01-01 open Liabilities:CreditCard:Primary:BMO:CardA CAD
+2026-01-01 open Assets:CA:EQBank:Chequing CAD
+""".lstrip(),
+    )
+    statement_path = downloads / "statement.csv"
+    statement_path.write_text(
+        "ignored line 1\nignored line 2\nTransaction Date,Description,Transaction Amount\n20260304,Market,10.00\n",
+        encoding="utf-8",
+    )
+    (downloads / "EQ Bank Details.csv").write_text(
+        "Transfer Date,Description,Amount,Balance\n2026-03-04,Deposit,100.00,100.00\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(json.dumps({"preferred_source_path": str(statement_path)})),
+    )
+    exit_code = unified_cli.main(["api", "refresh-import-page"])
+
+    captured = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert captured["planner_status"] == "needs_selection"
+    assert captured["planner_error"] is None
+    assert len(captured["routes"]) == 2
+    assert captured["selected_source_path"] == str(statement_path)
+    assert captured["account_resolution"]["status"] == "ready"
+    assert captured["account_resolution"]["import_type"] == "cc"
+    assert captured["account_resolution"]["importer_id"] == "bmo"
+    assert captured["account_resolution"]["account_label"] == "BMO credit card"
+    assert captured["account_resolution"]["account_options"] == [
+        "Liabilities:CreditCard:Primary:BMO:CardA"
+    ]
+    assert captured["account_resolution"]["as_of"] == "2026-03-04"
+
+
 def test_api_resolve_import_accounts_for_credit_card_route(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -238,6 +238,8 @@ mod process_util {
         command.args(program_args).args(extra_args.iter().copied());
         if stdin_input.is_some() {
             command.stdin(Stdio::piped());
+        } else {
+            command.stdin(Stdio::null());
         }
         let mut child = command
             .stdout(Stdio::piped())
@@ -293,6 +295,7 @@ enum Page {
     Serve,
     Fava,
     Ocr,
+    Imports,
 }
 
 impl Page {
@@ -302,6 +305,7 @@ impl Page {
             Page::Serve => 1,
             Page::Fava => 2,
             Page::Ocr => 3,
+            Page::Imports => 4,
         }
     }
 }
@@ -345,6 +349,12 @@ enum PaneFocus {
 enum RightPane {
     Details,
     StatusLog,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ImportPaneFocus {
+    Routes,
+    Accounts,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -455,6 +465,78 @@ struct ApplyMatchResponse {
     _matched_receipt_path: Option<String>,
     #[serde(rename = "enriched_path")]
     _enriched_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ImportRouteOption {
+    csv_file: String,
+    source_path: String,
+    import_type: String,
+    importer_id: String,
+    rule_id: String,
+    stage: u32,
+}
+
+impl ImportRouteOption {
+    fn display_label(&self) -> String {
+        format!(
+            "{}  {}  {}",
+            self.import_type_label(),
+            self.importer_id,
+            self.csv_file
+        )
+    }
+
+    fn import_type_label(&self) -> &'static str {
+        match self.import_type.as_str() {
+            "cc" => "Credit Card",
+            "chequing" => "Chequing",
+            _ => "Unknown",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct RefreshImportPageResponse {
+    planner_status: String,
+    has_uncommitted_changes: bool,
+    #[serde(default)]
+    routes: Vec<ImportRouteOption>,
+    selected_source_path: Option<String>,
+    account_resolution: Option<ResolveImportAccountsResponse>,
+    planner_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ResolveImportAccountsResponse {
+    status: String,
+    #[serde(rename = "import_type")]
+    _import_type: String,
+    #[serde(rename = "csv_file")]
+    _csv_file: String,
+    #[serde(rename = "importer_id")]
+    _importer_id: String,
+    account_label: Option<String>,
+    account_options: Option<Vec<String>>,
+    as_of: Option<String>,
+    error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ApplyImportResponse {
+    status: String,
+    import_type: String,
+    result_file_path: Option<String>,
+    result_file_name: Option<String>,
+    account: Option<String>,
+    start_date: Option<String>,
+    end_date: Option<String>,
+    error: Option<String>,
+    #[serde(default)]
+    warnings: Vec<String>,
+    #[serde(default)]
+    validation_errors: Vec<String>,
+    summary: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -782,6 +864,235 @@ impl TextInputState {
         let start = char_to_byte_index(&self.value, self.cursor);
         let end = char_to_byte_index(&self.value, self.cursor + 1);
         self.value.replace_range(start..end, "");
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ImportPageState {
+    routes: Vec<ImportRouteOption>,
+    route_state: ListState,
+    focus: ImportPaneFocus,
+    has_uncommitted_changes: bool,
+    allow_uncommitted: bool,
+    planner_status: String,
+    planner_error: Option<String>,
+    account_label: Option<String>,
+    account_options: Vec<String>,
+    account_state: ListState,
+    account_as_of: Option<String>,
+    account_error: Option<String>,
+    last_result: Option<ApplyImportResponse>,
+}
+
+impl ImportPageState {
+    fn new() -> Self {
+        let mut route_state = ListState::default();
+        route_state.select(None);
+        let mut account_state = ListState::default();
+        account_state.select(None);
+        Self {
+            routes: Vec::new(),
+            route_state,
+            focus: ImportPaneFocus::Routes,
+            has_uncommitted_changes: false,
+            allow_uncommitted: false,
+            planner_status: "not_loaded".to_string(),
+            planner_error: None,
+            account_label: None,
+            account_options: Vec::new(),
+            account_state,
+            account_as_of: None,
+            account_error: None,
+            last_result: None,
+        }
+    }
+
+    fn selected_route(&self) -> Option<&ImportRouteOption> {
+        self.route_state
+            .selected()
+            .and_then(|index| self.routes.get(index))
+    }
+
+    fn selected_account(&self) -> Option<&str> {
+        self.account_state
+            .selected()
+            .and_then(|index| self.account_options.get(index))
+            .map(String::as_str)
+    }
+
+    fn set_routes(&mut self, routes: Vec<ImportRouteOption>, preferred_source_path: Option<&str>) {
+        let current_source = preferred_source_path
+            .map(ToOwned::to_owned)
+            .or_else(|| self.selected_route().map(|route| route.source_path.clone()));
+        self.routes = routes;
+        let selected_index = current_source.as_deref().and_then(|source_path| {
+            self.routes
+                .iter()
+                .position(|route| route.source_path == source_path)
+        });
+        match (self.routes.len(), selected_index) {
+            (0, _) => self.route_state.select(None),
+            (_, Some(index)) => self.route_state.select(Some(index)),
+            (_, None) => self.route_state.select(Some(0)),
+        }
+    }
+
+    fn move_route_selection(&mut self, delta: isize) {
+        let len = self.routes.len();
+        if len == 0 {
+            self.route_state.select(None);
+            return;
+        }
+        let current = self.route_state.selected().unwrap_or(0) as isize;
+        let next = (current + delta).clamp(0, (len - 1) as isize) as usize;
+        self.route_state.select(Some(next));
+    }
+
+    fn move_account_selection(&mut self, delta: isize) {
+        let len = self.account_options.len();
+        if len == 0 {
+            self.account_state.select(None);
+            return;
+        }
+        let current = self.account_state.selected().unwrap_or(0) as isize;
+        let next = (current + delta).clamp(0, (len - 1) as isize) as usize;
+        self.account_state.select(Some(next));
+    }
+
+    fn clear_account_resolution(&mut self) {
+        self.account_label = None;
+        self.account_options.clear();
+        self.account_state.select(None);
+        self.account_as_of = None;
+        self.account_error = None;
+    }
+
+    fn apply_account_resolution(
+        &mut self,
+        response: ResolveImportAccountsResponse,
+        preferred_account: Option<&str>,
+    ) {
+        self.account_label = response.account_label;
+        self.account_as_of = response.as_of;
+        self.account_error = if response.status == "error" {
+            response.error
+        } else {
+            None
+        };
+        self.account_options = response.account_options.unwrap_or_default();
+        let selected_index = preferred_account.and_then(|account| {
+            self.account_options
+                .iter()
+                .position(|candidate| candidate == account)
+        });
+        match (self.account_options.len(), selected_index) {
+            (0, _) => self.account_state.select(None),
+            (_, Some(index)) => self.account_state.select(Some(index)),
+            (_, None) => self.account_state.select(Some(0)),
+        }
+    }
+
+    fn detail_lines(&self) -> Vec<String> {
+        let mut lines = vec![
+            format!(
+                "Planner Status: {}",
+                match self.planner_status.as_str() {
+                    "not_loaded" => "not loaded (press `r` to load routes)",
+                    other => other,
+                }
+            ),
+            format!(
+                "Git Working Tree: {}",
+                if self.has_uncommitted_changes {
+                    "uncommitted changes detected"
+                } else {
+                    "clean"
+                }
+            ),
+            format!(
+                "Allow Import With Uncommitted Changes: {}",
+                if self.allow_uncommitted { "yes" } else { "no" }
+            ),
+        ];
+
+        if let Some(error) = &self.planner_error {
+            lines.push(String::new());
+            lines.push("Planner Error:".to_string());
+            lines.extend(error.lines().map(ToOwned::to_owned));
+        }
+
+        if let Some(route) = self.selected_route() {
+            lines.push(String::new());
+            lines.push("Selected Route".to_string());
+            lines.push(format!("CSV: {}", route.csv_file));
+            lines.push(format!("Source: {}", route.source_path));
+            lines.push(format!("Type: {}", route.import_type_label()));
+            lines.push(format!("Importer: {}", route.importer_id));
+            lines.push(format!("Rule: {}", route.rule_id));
+            lines.push(format!("Stage: {}", route.stage));
+        }
+
+        if self.account_label.is_some() || self.account_error.is_some() {
+            lines.push(String::new());
+            lines.push("Account Resolution".to_string());
+            if let Some(label) = &self.account_label {
+                lines.push(format!("Label: {label}"));
+            }
+            if let Some(as_of) = &self.account_as_of {
+                lines.push(format!("As Of: {as_of}"));
+            }
+            if let Some(account) = self.selected_account() {
+                lines.push(format!("Selected Account: {account}"));
+            }
+            if let Some(error) = &self.account_error {
+                lines.push("Error:".to_string());
+                lines.extend(error.lines().map(ToOwned::to_owned));
+            }
+        }
+
+        if let Some(result) = &self.last_result {
+            lines.push(String::new());
+            lines.push("Last Import Result".to_string());
+            lines.push(format!("Status: {}", result.status));
+            lines.push(format!("Import Type: {}", result.import_type));
+            if let Some(summary) = &result.summary {
+                lines.push(format!("Summary: {summary}"));
+            }
+            if let Some(account) = &result.account {
+                lines.push(format!("Account: {account}"));
+            }
+            if let Some(start_date) = &result.start_date {
+                lines.push(format!("Start Date: {start_date}"));
+            }
+            if let Some(end_date) = &result.end_date {
+                lines.push(format!("End Date: {end_date}"));
+            }
+            if let Some(path) = &result.result_file_path {
+                lines.push(format!("Result File: {path}"));
+            }
+            if let Some(name) = &result.result_file_name {
+                lines.push(format!("Result File Name: {name}"));
+            }
+            if let Some(error) = &result.error {
+                lines.push("Error:".to_string());
+                lines.extend(error.lines().map(ToOwned::to_owned));
+            }
+            if !result.warnings.is_empty() {
+                lines.push("Warnings:".to_string());
+                lines.extend(result.warnings.iter().map(|warning| format!("- {warning}")));
+            }
+            if !result.validation_errors.is_empty() {
+                lines.push("Validation Errors:".to_string());
+                lines.extend(
+                    result
+                        .validation_errors
+                        .iter()
+                        .map(|error| format!("- {error}")),
+                );
+            }
+        }
+
+        lines
     }
 }
 
@@ -1514,6 +1825,7 @@ struct App {
     serve_state: ServePageState,
     fava_state: FavaPageState,
     ocr_state: OcrPageState,
+    imports_state: ImportPageState,
     last_receipts_refresh: Option<Instant>,
     last_serve_refresh: Option<Instant>,
     last_fava_refresh: Option<Instant>,
@@ -1556,6 +1868,7 @@ impl App {
             serve_state: ServePageState::new(),
             fava_state: FavaPageState::new(),
             ocr_state: OcrPageState::new(),
+            imports_state: ImportPageState::new(),
             last_receipts_refresh: None,
             last_serve_refresh: None,
             last_fava_refresh: None,
@@ -1573,16 +1886,19 @@ impl App {
     fn page_help(page: Page) -> &'static str {
         match page {
             Page::Receipts => {
-                "1 receipts | 2 serve | 3 fava | 4 OCR | Tab switch queues | h/l pane focus | s toggle details/status | j/k move or scroll | e edit | m TUI match | M CLI match | arrows pan | r reload | a approve | c config | q quit"
+                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | Tab switch queues | h/l pane focus | s toggle details/status | j/k move or scroll | e edit | m TUI match | M CLI match | arrows pan | r reload | a approve | c config | q quit"
             }
             Page::Serve => {
-                "1 receipts | 2 serve | 3 fava | 4 OCR | s start `bb serve` | x stop `bb serve` | R restart | r refresh health | q quit"
+                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | s start `bb serve` | x stop `bb serve` | R restart | r refresh health | q quit"
             }
             Page::Fava => {
-                "1 receipts | 2 serve | 3 fava | 4 OCR | s start Fava | x stop Fava | R restart | r refresh health | q quit"
+                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | s start Fava | x stop Fava | R restart | r refresh health | q quit"
             }
             Page::Ocr => {
-                "1 receipts | 2 serve | 3 fava | 4 OCR | s start container | x stop container | R restart container | r refresh podman status/logs | q quit"
+                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | s start container | x stop container | R restart container | r refresh podman status/logs | q quit"
+            }
+            Page::Imports => {
+                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | r load routes | h/l or Tab switch pane | j/k move | Enter reload accounts | a apply import | u toggle allow-uncommitted | q quit"
             }
         }
     }
@@ -2048,6 +2364,95 @@ impl App {
         Ok(())
     }
 
+    fn refresh_imports_page(&mut self) -> AppResult<()> {
+        let preferred_source = self
+            .imports_state
+            .selected_route()
+            .map(|route| route.source_path.clone());
+        let preferred_account = self.imports_state.selected_account().map(str::to_string);
+        let response = backend_refresh_import_page(preferred_source.as_deref())?;
+        self.imports_state.has_uncommitted_changes = response.has_uncommitted_changes;
+        self.imports_state.planner_status = response.planner_status;
+        self.imports_state.planner_error = response.planner_error;
+        self.imports_state
+            .set_routes(response.routes, response.selected_source_path.as_deref());
+
+        match response.account_resolution {
+            Some(account_resolution) => self
+                .imports_state
+                .apply_account_resolution(account_resolution, preferred_account.as_deref()),
+            None => self.imports_state.clear_account_resolution(),
+        }
+        Ok(())
+    }
+
+    fn resolve_selected_import_accounts(&mut self) -> AppResult<()> {
+        let selected_account = self.imports_state.selected_account().map(str::to_string);
+        let Some(route) = self.imports_state.selected_route().cloned() else {
+            self.imports_state.clear_account_resolution();
+            self.set_status("No import route selected. Press `r` to load statement routes.");
+            return Ok(());
+        };
+        self.imports_state.clear_account_resolution();
+        let response = backend_resolve_import_accounts(
+            &route.import_type,
+            &route.csv_file,
+            &route.importer_id,
+        )?;
+        self.imports_state
+            .apply_account_resolution(response, selected_account.as_deref());
+        Ok(())
+    }
+
+    fn move_import_route_selection(&mut self, delta: isize) -> AppResult<()> {
+        let before = self
+            .imports_state
+            .selected_route()
+            .map(|route| route.source_path.clone());
+        self.imports_state.move_route_selection(delta);
+        let after = self
+            .imports_state
+            .selected_route()
+            .map(|route| route.source_path.clone());
+        if before != after {
+            self.resolve_selected_import_accounts()?;
+        }
+        Ok(())
+    }
+
+    fn apply_selected_import(&mut self) -> AppResult<()> {
+        let Some(route) = self.imports_state.selected_route().cloned() else {
+            self.set_status("No import route selected. Press `r` to load statement routes.");
+            return Ok(());
+        };
+        let selected_account = self.imports_state.selected_account().map(ToOwned::to_owned);
+        let response = backend_apply_import(
+            &route.import_type,
+            &route.csv_file,
+            &route.importer_id,
+            selected_account.as_deref(),
+            self.imports_state.allow_uncommitted,
+        )?;
+        let status = match response.status.as_str() {
+            "ok" => response
+                .summary
+                .clone()
+                .unwrap_or_else(|| format!("Imported {}", route.csv_file)),
+            "aborted" => response
+                .error
+                .clone()
+                .unwrap_or_else(|| "Import aborted".to_string()),
+            _ => response
+                .error
+                .clone()
+                .unwrap_or_else(|| format!("Import failed: {}", response.status)),
+        };
+        self.imports_state.last_result = Some(response);
+        self.refresh_imports_page()?;
+        self.set_status(status);
+        Ok(())
+    }
+
     fn refresh_current_page(&mut self) -> AppResult<()> {
         match self.active_page {
             Page::Receipts => self.refresh(),
@@ -2067,6 +2472,11 @@ impl App {
                     "Refreshed Podman container `{}` status and logs",
                     OCR_CONTAINER_NAME
                 ));
+                Ok(())
+            }
+            Page::Imports => {
+                self.refresh_imports_page()?;
+                self.set_status("Refreshed statement import routes");
                 Ok(())
             }
         }
@@ -2488,6 +2898,57 @@ fn backend_re_edit_approved_with_review(
 
 fn backend_get_config() -> AppResult<ConfigResponse> {
     let stdout = run_backend(&["api", "get-config"])?;
+    Ok(serde_json::from_str(&stdout)?)
+}
+
+fn backend_refresh_import_page(
+    preferred_source_path: Option<&str>,
+) -> AppResult<RefreshImportPageResponse> {
+    let payload = serde_json::json!({
+        "preferred_source_path": preferred_source_path,
+    });
+    let stdout = run_backend_with_input(
+        &["api", "refresh-import-page"],
+        Some(&serde_json::to_string(&payload)?),
+    )?;
+    Ok(serde_json::from_str(&stdout)?)
+}
+
+fn backend_resolve_import_accounts(
+    import_type: &str,
+    csv_file: &str,
+    importer_id: &str,
+) -> AppResult<ResolveImportAccountsResponse> {
+    let payload = serde_json::json!({
+        "import_type": import_type,
+        "csv_file": csv_file,
+        "importer_id": importer_id,
+    });
+    let stdout = run_backend_with_input(
+        &["api", "resolve-import-accounts"],
+        Some(&serde_json::to_string(&payload)?),
+    )?;
+    Ok(serde_json::from_str(&stdout)?)
+}
+
+fn backend_apply_import(
+    import_type: &str,
+    csv_file: &str,
+    importer_id: &str,
+    selected_account: Option<&str>,
+    allow_uncommitted: bool,
+) -> AppResult<ApplyImportResponse> {
+    let payload = serde_json::json!({
+        "import_type": import_type,
+        "csv_file": csv_file,
+        "importer_id": importer_id,
+        "selected_account": selected_account,
+        "allow_uncommitted": allow_uncommitted,
+    });
+    let stdout = run_backend_with_input(
+        &["api", "import-apply"],
+        Some(&serde_json::to_string(&payload)?),
+    )?;
     Ok(serde_json::from_str(&stdout)?)
 }
 
@@ -3225,6 +3686,7 @@ fn effective_item_removed(item: &Value) -> bool {
 }
 
 fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
+    frame.render_widget(Clear, frame.area());
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -3234,18 +3696,24 @@ fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
         ])
         .split(frame.area());
 
-    let tabs = Tabs::new(["Receipts [1]", "Serve [2]", "Fava [3]", "OCR [4]"])
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Pages (press 1/2/3/4)"),
-        )
-        .select(app.active_page.tab_index())
-        .highlight_style(
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        );
+    let tabs = Tabs::new([
+        "Receipts [1]",
+        "Serve [2]",
+        "Fava [3]",
+        "OCR [4]",
+        "Imports [5]",
+    ])
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Pages (press 1/2/3/4/5)"),
+    )
+    .select(app.active_page.tab_index())
+    .highlight_style(
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    );
     frame.render_widget(tabs, chunks[0]);
 
     if let Some(review_state) = &mut app.review_state {
@@ -3256,6 +3724,7 @@ fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
             Page::Serve => render_serve_page(frame, app, chunks[1]),
             Page::Fava => render_fava_page(frame, app, chunks[1]),
             Page::Ocr => render_ocr_page(frame, app, chunks[1]),
+            Page::Imports => render_imports_page(frame, app, chunks[1]),
         }
     }
 
@@ -3496,6 +3965,110 @@ fn render_ocr_page(frame: &mut ratatui::Frame<'_>, app: &App, area: ratatui::lay
     )
     .wrap(Wrap { trim: false });
     frame.render_widget(logs, sections[1]);
+}
+
+fn render_imports_page(frame: &mut ratatui::Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(6), Constraint::Min(10)])
+        .split(area);
+
+    let summary = Paragraph::new(format!(
+        "Detected routes: {}\nWorking tree: {}\nAllow import with uncommitted changes: {}\nSelected route: {}",
+        app.imports_state.routes.len(),
+        if app.imports_state.has_uncommitted_changes {
+            "uncommitted changes detected"
+        } else {
+            "clean"
+        },
+        if app.imports_state.allow_uncommitted {
+            "yes"
+        } else {
+            "no"
+        },
+        app.imports_state
+            .selected_route()
+            .map(|route| route.csv_file.as_str())
+            .unwrap_or("<none>")
+    ))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Statement Import (`a` apply, `u` toggle allow-uncommitted)"),
+    )
+    .wrap(Wrap { trim: true });
+    frame.render_widget(summary, sections[0]);
+
+    let body = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
+        .split(sections[1]);
+    let right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(10), Constraint::Min(8)])
+        .split(body[1]);
+
+    let route_items: Vec<ListItem> = app
+        .imports_state
+        .routes
+        .iter()
+        .map(|route| ListItem::new(Line::from(route.display_label())))
+        .collect();
+    let routes = List::new(route_items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!("Routes ({})", app.imports_state.routes.len()))
+                .border_style(if app.imports_state.focus == ImportPaneFocus::Routes {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default()
+                }),
+        )
+        .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+        .highlight_symbol(">> ");
+    frame.render_stateful_widget(routes, body[0], &mut app.imports_state.route_state);
+
+    let account_items: Vec<ListItem> = app
+        .imports_state
+        .account_options
+        .iter()
+        .map(|account| ListItem::new(Line::from(account.clone())))
+        .collect();
+    let account_title = app
+        .imports_state
+        .account_label
+        .clone()
+        .unwrap_or_else(|| "Accounts".to_string());
+    let accounts = List::new(account_items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(account_title)
+                .border_style(if app.imports_state.focus == ImportPaneFocus::Accounts {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default()
+                }),
+        )
+        .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+        .highlight_symbol(">> ");
+    frame.render_stateful_widget(accounts, right[0], &mut app.imports_state.account_state);
+
+    let details = Paragraph::new(Text::from(
+        app.imports_state
+            .detail_lines()
+            .into_iter()
+            .map(Line::from)
+            .collect::<Vec<_>>(),
+    ))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Import Details"),
+    )
+    .wrap(Wrap { trim: false });
+    frame.render_widget(details, right[1]);
 }
 
 fn render_review_screen(
@@ -4032,7 +4605,10 @@ fn setup_terminal() -> AppResult<Terminal<CrosstermBackend<Stdout>>> {
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
-    Ok(Terminal::new(backend)?)
+    let mut terminal = Terminal::new(backend)?;
+    terminal.clear()?;
+    terminal.hide_cursor()?;
+    Ok(terminal)
 }
 
 fn restore_terminal(mut terminal: Terminal<CrosstermBackend<Stdout>>) -> AppResult<()> {
@@ -4079,9 +4655,6 @@ fn run_app(
         let Event::Key(key) = event::read()? else {
             continue;
         };
-        if key.kind != KeyEventKind::Press {
-            continue;
-        }
 
         if app.review_state.is_some() {
             let mut review_cancelled = false;
@@ -4395,6 +4968,10 @@ fn run_app(
                     app.set_error(error.to_string());
                 }
             }
+            (KeyCode::Char('5'), _) => {
+                app.switch_page(Page::Imports);
+                app.set_status("Switched to Imports. Press `r` to load statement routes.");
+            }
             (KeyCode::Char('r'), _) => {
                 if let Err(error) = app.refresh_current_page() {
                     app.set_error(error.to_string());
@@ -4562,6 +5139,60 @@ fn run_app(
                         app.set_error(error.to_string());
                     }
                 }
+                Page::Imports => match (key.code, key.modifiers) {
+                    (KeyCode::Tab, _)
+                    | (KeyCode::Char('l'), KeyModifiers::NONE)
+                    | (KeyCode::Right, _) => {
+                        app.imports_state.focus = ImportPaneFocus::Accounts;
+                    }
+                    (KeyCode::BackTab, _)
+                    | (KeyCode::Char('h'), KeyModifiers::NONE)
+                    | (KeyCode::Left, _) => {
+                        app.imports_state.focus = ImportPaneFocus::Routes;
+                    }
+                    (KeyCode::Down, _) | (KeyCode::Char('j'), KeyModifiers::NONE) => {
+                        if app.imports_state.focus == ImportPaneFocus::Routes {
+                            if let Err(error) = app.move_import_route_selection(1) {
+                                app.set_error(error.to_string());
+                            }
+                        } else {
+                            app.imports_state.move_account_selection(1);
+                        }
+                    }
+                    (KeyCode::Up, _) | (KeyCode::Char('k'), KeyModifiers::NONE) => {
+                        if app.imports_state.focus == ImportPaneFocus::Routes {
+                            if let Err(error) = app.move_import_route_selection(-1) {
+                                app.set_error(error.to_string());
+                            }
+                        } else {
+                            app.imports_state.move_account_selection(-1);
+                        }
+                    }
+                    (KeyCode::Enter, _) => {
+                        if let Err(error) = app.resolve_selected_import_accounts() {
+                            app.set_error(error.to_string());
+                        } else {
+                            app.set_status("Reloaded account choices for selected statement");
+                        }
+                    }
+                    (KeyCode::Char('u'), KeyModifiers::NONE) => {
+                        app.imports_state.allow_uncommitted = !app.imports_state.allow_uncommitted;
+                        app.set_status(format!(
+                            "Allow import with uncommitted changes: {}",
+                            if app.imports_state.allow_uncommitted {
+                                "enabled"
+                            } else {
+                                "disabled"
+                            }
+                        ));
+                    }
+                    (KeyCode::Char('a'), _) => {
+                        if let Err(error) = app.apply_selected_import() {
+                            app.set_error(error.to_string());
+                        }
+                    }
+                    _ => {}
+                },
             },
         }
     }
@@ -4821,5 +5452,117 @@ mod tests {
             app.selected_path_for_queue(Queue::Scanned).as_deref(),
             Some("/tmp/current.receipt.json")
         );
+    }
+
+    #[test]
+    fn import_page_state_preserves_selected_route_by_source_path() {
+        let mut state = ImportPageState::new();
+        state.set_routes(
+            vec![
+                ImportRouteOption {
+                    csv_file: "statement.csv".to_string(),
+                    source_path: "/tmp/statement.csv".to_string(),
+                    import_type: "cc".to_string(),
+                    importer_id: "bmo".to_string(),
+                    rule_id: "cc-bmo-statement".to_string(),
+                    stage: 1,
+                },
+                ImportRouteOption {
+                    csv_file: "Preferred_Package_foo.csv".to_string(),
+                    source_path: "/tmp/Preferred_Package_foo.csv".to_string(),
+                    import_type: "chequing".to_string(),
+                    importer_id: "scotia_chequing".to_string(),
+                    rule_id: "chequing-scotia".to_string(),
+                    stage: 1,
+                },
+            ],
+            None,
+        );
+        state.route_state.select(Some(1));
+
+        state.set_routes(
+            vec![
+                ImportRouteOption {
+                    csv_file: "new.csv".to_string(),
+                    source_path: "/tmp/new.csv".to_string(),
+                    import_type: "cc".to_string(),
+                    importer_id: "rogers".to_string(),
+                    rule_id: "cc-rogers".to_string(),
+                    stage: 1,
+                },
+                ImportRouteOption {
+                    csv_file: "Preferred_Package_foo.csv".to_string(),
+                    source_path: "/tmp/Preferred_Package_foo.csv".to_string(),
+                    import_type: "chequing".to_string(),
+                    importer_id: "scotia_chequing".to_string(),
+                    rule_id: "chequing-scotia".to_string(),
+                    stage: 1,
+                },
+            ],
+            None,
+        );
+
+        assert_eq!(state.route_state.selected(), Some(1));
+        assert_eq!(
+            state
+                .selected_route()
+                .map(|route| route.source_path.as_str()),
+            Some("/tmp/Preferred_Package_foo.csv")
+        );
+    }
+
+    #[test]
+    fn import_page_detail_lines_include_last_result_and_warnings() {
+        let mut state = ImportPageState::new();
+        state.planner_status = "ready".to_string();
+        state.has_uncommitted_changes = true;
+        state.allow_uncommitted = true;
+        state.set_routes(
+            vec![ImportRouteOption {
+                csv_file: "statement.csv".to_string(),
+                source_path: "/tmp/statement.csv".to_string(),
+                import_type: "cc".to_string(),
+                importer_id: "bmo".to_string(),
+                rule_id: "cc-bmo-statement".to_string(),
+                stage: 1,
+            }],
+            None,
+        );
+        state.apply_account_resolution(
+            ResolveImportAccountsResponse {
+                status: "ready".to_string(),
+                _import_type: "cc".to_string(),
+                _csv_file: "statement.csv".to_string(),
+                _importer_id: "bmo".to_string(),
+                account_label: Some("BMO credit card".to_string()),
+                account_options: Some(vec!["Liabilities:CreditCard:Primary:BMO:CardA".to_string()]),
+                as_of: Some("2026-03-04".to_string()),
+                error: None,
+            },
+            None,
+        );
+        state.last_result = Some(ApplyImportResponse {
+            status: "ok".to_string(),
+            import_type: "cc".to_string(),
+            result_file_path: Some("/tmp/carda_0304_0304.beancount".to_string()),
+            result_file_name: Some("carda_0304_0304.beancount".to_string()),
+            account: Some("Liabilities:CreditCard:Primary:BMO:CardA".to_string()),
+            start_date: Some("0304".to_string()),
+            end_date: Some("0304".to_string()),
+            error: None,
+            warnings: vec!["Ledger validation found errors after import.".to_string()],
+            validation_errors: vec!["Validation error 1".to_string()],
+            summary: Some("Import complete: /tmp/carda_0304_0304.beancount".to_string()),
+        });
+
+        let rendered = state.detail_lines().join("\n");
+
+        assert!(rendered.contains("Planner Status: ready"));
+        assert!(rendered.contains("Git Working Tree: uncommitted changes detected"));
+        assert!(rendered.contains("Selected Route"));
+        assert!(rendered.contains("Selected Account: Liabilities:CreditCard:Primary:BMO:CardA"));
+        assert!(rendered.contains("Last Import Result"));
+        assert!(rendered.contains("Warnings:"));
+        assert!(rendered.contains("Validation Errors:"));
     }
 }
