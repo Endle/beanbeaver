@@ -122,9 +122,19 @@ fn re_footer_address_patterns() -> &'static Regex {
     })
 }
 
+fn re_receipt_metadata_patterns() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)WS#|RECEIPT#|CASHIER|ITEM\s+COUNT|NUMBER\s+OF\s+ITEMS|HAPPY\s+SHOPPING|CREDIT\s+CARD|DEBIT|APPROVED|AUTH|REFERENCE|TERMINAL|CUSTOMER\s+COPY",
+        )
+        .unwrap()
+    })
+}
+
 fn re_count_at_price() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"^\d+\s*@\s*\$?-?\d+\.\d{2}\b").unwrap())
+    RE.get_or_init(|| Regex::new(r"(?i)^\d+\s*@\s*\$?-?\d+\.\d{2}").unwrap())
 }
 
 fn re_weight_at_price() -> &'static Regex {
@@ -456,6 +466,10 @@ fn footer_address_like(text: &str) -> bool {
     re_footer_address_patterns().is_match(&text.to_ascii_uppercase())
 }
 
+fn receipt_metadata_like(text: &str) -> bool {
+    re_receipt_metadata_patterns().is_match(text.trim())
+}
+
 fn clean_description(desc: &str) -> String {
     let mut cleaned = desc.to_string();
     cleaned = re_leading_qty_prefix().replace(&cleaned, "").to_string();
@@ -500,6 +514,9 @@ fn is_valid_onsale_target(line: &ParsedLine) -> bool {
     if line.left_text.is_empty() {
         return false;
     }
+    if receipt_metadata_like(&line.left_text) || receipt_metadata_like(&line.full_text) {
+        return false;
+    }
     if is_summary_line(&line.left_text) || is_summary_line(&line.full_text) {
         return false;
     }
@@ -519,6 +536,9 @@ fn is_valid_onsale_target(line: &ParsedLine) -> bool {
 fn is_valid_item_line(line: &ParsedLine, total_line_y: Option<f64>) -> bool {
     let left_text_for_ratio = strip_leading_receipt_codes(&line.left_text);
     if left_text_for_ratio.is_empty() || line.left_text.is_empty() {
+        return false;
+    }
+    if receipt_metadata_like(&line.left_text) || receipt_metadata_like(&line.full_text) {
         return false;
     }
     let short_alpha = is_short_alpha_item(&left_text_for_ratio);
@@ -921,16 +941,9 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
             && !used_line_indices[price_candidate.source_line_index]
         {
             let source_distance = (source_line.line_y - price_y).abs();
-            let source_left_is_header = is_section_header_text(&source_line.left_text)
-                && !is_priced_generic_item_label(&source_line.left_text, &source_line.full_text);
             if source_distance <= Y_TOLERANCE
-                && !source_line.left_text.is_empty()
+                && is_valid_item_line(source_line, total_line_y)
                 && !looks_like_quantity_expression(&source_line.left_text)
-                && !is_summary_line(&source_line.left_text)
-                && !is_summary_line(&source_line.full_text)
-                && !source_left_is_header
-                && !is_section_header_text(&source_line.full_text)
-                && !footer_address_like(&source_line.full_text)
             {
                 chosen_line_index = Some(price_candidate.source_line_index);
                 chosen_distance = source_distance;
@@ -1153,6 +1166,106 @@ mod tests {
                 LineInput {
                     text: "Hot Kid Honey Flavour Bal".to_string(),
                     words: vec![word("Hot Kid Honey Flavour Bal", 0.08, 0.160, 0.360, 0.172)],
+                },
+                LineInput {
+                    text: "TOTAL 6.57".to_string(),
+                    words: vec![
+                        word("TOTAL", 0.09, 0.500, 0.180, 0.512),
+                        word("6.57", 0.88, 0.500, 0.93, 0.512),
+                    ],
+                },
+            ],
+        };
+
+        let outcome = extract_spatial_items(vec![page]);
+        let observed = outcome
+            .items
+            .into_iter()
+            .map(|item| (item.description, item.price_scaled))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            observed,
+            vec![
+                ("S & B Wasabi".to_string(), 19_800),
+                ("Hot Kid Honey Flavour Bal".to_string(), 45_900),
+            ]
+        );
+    }
+
+    #[test]
+    fn quantity_price_row_with_ea_suffix_uses_item_above() {
+        let page = PageInput {
+            lines: vec![
+                LineInput {
+                    text: "FF SHEPHERDS PURSE FILLING".to_string(),
+                    words: vec![word(
+                        "FF SHEPHERDS PURSE FILLING",
+                        0.05,
+                        0.700,
+                        0.40,
+                        0.712,
+                    )],
+                },
+                LineInput {
+                    text: "2 @ $3.49ea. W $6.98".to_string(),
+                    words: vec![
+                        word("2 @ $3.49ea.", 0.07, 0.723, 0.23, 0.735),
+                        word("W $6.98", 0.88, 0.723, 0.95, 0.735),
+                    ],
+                },
+                LineInput {
+                    text: "TOTAL 6.98".to_string(),
+                    words: vec![
+                        word("TOTAL", 0.10, 0.900, 0.18, 0.912),
+                        word("6.98", 0.88, 0.900, 0.93, 0.912),
+                    ],
+                },
+            ],
+        };
+
+        let outcome = extract_spatial_items(vec![page]);
+        let observed = outcome
+            .items
+            .into_iter()
+            .map(|item| (item.description, item.price_scaled))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            observed,
+            vec![("FF SHEPHERDS PURSE FILLING".to_string(), 69_800)]
+        );
+    }
+
+    #[test]
+    fn skips_receipt_metadata_when_quantity_row_needs_item_context() {
+        let page = PageInput {
+            lines: vec![
+                LineInput {
+                    text: "WS# P6 Cashier6".to_string(),
+                    words: vec![word("WS# P6 Cashier6", 0.05, 0.100, 0.22, 0.112)],
+                },
+                LineInput {
+                    text: "*S & B Wasabi".to_string(),
+                    words: vec![word("*S & B Wasabi", 0.08, 0.140, 0.260, 0.152)],
+                },
+                LineInput {
+                    text: "(E)ON SALE 1.98".to_string(),
+                    words: vec![
+                        word("(E)ON SALE", 0.09, 0.160, 0.210, 0.172),
+                        word("1.98", 0.88, 0.160, 0.93, 0.172),
+                    ],
+                },
+                LineInput {
+                    text: "2 @ $0.99 4.59".to_string(),
+                    words: vec![
+                        word("2 @ $0.99", 0.22, 0.180, 0.320, 0.192),
+                        word("4.59", 0.88, 0.180, 0.93, 0.192),
+                    ],
+                },
+                LineInput {
+                    text: "Hot Kid Honey Flavour Bal".to_string(),
+                    words: vec![word("Hot Kid Honey Flavour Bal", 0.08, 0.200, 0.360, 0.212)],
                 },
                 LineInput {
                     text: "TOTAL 6.57".to_string(),

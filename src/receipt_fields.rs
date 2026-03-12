@@ -161,6 +161,15 @@ pub(crate) fn extract_total(lines: &[String]) -> i64 {
                 continue;
             }
             if let Some(amount) = extract_price_from_line(&lines[idx]) {
+                if amount == 0
+                    && line_upper.contains("AFTER TAX")
+                    && idx + 1 < lines.len()
+                    && re_standalone_amount().is_match(&lines[idx + 1])
+                {
+                    if let Some(next_amount) = extract_price_from_line(&lines[idx + 1]) {
+                        return next_amount;
+                    }
+                }
                 return amount;
             }
             if idx + 1 < lines.len() {
@@ -260,6 +269,27 @@ pub(crate) fn extract_subtotal(lines: &[String]) -> Option<i64> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_total;
+
+    #[test]
+    fn total_after_tax_zero_prefers_following_standalone_amount() {
+        let lines = vec![
+            "Item Count: 33".to_string(),
+            "Sub Total 153.55".to_string(),
+            "HST".to_string(),
+            "hst5% 0.00".to_string(),
+            "Total after Tax 0.00".to_string(),
+            "153.55".to_string(),
+            "Credit Card".to_string(),
+            "153.55".to_string(),
+        ];
+
+        assert_eq!(extract_total(&lines), 15_355);
+    }
 }
 
 fn to_four_digit_year(year: i32) -> i32 {
