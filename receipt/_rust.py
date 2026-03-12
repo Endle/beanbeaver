@@ -1,4 +1,4 @@
-"""Helpers for loading the optional native receipt extension."""
+"""Helpers for loading the required native receipt extension."""
 
 from __future__ import annotations
 
@@ -83,5 +83,5 @@ def _load_extension_from_directories(
 def require_rust_matcher() -> ModuleType:
     module = load_rust_matcher()
     if module is None:
-        raise ImportError("beanbeaver._rust_matcher is required for spatial receipt parsing")
+        raise ImportError("beanbeaver._rust_matcher is required")
     return module

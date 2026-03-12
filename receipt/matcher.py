@@ -133,12 +133,6 @@ def _transaction_location(txn: object) -> tuple[str, int]:
                 line_number = 0
     return file_path, line_number
 
-
-def rust_backend_loaded() -> bool:
-    """Return whether the required native matcher backend is active."""
-    return True
-
-
 def _config_or_default(config: MatchConfig | None) -> MatchConfig:
     return config if config is not None else MatchConfig()
 

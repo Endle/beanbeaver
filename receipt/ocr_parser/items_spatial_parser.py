@@ -7,12 +7,10 @@ from typing import Any
 
 from beanbeaver.domain.receipt import ReceiptItem, ReceiptWarning
 
-from .._rust import load_rust_matcher, require_rust_matcher
+from .._rust import require_rust_matcher
 from ..item_categories import ItemCategoryRuleLayers, categorize_item
 
 _SCALE_FACTOR = Decimal("10000")
-
-_rust_matcher = load_rust_matcher()
 
 
 def _select_spatial_item_line(
