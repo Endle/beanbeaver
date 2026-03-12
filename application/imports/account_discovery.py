@@ -7,6 +7,7 @@ from pathlib import Path
 
 from beanbeaver.application.imports.shared import select_interactive_option
 from beanbeaver.ledger_access import open_accounts
+from beanbeaver.runtime import get_paths
 
 CC_PAYMENT_RULES: list[tuple[str, list[str]]] = [
     (
@@ -44,10 +45,11 @@ def find_open_accounts(
     ledger_path: Path | None = None,
 ) -> list[str]:
     """Return open account names matching any of the patterns."""
+    resolved_ledger_path = ledger_path if ledger_path is not None else get_paths().main_beancount
     return open_accounts(
         patterns=patterns,
         as_of=as_of,
-        ledger_path=ledger_path,
+        ledger_path=resolved_ledger_path,
     )
 
 

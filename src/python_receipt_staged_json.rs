@@ -64,6 +64,9 @@ impl<'a, 'py> FromPyObject<'a, 'py> for PyStageRuleLayersInput {
 }
 
 fn to_stage_rule_layers(input: PyStageRuleLayersInput) -> receipt_staged_json::StageRuleLayers {
+    let account_mapping = input.account_mapping;
+    let category_account_mapping = account_mapping.iter().cloned().collect();
+
     receipt_staged_json::StageRuleLayers {
         category_rules: receipt_categories::CategoryRuleLayers {
             rules: input
@@ -77,8 +80,9 @@ fn to_stage_rule_layers(input: PyStageRuleLayersInput) -> receipt_staged_json::S
                 })
                 .collect(),
             exact_only_keywords: input.exact_only_keywords,
+            account_mapping: category_account_mapping,
         },
-        account_mapping: input.account_mapping,
+        account_mapping,
     }
 }
 
@@ -86,7 +90,11 @@ fn fixed_decimal_string(value: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
     if value.is_none() {
         return Ok(None);
     }
-    Ok(Some(value.call_method1("__format__", (".2f",))?.extract::<String>()?))
+    Ok(Some(
+        value
+            .call_method1("__format__", (".2f",))?
+            .extract::<String>()?,
+    ))
 }
 
 fn decimalish_to_string(py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
@@ -181,7 +189,9 @@ fn optional_usize_attr(obj: &Bound<'_, PyAny>, attr: &str) -> PyResult<Option<us
     Ok(value.extract::<usize>().ok())
 }
 
-fn extract_receipt_input(receipt: &Bound<'_, PyAny>) -> PyResult<receipt_staged_json::ReceiptInput> {
+fn extract_receipt_input(
+    receipt: &Bound<'_, PyAny>,
+) -> PyResult<receipt_staged_json::ReceiptInput> {
     let items_any = receipt.getattr("items")?;
     let mut items = Vec::new();
     for item in items_any.try_iter()? {
@@ -207,7 +217,8 @@ fn extract_receipt_input(receipt: &Bound<'_, PyAny>) -> PyResult<receipt_staged_
     Ok(receipt_staged_json::ReceiptInput {
         merchant: required_string_attr(receipt, "merchant")?,
         date_iso: receipt.getattr("date")?.str()?.extract::<String>()?,
-        total: fixed_decimal_string(&receipt.getattr("total")?)?.unwrap_or_else(|| "0.00".to_string()),
+        total: fixed_decimal_string(&receipt.getattr("total")?)?
+            .unwrap_or_else(|| "0.00".to_string()),
         date_is_placeholder: receipt.getattr("date_is_placeholder")?.extract::<bool>()?,
         items,
         tax: fixed_decimal_string(&receipt.getattr("tax")?)?,
@@ -314,7 +325,9 @@ fn merged_item_classification(
                             }
                         }
                     }
-                    if let Some(extracted_tags) = extract_tags_from_dict(review_classification, "tags")? {
+                    if let Some(extracted_tags) =
+                        extract_tags_from_dict(review_classification, "tags")?
+                    {
                         tags_present = true;
                         tags = extracted_tags;
                     }
@@ -324,7 +337,10 @@ fn merged_item_classification(
     }
 
     if any || category_present || tags_present {
-        return Ok(Some(receipt_staged_json::ClassificationData { category, tags }));
+        return Ok(Some(receipt_staged_json::ClassificationData {
+            category,
+            tags,
+        }));
     }
 
     Ok(None)
@@ -547,10 +563,13 @@ fn receipt_build_parsed_receipt_stage(
         } else {
             item_dict.set_item("classification", py.None())?;
         }
-        let warning_dicts =
-            Vec::from_iter(item.warnings.iter().map(|warning| structured_warning_dict(py, warning).map(Bound::unbind)))
-                .into_iter()
-                .collect::<PyResult<Vec<_>>>()?;
+        let warning_dicts = Vec::from_iter(
+            item.warnings
+                .iter()
+                .map(|warning| structured_warning_dict(py, warning).map(Bound::unbind)),
+        )
+        .into_iter()
+        .collect::<PyResult<Vec<_>>>()?;
         item_dict.set_item("warnings", warning_dicts)?;
         let meta_dict = PyDict::new(py);
         meta_dict.set_item("source", &item.source)?;
@@ -560,10 +579,14 @@ fn receipt_build_parsed_receipt_stage(
     .into_iter()
     .collect::<PyResult<Vec<_>>>()?;
 
-    let warnings =
-        Vec::from_iter(stage.warnings.iter().map(|warning| structured_warning_dict(py, warning).map(Bound::unbind)))
-            .into_iter()
-            .collect::<PyResult<Vec<_>>>()?;
+    let warnings = Vec::from_iter(
+        stage
+            .warnings
+            .iter()
+            .map(|warning| structured_warning_dict(py, warning).map(Bound::unbind)),
+    )
+    .into_iter()
+    .collect::<PyResult<Vec<_>>>()?;
 
     let debug = if let Some(payload) = raw_ocr_payload {
         let debug_dict = PyDict::new(py);
@@ -599,12 +622,22 @@ fn receipt_resolve_stage_document(
     rule_layers: PyStageRuleLayersInput,
 ) -> PyResult<Py<PyDict>> {
     let stage_input = extract_stage_document_input(py, document)?;
-    let resolved = receipt_staged_json::resolve_stage_document(&stage_input, &to_stage_rule_layers(rule_layers));
+    let resolved = receipt_staged_json::resolve_stage_document(
+        &stage_input,
+        &to_stage_rule_layers(rule_layers),
+    );
 
     let items = resolved
         .items
         .iter()
-        .map(|item| (item.description.clone(), item.price.clone(), item.quantity, item.category.clone()))
+        .map(|item| {
+            (
+                item.description.clone(),
+                item.price.clone(),
+                item.quantity,
+                item.category.clone(),
+            )
+        })
         .collect::<Vec<_>>();
     let warnings = resolved
         .warnings
@@ -627,7 +660,10 @@ fn receipt_resolve_stage_document(
 }
 
 pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
-    module.add_function(wrap_pyfunction!(receipt_build_parsed_receipt_stage, module)?)?;
+    module.add_function(wrap_pyfunction!(
+        receipt_build_parsed_receipt_stage,
+        module
+    )?)?;
     module.add_function(wrap_pyfunction!(receipt_get_stage_summary, module)?)?;
     module.add_function(wrap_pyfunction!(receipt_resolve_stage_document, module)?)?;
     Ok(())

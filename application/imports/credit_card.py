@@ -11,10 +11,11 @@ from typing import Literal
 
 from beanbeaver.application.imports.account_discovery import find_open_accounts
 from beanbeaver.application.imports.csv_routing import (
-    detect_credit_card_csv as detect_credit_card_csv_by_rules,
+    CardImporterId,
+    detect_credit_card_importer_id,
 )
 from beanbeaver.application.imports.csv_routing import (
-    detect_credit_card_importer_id,
+    detect_credit_card_csv as detect_credit_card_csv_by_rules,
 )
 from beanbeaver.application.imports.shared import (
     confirm_uncommitted_changes,
@@ -65,6 +66,9 @@ class CreditCardImportRequest:
     csv_file: str | None = None
     start_date: str | None = None
     end_date: str | None = None
+    importer_id: CardImporterId | None = None
+    selected_account: str | None = None
+    allow_uncommitted: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -78,6 +82,18 @@ class CreditCardImportResult:
     start_date: str | None = None
     end_date: str | None = None
     error: str | None = None
+    warnings: tuple[str, ...] = ()
+    validation_errors: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CreditCardAccountOptions:
+    """Resolved account options for one credit-card CSV import."""
+
+    importer_id: CardImporterId
+    account_label: str
+    account_options: list[str]
+    as_of: datetime.date | None = None
 
 
 def detect_credit_card_csv() -> str | None:
@@ -101,9 +117,15 @@ def _select_account(
     *,
     account_label: str,
     as_of: datetime.date | None,
+    selected_account: str | None = None,
 ) -> str:
     if not matches:
         raise RuntimeError(f"No open {account_label} accounts found in main ledger.")
+    if selected_account is not None:
+        if selected_account not in matches:
+            options = ", ".join(matches)
+            raise RuntimeError(f"Selected {account_label} account not available: {selected_account}. Options: {options}")
+        return selected_account
     as_of_text = as_of.isoformat() if as_of else "today"
     return select_interactive_option(
         matches,
@@ -128,8 +150,7 @@ def _build_detection_importers() -> list[BaseCardImporter]:
     ]
 
 
-def _detect_importer(target_file_name: os.PathLike[str]) -> BaseCardImporter:
-    importer_id = detect_credit_card_importer_id(Path(target_file_name))
+def _build_detection_importer(importer_id: CardImporterId) -> BaseCardImporter:
     for candidate in _build_detection_importers():
         if importer_id == "cibc" and isinstance(candidate, CibcImporter):
             return candidate
@@ -147,10 +168,11 @@ def _detect_importer(target_file_name: os.PathLike[str]) -> BaseCardImporter:
             return candidate
         if importer_id == "amex" and isinstance(candidate, AmexImporter):
             return candidate
-    if importer_id:
-        raise RuntimeError(f"Unsupported importer id: {importer_id}")
-    else:
-        raise RuntimeError("Could not determine importer for this CSV.")
+    raise RuntimeError(f"Unsupported importer id: {importer_id}")
+
+
+def _detect_importer(target_file_name: os.PathLike[str], importer_id: CardImporterId | None = None) -> BaseCardImporter:
+    return _build_detection_importer(importer_id or detect_credit_card_importer_id(Path(target_file_name)))
 
 
 def _detect_statement_as_of(importer: BaseCardImporter, target_file_name: os.PathLike[str]) -> datetime.date | None:
@@ -176,14 +198,32 @@ def _detect_statement_as_of(importer: BaseCardImporter, target_file_name: os.Pat
     return latest
 
 
-def _discover_cibc_accounts(as_of: datetime.date | None, csv_file: str) -> tuple[CibcImporter, str]:
+def _cibc_account_matches(as_of: datetime.date | None, csv_file: str) -> list[str]:
+    matches = find_open_accounts(CIBC_ACCOUNT_PATTERNS, as_of=as_of)
+    is_simplii_file = "simplii" in csv_file.lower()
+    simplii_matches = [account for account in matches if _contains_token(account, "simplii")]
+    cibc_matches = [account for account in matches if account not in simplii_matches]
+    preferred = simplii_matches if is_simplii_file else cibc_matches
+    return preferred if preferred else matches
+
+
+def _discover_cibc_accounts(
+    as_of: datetime.date | None,
+    csv_file: str,
+    *,
+    selected_account: str | None = None,
+) -> tuple[CibcImporter, str]:
     matches = find_open_accounts(CIBC_ACCOUNT_PATTERNS, as_of=as_of)
     is_simplii_file = "simplii" in csv_file.lower()
     simplii_matches = [account for account in matches if _contains_token(account, "simplii")]
     cibc_matches = [account for account in matches if account not in simplii_matches]
 
-    preferred = simplii_matches if is_simplii_file else cibc_matches
-    primary = _select_account(preferred if preferred else matches, account_label="CIBC credit card", as_of=as_of)
+    primary = _select_account(
+        _cibc_account_matches(as_of, csv_file),
+        account_label="CIBC credit card",
+        as_of=as_of,
+        selected_account=selected_account,
+    )
 
     if is_simplii_file:
         account = cibc_matches[0] if cibc_matches else primary
@@ -195,14 +235,32 @@ def _discover_cibc_accounts(as_of: datetime.date | None, csv_file: str) -> tuple
     return CibcImporter(account=account, simplii_account=simplii_account), primary
 
 
-def _discover_bmo_accounts(as_of: datetime.date | None, csv_file: str) -> tuple[BmoImporter, str]:
+def _bmo_account_matches(as_of: datetime.date | None, csv_file: str) -> list[str]:
+    matches = find_open_accounts(BMO_ACCOUNT_PATTERNS, as_of=as_of)
+    is_porter_file = os.path.basename(csv_file).lower() == "porter.csv"
+    porter_matches = [account for account in matches if _contains_token(account, "porter")]
+    bmo_matches = [account for account in matches if account not in porter_matches]
+    preferred = porter_matches if is_porter_file else bmo_matches
+    return preferred if preferred else matches
+
+
+def _discover_bmo_accounts(
+    as_of: datetime.date | None,
+    csv_file: str,
+    *,
+    selected_account: str | None = None,
+) -> tuple[BmoImporter, str]:
     matches = find_open_accounts(BMO_ACCOUNT_PATTERNS, as_of=as_of)
     is_porter_file = os.path.basename(csv_file).lower() == "porter.csv"
     porter_matches = [account for account in matches if _contains_token(account, "porter")]
     bmo_matches = [account for account in matches if account not in porter_matches]
 
-    preferred = porter_matches if is_porter_file else bmo_matches
-    primary = _select_account(preferred if preferred else matches, account_label="BMO credit card", as_of=as_of)
+    primary = _select_account(
+        _bmo_account_matches(as_of, csv_file),
+        account_label="BMO credit card",
+        as_of=as_of,
+        selected_account=selected_account,
+    )
 
     porter_account: str | None
     if is_porter_file:
@@ -221,13 +279,14 @@ def _discover_single_account_importer(
     *,
     label: str,
     as_of: datetime.date | None,
+    selected_account: str | None = None,
 ) -> tuple[BaseCardImporter, str]:
     matches = find_open_accounts(patterns, as_of=as_of)
-    selected = _select_account(matches, account_label=label, as_of=as_of)
+    selected = _select_account(matches, account_label=label, as_of=as_of, selected_account=selected_account)
     return importer_cls(account=selected), selected
 
 
-def _discover_amex_importer(as_of: datetime.date | None, csv_file: str) -> tuple[AmexImporter, str]:
+def _amex_account_matches(as_of: datetime.date | None, csv_file: str) -> list[str]:
     matches = find_open_accounts(AMEX_ACCOUNT_PATTERNS, as_of=as_of)
     lower_name = os.path.basename(csv_file).lower()
     keyword_map = {
@@ -244,22 +303,41 @@ def _discover_amex_importer(as_of: datetime.date | None, csv_file: str) -> tuple
             if filtered:
                 preferred = filtered
             break
+    return preferred
 
-    selected = _select_account(preferred, account_label="AMEX credit card", as_of=as_of)
+
+def _discover_amex_importer(
+    as_of: datetime.date | None,
+    csv_file: str,
+    *,
+    selected_account: str | None = None,
+) -> tuple[AmexImporter, str]:
+    preferred = _amex_account_matches(as_of, csv_file)
+
+    selected = _select_account(
+        preferred,
+        account_label="AMEX credit card",
+        as_of=as_of,
+        selected_account=selected_account,
+    )
     return AmexImporter(account=selected), selected
 
 
 def _resolve_importer(
-    target_file_name: os.PathLike[str], csv_file: str
+    target_file_name: os.PathLike[str],
+    csv_file: str,
+    *,
+    importer_id: CardImporterId | None = None,
+    selected_account: str | None = None,
 ) -> tuple[BaseCardImporter, str, datetime.date | None]:
-    detected_importer = _detect_importer(target_file_name)
+    detected_importer = _detect_importer(target_file_name, importer_id)
     as_of = _detect_statement_as_of(detected_importer, target_file_name)
 
     if isinstance(detected_importer, CibcImporter):
-        importer, account = _discover_cibc_accounts(as_of, csv_file)
+        importer, account = _discover_cibc_accounts(as_of, csv_file, selected_account=selected_account)
         return importer, account, as_of
     if isinstance(detected_importer, BmoImporter):
-        importer, account = _discover_bmo_accounts(as_of, csv_file)
+        importer, account = _discover_bmo_accounts(as_of, csv_file, selected_account=selected_account)
         return importer, account, as_of
     if isinstance(detected_importer, ScotiaImporter):
         importer, account = _discover_single_account_importer(
@@ -267,6 +345,7 @@ def _resolve_importer(
             SCOTIA_ACCOUNT_PATTERNS,
             label="Scotia credit card",
             as_of=as_of,
+            selected_account=selected_account,
         )
         return importer, account, as_of
     if isinstance(detected_importer, RogersImporter):
@@ -275,6 +354,7 @@ def _resolve_importer(
             ROGERS_ACCOUNT_PATTERNS,
             label="Rogers credit card",
             as_of=as_of,
+            selected_account=selected_account,
         )
         return importer, account, as_of
     if isinstance(detected_importer, MbnaImporter):
@@ -283,6 +363,7 @@ def _resolve_importer(
             MBNA_ACCOUNT_PATTERNS,
             label="MBNA credit card",
             as_of=as_of,
+            selected_account=selected_account,
         )
         return importer, account, as_of
     if isinstance(detected_importer, PcfImporter):
@@ -291,6 +372,7 @@ def _resolve_importer(
             PCF_ACCOUNT_PATTERNS,
             label="PC Financial credit card",
             as_of=as_of,
+            selected_account=selected_account,
         )
         return importer, account, as_of
     if isinstance(detected_importer, CanadianTireFinancialImporter):
@@ -299,11 +381,87 @@ def _resolve_importer(
             CTFS_ACCOUNT_PATTERNS,
             label="CTFS credit card",
             as_of=as_of,
+            selected_account=selected_account,
         )
         return importer, account, as_of
     if isinstance(detected_importer, AmexImporter):
-        importer, account = _discover_amex_importer(as_of, csv_file)
+        importer, account = _discover_amex_importer(as_of, csv_file, selected_account=selected_account)
         return importer, account, as_of
+    raise RuntimeError(f"Unsupported importer type: {detected_importer.__class__.__name__}")
+
+
+def resolve_credit_card_account_options(
+    csv_file: str,
+    *,
+    importer_id: CardImporterId | None = None,
+) -> CreditCardAccountOptions:
+    target_file_name = TMPDIR / os.path.basename(csv_file)
+    copy_statement_csv(
+        csv_file=csv_file,
+        target_path=target_file_name,
+        downloads_dir=DOWNLOADED_CSV_BASE_PATH,
+        allow_absolute=False,
+    )
+    detected_importer = _detect_importer(target_file_name, importer_id)
+    resolved_importer_id = importer_id or detect_credit_card_importer_id(Path(target_file_name))
+    as_of = _detect_statement_as_of(detected_importer, target_file_name)
+
+    if isinstance(detected_importer, CibcImporter):
+        return CreditCardAccountOptions(
+            importer_id=resolved_importer_id,
+            account_label="CIBC credit card",
+            account_options=_cibc_account_matches(as_of, csv_file),
+            as_of=as_of,
+        )
+    if isinstance(detected_importer, BmoImporter):
+        return CreditCardAccountOptions(
+            importer_id=resolved_importer_id,
+            account_label="BMO credit card",
+            account_options=_bmo_account_matches(as_of, csv_file),
+            as_of=as_of,
+        )
+    if isinstance(detected_importer, ScotiaImporter):
+        return CreditCardAccountOptions(
+            importer_id=resolved_importer_id,
+            account_label="Scotia credit card",
+            account_options=find_open_accounts(SCOTIA_ACCOUNT_PATTERNS, as_of=as_of),
+            as_of=as_of,
+        )
+    if isinstance(detected_importer, RogersImporter):
+        return CreditCardAccountOptions(
+            importer_id=resolved_importer_id,
+            account_label="Rogers credit card",
+            account_options=find_open_accounts(ROGERS_ACCOUNT_PATTERNS, as_of=as_of),
+            as_of=as_of,
+        )
+    if isinstance(detected_importer, MbnaImporter):
+        return CreditCardAccountOptions(
+            importer_id=resolved_importer_id,
+            account_label="MBNA credit card",
+            account_options=find_open_accounts(MBNA_ACCOUNT_PATTERNS, as_of=as_of),
+            as_of=as_of,
+        )
+    if isinstance(detected_importer, PcfImporter):
+        return CreditCardAccountOptions(
+            importer_id=resolved_importer_id,
+            account_label="PC Financial credit card",
+            account_options=find_open_accounts(PCF_ACCOUNT_PATTERNS, as_of=as_of),
+            as_of=as_of,
+        )
+    if isinstance(detected_importer, CanadianTireFinancialImporter):
+        return CreditCardAccountOptions(
+            importer_id=resolved_importer_id,
+            account_label="CTFS credit card",
+            account_options=find_open_accounts(CTFS_ACCOUNT_PATTERNS, as_of=as_of),
+            as_of=as_of,
+        )
+    if isinstance(detected_importer, AmexImporter):
+        return CreditCardAccountOptions(
+            importer_id=resolved_importer_id,
+            account_label="AMEX credit card",
+            account_options=_amex_account_matches(as_of, csv_file),
+            as_of=as_of,
+        )
     raise RuntimeError(f"Unsupported importer type: {detected_importer.__class__.__name__}")
 
 
@@ -329,7 +487,7 @@ def run_credit_card_import(request: CreditCardImportRequest) -> CreditCardImport
             error="Provide both start_date and end_date together, or neither.",
         )
 
-    if not confirm_uncommitted_changes():
+    if not confirm_uncommitted_changes(request.allow_uncommitted):
         return CreditCardImportResult(status="aborted")
 
     csv_file = request.csv_file
@@ -361,7 +519,12 @@ def run_credit_card_import(request: CreditCardImportRequest) -> CreditCardImport
         return CreditCardImportResult(status="error", error=f"File not found: {csv_file}")
 
     try:
-        importer, card_account, as_of = _resolve_importer(target_file_name, csv_file)
+        importer, card_account, as_of = _resolve_importer(
+            target_file_name,
+            csv_file,
+            importer_id=request.importer_id,
+            selected_account=request.selected_account,
+        )
     except RuntimeError as exc:
         return CreditCardImportResult(status="error", error=str(exc))
 

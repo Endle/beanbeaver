@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -85,6 +85,14 @@ mod process_util {
     pub(super) fn run_backend_interactive(args: &[&str]) -> io::Result<ExitStatus> {
         let base = backend_command();
         run_interactive_full_command(&base, args)
+    }
+
+    pub(super) fn view_csv_file(path: &str) -> io::Result<ExitStatus> {
+        run_program_status("less", ["-N", "-S", path])
+    }
+
+    pub(super) fn trash_file(path: &str) -> io::Result<Output> {
+        run_program_output("trash", [path])
     }
 
     pub(super) fn podman_start_ocr() -> io::Result<Output> {
@@ -228,6 +236,19 @@ mod process_util {
         Command::new(program).args(args).output()
     }
 
+    fn run_program_status<I, S>(program: &str, args: I) -> io::Result<ExitStatus>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        Command::new(program)
+            .args(args)
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+    }
+
     fn run_capture_full_command(
         command: &[String],
         extra_args: &[&str],
@@ -238,6 +259,8 @@ mod process_util {
         command.args(program_args).args(extra_args.iter().copied());
         if stdin_input.is_some() {
             command.stdin(Stdio::piped());
+        } else {
+            command.stdin(Stdio::null());
         }
         let mut child = command
             .stdout(Stdio::piped())
@@ -282,6 +305,7 @@ const FAVA_HOST: &str = "127.0.0.1";
 const FAVA_PORT: u16 = 5000;
 const OCR_CONTAINER_NAME: &str = "beanbeaver-ocr";
 const MAX_RUNTIME_LOG_LINES: usize = 400;
+const RECEIPTS_REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 const SERVE_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const FAVA_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const OCR_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
@@ -292,6 +316,7 @@ enum Page {
     Serve,
     Fava,
     Ocr,
+    Imports,
 }
 
 impl Page {
@@ -301,6 +326,7 @@ impl Page {
             Page::Serve => 1,
             Page::Fava => 2,
             Page::Ocr => 3,
+            Page::Imports => 4,
         }
     }
 }
@@ -344,6 +370,12 @@ enum PaneFocus {
 enum RightPane {
     Details,
     StatusLog,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ImportPaneFocus {
+    Routes,
+    Accounts,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -406,6 +438,15 @@ struct ApproveReceiptResponse {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+struct ReEditApprovedResponse {
+    status: String,
+    #[serde(rename = "source_path")]
+    _source_path: String,
+    updated_path: Option<String>,
+    normalize_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 struct ConfigResponse {
     config_path: String,
     project_root: String,
@@ -445,6 +486,78 @@ struct ApplyMatchResponse {
     _matched_receipt_path: Option<String>,
     #[serde(rename = "enriched_path")]
     _enriched_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ImportRouteOption {
+    csv_file: String,
+    source_path: String,
+    import_type: String,
+    importer_id: String,
+    rule_id: String,
+    stage: u32,
+}
+
+impl ImportRouteOption {
+    fn display_label(&self) -> String {
+        format!(
+            "{}  {}  {}",
+            self.import_type_label(),
+            self.importer_id,
+            self.csv_file
+        )
+    }
+
+    fn import_type_label(&self) -> &'static str {
+        match self.import_type.as_str() {
+            "cc" => "Credit Card",
+            "chequing" => "Chequing",
+            _ => "Unknown",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct RefreshImportPageResponse {
+    planner_status: String,
+    has_uncommitted_changes: bool,
+    #[serde(default)]
+    routes: Vec<ImportRouteOption>,
+    selected_source_path: Option<String>,
+    account_resolution: Option<ResolveImportAccountsResponse>,
+    planner_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ResolveImportAccountsResponse {
+    status: String,
+    #[serde(rename = "import_type")]
+    _import_type: String,
+    #[serde(rename = "csv_file")]
+    _csv_file: String,
+    #[serde(rename = "importer_id")]
+    _importer_id: String,
+    account_label: Option<String>,
+    account_options: Option<Vec<String>>,
+    as_of: Option<String>,
+    error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ApplyImportResponse {
+    status: String,
+    import_type: String,
+    result_file_path: Option<String>,
+    result_file_name: Option<String>,
+    account: Option<String>,
+    start_date: Option<String>,
+    end_date: Option<String>,
+    error: Option<String>,
+    #[serde(default)]
+    warnings: Vec<String>,
+    #[serde(default)]
+    validation_errors: Vec<String>,
+    summary: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -541,6 +654,7 @@ struct ReceiptFieldState {
 #[derive(Clone, Debug)]
 struct ReviewItemState {
     id: String,
+    is_new: bool,
     original_description: String,
     description: String,
     original_price: String,
@@ -552,6 +666,56 @@ struct ReviewItemState {
     notes: String,
     original_removed: bool,
     removed: bool,
+}
+
+impl ReviewItemState {
+    fn from_document(item: &Value) -> Option<Self> {
+        let item_id = item.get("id")?;
+        let id = json_value_to_text(Some(item_id));
+        if id.is_empty() {
+            return None;
+        }
+        Some(Self {
+            id,
+            is_new: false,
+            original_description: effective_item_text(item, "description"),
+            description: effective_item_text(item, "description"),
+            original_price: effective_item_text(item, "price"),
+            price: effective_item_text(item, "price"),
+            quantity: effective_item_text(item, "quantity"),
+            original_category: effective_item_category_text(item),
+            category: effective_item_category_text(item),
+            original_notes: effective_item_text(item, "notes"),
+            notes: effective_item_text(item, "notes"),
+            original_removed: effective_item_removed(item),
+            removed: effective_item_removed(item),
+        })
+    }
+
+    fn new_added(id: String) -> Self {
+        Self {
+            id,
+            is_new: true,
+            original_description: String::new(),
+            description: String::new(),
+            original_price: String::new(),
+            price: String::new(),
+            quantity: "1".to_string(),
+            original_category: String::new(),
+            category: String::new(),
+            original_notes: String::new(),
+            notes: String::new(),
+            original_removed: false,
+            removed: false,
+        }
+    }
+
+    fn has_meaningful_content(&self) -> bool {
+        !self.description.trim().is_empty()
+            || !self.price.trim().is_empty()
+            || !self.category.trim().is_empty()
+            || !self.notes.trim().is_empty()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -724,7 +888,237 @@ impl TextInputState {
     }
 }
 
+#[derive(Clone, Debug)]
+struct ImportPageState {
+    routes: Vec<ImportRouteOption>,
+    route_state: ListState,
+    focus: ImportPaneFocus,
+    has_uncommitted_changes: bool,
+    allow_uncommitted: bool,
+    planner_status: String,
+    planner_error: Option<String>,
+    account_label: Option<String>,
+    account_options: Vec<String>,
+    account_state: ListState,
+    account_as_of: Option<String>,
+    account_error: Option<String>,
+    last_result: Option<ApplyImportResponse>,
+}
+
+impl ImportPageState {
+    fn new() -> Self {
+        let mut route_state = ListState::default();
+        route_state.select(None);
+        let mut account_state = ListState::default();
+        account_state.select(None);
+        Self {
+            routes: Vec::new(),
+            route_state,
+            focus: ImportPaneFocus::Routes,
+            has_uncommitted_changes: false,
+            allow_uncommitted: false,
+            planner_status: "not_loaded".to_string(),
+            planner_error: None,
+            account_label: None,
+            account_options: Vec::new(),
+            account_state,
+            account_as_of: None,
+            account_error: None,
+            last_result: None,
+        }
+    }
+
+    fn selected_route(&self) -> Option<&ImportRouteOption> {
+        self.route_state
+            .selected()
+            .and_then(|index| self.routes.get(index))
+    }
+
+    fn selected_account(&self) -> Option<&str> {
+        self.account_state
+            .selected()
+            .and_then(|index| self.account_options.get(index))
+            .map(String::as_str)
+    }
+
+    fn set_routes(&mut self, routes: Vec<ImportRouteOption>, preferred_source_path: Option<&str>) {
+        let current_source = preferred_source_path
+            .map(ToOwned::to_owned)
+            .or_else(|| self.selected_route().map(|route| route.source_path.clone()));
+        self.routes = routes;
+        let selected_index = current_source.as_deref().and_then(|source_path| {
+            self.routes
+                .iter()
+                .position(|route| route.source_path == source_path)
+        });
+        match (self.routes.len(), selected_index) {
+            (0, _) => self.route_state.select(None),
+            (_, Some(index)) => self.route_state.select(Some(index)),
+            (_, None) => self.route_state.select(Some(0)),
+        }
+    }
+
+    fn move_route_selection(&mut self, delta: isize) {
+        let len = self.routes.len();
+        if len == 0 {
+            self.route_state.select(None);
+            return;
+        }
+        let current = self.route_state.selected().unwrap_or(0) as isize;
+        let next = (current + delta).clamp(0, (len - 1) as isize) as usize;
+        self.route_state.select(Some(next));
+    }
+
+    fn move_account_selection(&mut self, delta: isize) {
+        let len = self.account_options.len();
+        if len == 0 {
+            self.account_state.select(None);
+            return;
+        }
+        let current = self.account_state.selected().unwrap_or(0) as isize;
+        let next = (current + delta).clamp(0, (len - 1) as isize) as usize;
+        self.account_state.select(Some(next));
+    }
+
+    fn clear_account_resolution(&mut self) {
+        self.account_label = None;
+        self.account_options.clear();
+        self.account_state.select(None);
+        self.account_as_of = None;
+        self.account_error = None;
+    }
+
+    fn apply_account_resolution(
+        &mut self,
+        response: ResolveImportAccountsResponse,
+        preferred_account: Option<&str>,
+    ) {
+        self.account_label = response.account_label;
+        self.account_as_of = response.as_of;
+        self.account_error = if response.status == "error" {
+            response.error
+        } else {
+            None
+        };
+        self.account_options = response.account_options.unwrap_or_default();
+        let selected_index = preferred_account.and_then(|account| {
+            self.account_options
+                .iter()
+                .position(|candidate| candidate == account)
+        });
+        match (self.account_options.len(), selected_index) {
+            (0, _) => self.account_state.select(None),
+            (_, Some(index)) => self.account_state.select(Some(index)),
+            (_, None) => self.account_state.select(Some(0)),
+        }
+    }
+
+    fn detail_lines(&self) -> Vec<String> {
+        let mut lines = vec![
+            format!(
+                "Planner Status: {}",
+                match self.planner_status.as_str() {
+                    "not_loaded" => "not loaded (press `r` to load routes)",
+                    other => other,
+                }
+            ),
+            format!(
+                "Git Working Tree: {}",
+                if self.has_uncommitted_changes {
+                    "uncommitted changes detected"
+                } else {
+                    "clean"
+                }
+            ),
+            format!(
+                "Allow Import With Uncommitted Changes: {}",
+                if self.allow_uncommitted { "yes" } else { "no" }
+            ),
+        ];
+
+        if let Some(error) = &self.planner_error {
+            lines.push(String::new());
+            lines.push("Planner Error:".to_string());
+            lines.extend(error.lines().map(ToOwned::to_owned));
+        }
+
+        if let Some(route) = self.selected_route() {
+            lines.push(String::new());
+            lines.push("Selected Route".to_string());
+            lines.push(format!("CSV: {}", route.csv_file));
+            lines.push(format!("Source: {}", route.source_path));
+            lines.push(format!("Type: {}", route.import_type_label()));
+            lines.push(format!("Importer: {}", route.importer_id));
+            lines.push(format!("Rule: {}", route.rule_id));
+            lines.push(format!("Stage: {}", route.stage));
+        }
+
+        if self.account_label.is_some() || self.account_error.is_some() {
+            lines.push(String::new());
+            lines.push("Account Resolution".to_string());
+            if let Some(label) = &self.account_label {
+                lines.push(format!("Label: {label}"));
+            }
+            if let Some(as_of) = &self.account_as_of {
+                lines.push(format!("As Of: {as_of}"));
+            }
+            if let Some(account) = self.selected_account() {
+                lines.push(format!("Selected Account: {account}"));
+            }
+            if let Some(error) = &self.account_error {
+                lines.push("Error:".to_string());
+                lines.extend(error.lines().map(ToOwned::to_owned));
+            }
+        }
+
+        if let Some(result) = &self.last_result {
+            lines.push(String::new());
+            lines.push("Last Import Result".to_string());
+            lines.push(format!("Status: {}", result.status));
+            lines.push(format!("Import Type: {}", result.import_type));
+            if let Some(summary) = &result.summary {
+                lines.push(format!("Summary: {summary}"));
+            }
+            if let Some(account) = &result.account {
+                lines.push(format!("Account: {account}"));
+            }
+            if let Some(start_date) = &result.start_date {
+                lines.push(format!("Start Date: {start_date}"));
+            }
+            if let Some(end_date) = &result.end_date {
+                lines.push(format!("End Date: {end_date}"));
+            }
+            if let Some(path) = &result.result_file_path {
+                lines.push(format!("Result File: {path}"));
+            }
+            if let Some(name) = &result.result_file_name {
+                lines.push(format!("Result File Name: {name}"));
+            }
+            if let Some(error) = &result.error {
+                lines.push("Error:".to_string());
+                lines.extend(error.lines().map(ToOwned::to_owned));
+            }
+            if !result.warnings.is_empty() {
+                lines.push("Warnings:".to_string());
+                lines.extend(result.warnings.iter().map(|warning| format!("- {warning}")));
+            }
+            if !result.validation_errors.is_empty() {
+                lines.push("Validation Errors:".to_string());
+                lines.extend(
+                    result
+                        .validation_errors
+                        .iter()
+                        .map(|error| format!("- {error}")),
+                );
+            }
+        }
+
+        lines
+    }
+}
+
 struct ReviewState {
+    source_queue: Queue,
     path: String,
     receipt_dir: String,
     stage_file: String,
@@ -740,6 +1134,7 @@ struct ReviewState {
     item_editor: Option<ItemEditorState>,
     category_picker: Option<CategoryPickerState>,
     text_input: Option<TextInputState>,
+    next_added_item_number: usize,
 }
 
 struct ConfigState {
@@ -877,7 +1272,11 @@ impl MatchState {
 }
 
 impl ReviewState {
-    fn from_detail(detail: &ShowReceiptResponse, category_options: Vec<CategoryOption>) -> Self {
+    fn from_detail(
+        source_queue: Queue,
+        detail: &ShowReceiptResponse,
+        category_options: Vec<CategoryOption>,
+    ) -> Self {
         let mut field_state = ListState::default();
         field_state.select(Some(0));
         let mut item_state = ListState::default();
@@ -905,27 +1304,9 @@ impl ReviewState {
         let mut items = Vec::new();
         if let Some(item_docs) = document.get("items").and_then(Value::as_array) {
             for item in item_docs {
-                let Some(item_id) = item.get("id") else {
-                    continue;
-                };
-                let id = json_value_to_text(Some(item_id));
-                if id.is_empty() {
-                    continue;
+                if let Some(review_item) = ReviewItemState::from_document(item) {
+                    items.push(review_item);
                 }
-                items.push(ReviewItemState {
-                    id,
-                    original_description: effective_item_text(item, "description"),
-                    description: effective_item_text(item, "description"),
-                    original_price: effective_item_text(item, "price"),
-                    price: effective_item_text(item, "price"),
-                    quantity: effective_item_text(item, "quantity"),
-                    original_category: effective_item_category_text(item),
-                    category: effective_item_category_text(item),
-                    original_notes: effective_item_text(item, "notes"),
-                    notes: effective_item_text(item, "notes"),
-                    original_removed: effective_item_removed(item),
-                    removed: effective_item_removed(item),
-                });
             }
         }
         if !items.is_empty() {
@@ -933,6 +1314,7 @@ impl ReviewState {
         }
 
         Self {
+            source_queue,
             path: detail.path.clone(),
             receipt_dir: detail.summary.receipt_dir.clone(),
             stage_file: detail.summary.stage_file.clone(),
@@ -948,6 +1330,21 @@ impl ReviewState {
             item_editor: None,
             category_picker: None,
             text_input: None,
+            next_added_item_number: 1,
+        }
+    }
+
+    fn mode_label(&self) -> &'static str {
+        match self.source_queue {
+            Queue::Scanned => "Review Scanned Receipt",
+            Queue::Approved => "Review Approved Receipt",
+        }
+    }
+
+    fn submit_label(&self) -> &'static str {
+        match self.source_queue {
+            Queue::Scanned => "approve",
+            Queue::Approved => "save",
         }
     }
 
@@ -1043,6 +1440,25 @@ impl ReviewState {
             })
             .unwrap_or(0);
         self.category_picker = Some(CategoryPickerState::new(index, selected_index));
+    }
+
+    fn next_added_item_id(&mut self) -> String {
+        loop {
+            let candidate = format!("item-added-{:04}", self.next_added_item_number);
+            self.next_added_item_number += 1;
+            if self.items.iter().all(|item| item.id != candidate) {
+                return candidate;
+            }
+        }
+    }
+
+    fn add_item(&mut self) -> String {
+        let id = self.next_added_item_id();
+        self.items.push(ReviewItemState::new_added(id.clone()));
+        let index = self.items.len().saturating_sub(1);
+        self.item_state.select(Some(index));
+        self.item_editor = Some(ItemEditorState::new(index));
+        id
     }
 
     fn toggle_item_removed(&mut self, index: usize) -> Option<String> {
@@ -1154,6 +1570,37 @@ impl ReviewState {
 
         let mut items = Vec::new();
         for item in &self.items {
+            if item.is_new {
+                if !item.has_meaningful_content() {
+                    continue;
+                }
+                let mut item_review = serde_json::Map::new();
+                if !item.description.trim().is_empty() {
+                    item_review.insert(
+                        "description".to_string(),
+                        Value::String(item.description.clone()),
+                    );
+                }
+                if !item.price.trim().is_empty() {
+                    item_review.insert("price".to_string(), Value::String(item.price.clone()));
+                }
+                if !item.category.trim().is_empty() {
+                    item_review
+                        .insert("category".to_string(), Value::String(item.category.clone()));
+                }
+                if !item.notes.trim().is_empty() {
+                    item_review.insert("notes".to_string(), Value::String(item.notes.clone()));
+                }
+                if item.removed {
+                    item_review.insert("removed".to_string(), Value::Bool(true));
+                }
+                items.push(serde_json::json!({
+                    "id": item.id.clone(),
+                    "create": true,
+                    "review": Value::Object(item_review),
+                }));
+                continue;
+            }
             let mut item_review = serde_json::Map::new();
             if item.description != item.original_description {
                 item_review.insert(
@@ -1218,10 +1665,12 @@ impl ReviewState {
             } else {
                 item.quantity.as_str()
             };
+            let new_item = if item.is_new { " [new]" } else { "" };
             lines.push(format!(
-                "{:>2}. {}  x{}  ${}  [{}]",
+                "{:>2}. {}{}  x{}  ${}  [{}]",
                 index + 1,
                 item.description,
+                new_item,
                 quantity,
                 if item.price.is_empty() {
                     "0.00"
@@ -1263,6 +1712,35 @@ impl ReviewState {
             }
         }
         for item in &self.items {
+            if item.is_new {
+                if !item.has_meaningful_content() {
+                    continue;
+                }
+                let description = if item.description.trim().is_empty() {
+                    "<empty>"
+                } else {
+                    item.description.as_str()
+                };
+                let price = if item.price.trim().is_empty() {
+                    "<empty>"
+                } else {
+                    item.price.as_str()
+                };
+                let category = if item.category.trim().is_empty() {
+                    "<empty>"
+                } else {
+                    item.category.as_str()
+                };
+                let removed = if item.removed { " [removed]" } else { "" };
+                lines.push(format!(
+                    "{} added: {} | {} | {}{}",
+                    item.id, description, price, category, removed
+                ));
+                if !item.notes.trim().is_empty() {
+                    lines.push(format!("{} notes: <empty> -> {}", item.id, item.notes));
+                }
+                continue;
+            }
             if item.description != item.original_description {
                 lines.push(format!(
                     "{} description: {} -> {}",
@@ -1368,6 +1846,8 @@ struct App {
     serve_state: ServePageState,
     fava_state: FavaPageState,
     ocr_state: OcrPageState,
+    imports_state: ImportPageState,
+    last_receipts_refresh: Option<Instant>,
     last_serve_refresh: Option<Instant>,
     last_fava_refresh: Option<Instant>,
     last_ocr_refresh: Option<Instant>,
@@ -1409,6 +1889,8 @@ impl App {
             serve_state: ServePageState::new(),
             fava_state: FavaPageState::new(),
             ocr_state: OcrPageState::new(),
+            imports_state: ImportPageState::new(),
+            last_receipts_refresh: None,
             last_serve_refresh: None,
             last_fava_refresh: None,
             last_ocr_refresh: None,
@@ -1425,16 +1907,19 @@ impl App {
     fn page_help(page: Page) -> &'static str {
         match page {
             Page::Receipts => {
-                "1 receipts | 2 serve | 3 fava | 4 OCR | Tab switch queues | h/l pane focus | s toggle details/status | j/k move or scroll | e edit | m TUI match | M CLI match | arrows pan | r reload | a approve | c config | q quit"
+                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | Tab switch queues | h/l pane focus | s toggle details/status | j/k move or scroll | e edit | m TUI match | M CLI match | arrows pan | r reload | a approve | c config | q quit"
             }
             Page::Serve => {
-                "1 receipts | 2 serve | 3 fava | 4 OCR | s start `bb serve` | x stop `bb serve` | R restart | r refresh health | q quit"
+                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | s start `bb serve` | x stop `bb serve` | R restart | r refresh health | q quit"
             }
             Page::Fava => {
-                "1 receipts | 2 serve | 3 fava | 4 OCR | s start Fava | x stop Fava | R restart | r refresh health | q quit"
+                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | s start Fava | x stop Fava | R restart | r refresh health | q quit"
             }
             Page::Ocr => {
-                "1 receipts | 2 serve | 3 fava | 4 OCR | s start container | x stop container | R restart container | r refresh podman status/logs | q quit"
+                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | s start container | x stop container | R restart container | r refresh podman status/logs | q quit"
+            }
+            Page::Imports => {
+                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | r load routes | h/l or Tab switch pane | j/k move | Enter reload accounts | v view csv | x trash csv | a apply import | u toggle allow-uncommitted | q quit"
             }
         }
     }
@@ -1466,6 +1951,13 @@ impl App {
             .and_then(|index| receipts.get(index))
     }
 
+    fn selected_path_for_queue(&self, queue: Queue) -> Option<String> {
+        let receipts = self.receipts(queue);
+        self.selected_index(queue)
+            .and_then(|index| receipts.get(index))
+            .map(|receipt| receipt.path.clone())
+    }
+
     fn sync_selection(&mut self, queue: Queue) {
         let len = self.receipts(queue).len();
         let state = self.list_state_mut(queue);
@@ -1475,6 +1967,20 @@ impl App {
                 let current = state.selected().unwrap_or(0);
                 state.select(Some(current.min(len - 1)));
             }
+        }
+    }
+
+    fn sync_selection_to_path(&mut self, queue: Queue, preferred_path: Option<&str>) {
+        let selected_index = preferred_path.and_then(|path| {
+            self.receipts(queue)
+                .iter()
+                .position(|receipt| receipt.path == path)
+        });
+
+        match (self.receipts(queue).len(), selected_index) {
+            (0, _) => self.list_state_mut(queue).select(None),
+            (_, Some(index)) => self.list_state_mut(queue).select(Some(index)),
+            (_, None) => self.list_state_mut(queue).select(Some(0)),
         }
     }
 
@@ -1582,8 +2088,9 @@ impl App {
     fn refresh(&mut self) -> AppResult<()> {
         self.config = backend_get_config()?;
         self.reload_receipts()?;
+        self.last_receipts_refresh = Some(Instant::now());
         self.load_detail()?;
-        self.refresh_runtime_pages(true)?;
+        self.refresh_runtime_pages(false)?;
         self.set_status(format!(
             "Loaded {} scanned / {} approved receipt(s)",
             self.scanned.len(),
@@ -1593,10 +2100,46 @@ impl App {
     }
 
     fn reload_receipts(&mut self) -> AppResult<()> {
+        let selected_scanned = self.selected_path_for_queue(Queue::Scanned);
+        let selected_approved = self.selected_path_for_queue(Queue::Approved);
         self.scanned = backend_list_receipts(Queue::Scanned)?;
         self.approved = backend_list_receipts(Queue::Approved)?;
-        self.sync_selection(Queue::Scanned);
-        self.sync_selection(Queue::Approved);
+        self.sync_selection_to_path(Queue::Scanned, selected_scanned.as_deref());
+        self.sync_selection_to_path(Queue::Approved, selected_approved.as_deref());
+        Ok(())
+    }
+
+    fn refresh_receipts_page(&mut self, force: bool) -> AppResult<()> {
+        if self.active_page != Page::Receipts
+            || self.review_state.is_some()
+            || self.config_state.is_some()
+            || self.match_state.is_some()
+        {
+            return Ok(());
+        }
+
+        let now = Instant::now();
+        if !force
+            && self
+                .last_receipts_refresh
+                .is_some_and(|last| now.duration_since(last) < RECEIPTS_REFRESH_INTERVAL)
+        {
+            return Ok(());
+        }
+
+        let active_path_before = self.selected_path_for_queue(self.active_queue);
+        let detail_path_before = self.detail_path.clone();
+        self.reload_receipts()?;
+        self.last_receipts_refresh = Some(now);
+
+        let active_path_after = self.selected_path_for_queue(self.active_queue);
+        if force
+            || active_path_before != active_path_after
+            || detail_path_before != active_path_after
+        {
+            self.load_detail()?;
+        }
+
         Ok(())
     }
 
@@ -1684,10 +2227,6 @@ impl App {
             self.set_status("No receipt selected");
             return;
         };
-        if self.active_queue == Queue::Approved {
-            self.set_status("Approved receipts are re-edited in the external editor");
-            return;
-        }
         match backend_show_receipt(&receipt.path) {
             Ok(detail) => match backend_list_item_categories() {
                 Ok(categories) => {
@@ -1696,9 +2235,13 @@ impl App {
                         account: String::new(),
                     }];
                     category_options.extend(categories);
-                    self.review_state = Some(ReviewState::from_detail(&detail, category_options));
+                    self.review_state = Some(ReviewState::from_detail(
+                        self.active_queue,
+                        &detail,
+                        category_options,
+                    ));
                     self.set_status(
-                            "Review receipt: h/l switch pane | Enter item editor | v price | n notes | c choose category | x toggle removed | p preview | a approve | Esc cancel",
+                            "Review receipt: h/l switch pane | Enter item editor | i add item | v price | n notes | c choose category | x toggle removed | p preview | a submit | Esc cancel",
                         );
                 }
                 Err(error) => {
@@ -1717,19 +2260,38 @@ impl App {
             return Ok(());
         };
         let payload = serde_json::to_string(&review_state.payload())?;
-        let result = backend_approve_scanned_with_review(&review_state.path, &payload)?;
+        let source_queue = review_state.source_queue;
+        let source_path = review_state.path.clone();
+        let result_path = match source_queue {
+            Queue::Scanned => {
+                let result = backend_approve_scanned_with_review(&source_path, &payload)?;
+                result.approved_path
+            }
+            Queue::Approved => {
+                let result = backend_re_edit_approved_with_review(&source_path, &payload)?;
+                result
+                    .updated_path
+                    .ok_or_else(|| "missing updated path from approved re-edit".to_string())?
+            }
+        };
         self.review_state = None;
         self.refresh()?;
-        self.active_queue = Queue::Approved;
-        if !self.select_receipt_by_path(Queue::Approved, &result.approved_path) {
-            self.sync_selection(Queue::Approved);
+        self.active_queue = match source_queue {
+            Queue::Scanned => Queue::Approved,
+            Queue::Approved => Queue::Approved,
+        };
+        if !self.select_receipt_by_path(self.active_queue, &result_path) {
+            self.sync_selection(self.active_queue);
         }
         self.focus = PaneFocus::List;
         self.load_detail()?;
-        self.set_status(format!(
-            "Approved {} -> {}",
-            result.source_path, result.approved_path
-        ));
+        self.set_status(match source_queue {
+            Queue::Scanned => format!("Approved {} -> {}", source_path, result_path),
+            Queue::Approved => format!(
+                "Saved approved review stage {} -> {}",
+                source_path, result_path
+            ),
+        });
         Ok(())
     }
 
@@ -1823,6 +2385,129 @@ impl App {
         Ok(())
     }
 
+    fn refresh_imports_page(&mut self) -> AppResult<()> {
+        let preferred_source = self
+            .imports_state
+            .selected_route()
+            .map(|route| route.source_path.clone());
+        let preferred_account = self.imports_state.selected_account().map(str::to_string);
+        let response = backend_refresh_import_page(preferred_source.as_deref())?;
+        self.imports_state.has_uncommitted_changes = response.has_uncommitted_changes;
+        self.imports_state.planner_status = response.planner_status;
+        self.imports_state.planner_error = response.planner_error;
+        self.imports_state
+            .set_routes(response.routes, response.selected_source_path.as_deref());
+
+        match response.account_resolution {
+            Some(account_resolution) => self
+                .imports_state
+                .apply_account_resolution(account_resolution, preferred_account.as_deref()),
+            None => self.imports_state.clear_account_resolution(),
+        }
+        Ok(())
+    }
+
+    fn resolve_selected_import_accounts(&mut self) -> AppResult<()> {
+        let selected_account = self.imports_state.selected_account().map(str::to_string);
+        let Some(route) = self.imports_state.selected_route().cloned() else {
+            self.imports_state.clear_account_resolution();
+            self.set_status("No import route selected. Press `r` to load statement routes.");
+            return Ok(());
+        };
+        self.imports_state.clear_account_resolution();
+        let response = backend_resolve_import_accounts(
+            &route.import_type,
+            &route.csv_file,
+            &route.importer_id,
+        )?;
+        self.imports_state
+            .apply_account_resolution(response, selected_account.as_deref());
+        Ok(())
+    }
+
+    fn move_import_route_selection(&mut self, delta: isize) -> AppResult<()> {
+        let before = self
+            .imports_state
+            .selected_route()
+            .map(|route| route.source_path.clone());
+        self.imports_state.move_route_selection(delta);
+        let after = self
+            .imports_state
+            .selected_route()
+            .map(|route| route.source_path.clone());
+        if before != after {
+            self.resolve_selected_import_accounts()?;
+        }
+        Ok(())
+    }
+
+    fn apply_selected_import(&mut self) -> AppResult<()> {
+        let Some(route) = self.imports_state.selected_route().cloned() else {
+            self.set_status("No import route selected. Press `r` to load statement routes.");
+            return Ok(());
+        };
+        let selected_account = self.imports_state.selected_account().map(ToOwned::to_owned);
+        let response = backend_apply_import(
+            &route.import_type,
+            &route.csv_file,
+            &route.importer_id,
+            selected_account.as_deref(),
+            self.imports_state.allow_uncommitted,
+        )?;
+        let status = match response.status.as_str() {
+            "ok" => response
+                .summary
+                .clone()
+                .unwrap_or_else(|| format!("Imported {}", route.csv_file)),
+            "aborted" => response
+                .error
+                .clone()
+                .unwrap_or_else(|| "Import aborted".to_string()),
+            _ => response
+                .error
+                .clone()
+                .unwrap_or_else(|| format!("Import failed: {}", response.status)),
+        };
+        self.imports_state.last_result = Some(response);
+        self.refresh_imports_page()?;
+        self.set_status(status);
+        Ok(())
+    }
+
+    fn selected_import_source_path(&mut self) -> AppResult<Option<String>> {
+        let Some(route) = self.imports_state.selected_route().cloned() else {
+            self.set_status("No import route selected. Press `r` to load statement routes.");
+            return Ok(None);
+        };
+        if Path::new(&route.source_path).exists() {
+            return Ok(Some(route.source_path));
+        }
+        self.refresh_imports_page()?;
+        self.set_status("Selected import file changed on disk; refreshed statement routes");
+        Ok(None)
+    }
+
+    fn trash_selected_import_csv(&mut self) -> AppResult<()> {
+        let Some(path) = self.selected_import_source_path()? else {
+            return Ok(());
+        };
+        let output = process_util::trash_file(&path)?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            return Err(format!(
+                "trash failed for {}\nstdout:\n{}\nstderr:\n{}",
+                path,
+                stdout.trim(),
+                stderr.trim()
+            )
+            .into());
+        }
+        self.refresh_imports_page()?;
+        self.set_status(format!("Moved {} to Trash", path));
+        Ok(())
+    }
+
     fn refresh_current_page(&mut self) -> AppResult<()> {
         match self.active_page {
             Page::Receipts => self.refresh(),
@@ -1844,10 +2529,16 @@ impl App {
                 ));
                 Ok(())
             }
+            Page::Imports => {
+                self.refresh_imports_page()?;
+                self.set_status("Refreshed statement import routes");
+                Ok(())
+            }
         }
     }
 
     fn refresh_runtime_pages(&mut self, force: bool) -> AppResult<()> {
+        self.refresh_receipts_page(force)?;
         self.poll_serve_process()?;
         self.poll_fava_process()?;
         let now = Instant::now();
@@ -2237,8 +2928,82 @@ fn backend_approve_scanned_with_review(
     Ok(response)
 }
 
+fn backend_re_edit_approved_with_review(
+    path: &str,
+    payload: &str,
+) -> AppResult<ReEditApprovedResponse> {
+    let stdout = run_backend_with_input(
+        &["api", "re-edit-approved-with-review", path],
+        Some(payload),
+    )?;
+    let response: ReEditApprovedResponse = serde_json::from_str(&stdout)?;
+    if response.status != "updated" {
+        return Err(format!(
+            "unexpected re-edit status: {} ({})",
+            response.status,
+            response
+                .normalize_error
+                .as_deref()
+                .unwrap_or("no normalize error provided")
+        )
+        .into());
+    }
+    Ok(response)
+}
+
 fn backend_get_config() -> AppResult<ConfigResponse> {
     let stdout = run_backend(&["api", "get-config"])?;
+    Ok(serde_json::from_str(&stdout)?)
+}
+
+fn backend_refresh_import_page(
+    preferred_source_path: Option<&str>,
+) -> AppResult<RefreshImportPageResponse> {
+    let payload = serde_json::json!({
+        "preferred_source_path": preferred_source_path,
+    });
+    let stdout = run_backend_with_input(
+        &["api", "refresh-import-page"],
+        Some(&serde_json::to_string(&payload)?),
+    )?;
+    Ok(serde_json::from_str(&stdout)?)
+}
+
+fn backend_resolve_import_accounts(
+    import_type: &str,
+    csv_file: &str,
+    importer_id: &str,
+) -> AppResult<ResolveImportAccountsResponse> {
+    let payload = serde_json::json!({
+        "import_type": import_type,
+        "csv_file": csv_file,
+        "importer_id": importer_id,
+    });
+    let stdout = run_backend_with_input(
+        &["api", "resolve-import-accounts"],
+        Some(&serde_json::to_string(&payload)?),
+    )?;
+    Ok(serde_json::from_str(&stdout)?)
+}
+
+fn backend_apply_import(
+    import_type: &str,
+    csv_file: &str,
+    importer_id: &str,
+    selected_account: Option<&str>,
+    allow_uncommitted: bool,
+) -> AppResult<ApplyImportResponse> {
+    let payload = serde_json::json!({
+        "import_type": import_type,
+        "csv_file": csv_file,
+        "importer_id": importer_id,
+        "selected_account": selected_account,
+        "allow_uncommitted": allow_uncommitted,
+    });
+    let stdout = run_backend_with_input(
+        &["api", "import-apply"],
+        Some(&serde_json::to_string(&payload)?),
+    )?;
     Ok(serde_json::from_str(&stdout)?)
 }
 
@@ -2976,6 +3741,7 @@ fn effective_item_removed(item: &Value) -> bool {
 }
 
 fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
+    frame.render_widget(Clear, frame.area());
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -2985,18 +3751,24 @@ fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
         ])
         .split(frame.area());
 
-    let tabs = Tabs::new(["Receipts [1]", "Serve [2]", "Fava [3]", "OCR [4]"])
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Pages (press 1/2/3/4)"),
-        )
-        .select(app.active_page.tab_index())
-        .highlight_style(
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        );
+    let tabs = Tabs::new([
+        "Receipts [1]",
+        "Serve [2]",
+        "Fava [3]",
+        "OCR [4]",
+        "Imports [5]",
+    ])
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Pages (press 1/2/3/4/5)"),
+    )
+    .select(app.active_page.tab_index())
+    .highlight_style(
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    );
     frame.render_widget(tabs, chunks[0]);
 
     if let Some(review_state) = &mut app.review_state {
@@ -3007,6 +3779,7 @@ fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
             Page::Serve => render_serve_page(frame, app, chunks[1]),
             Page::Fava => render_fava_page(frame, app, chunks[1]),
             Page::Ocr => render_ocr_page(frame, app, chunks[1]),
+            Page::Imports => render_imports_page(frame, app, chunks[1]),
         }
     }
 
@@ -3249,6 +4022,110 @@ fn render_ocr_page(frame: &mut ratatui::Frame<'_>, app: &App, area: ratatui::lay
     frame.render_widget(logs, sections[1]);
 }
 
+fn render_imports_page(frame: &mut ratatui::Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(6), Constraint::Min(10)])
+        .split(area);
+
+    let summary = Paragraph::new(format!(
+        "Detected routes: {}\nWorking tree: {}\nAllow import with uncommitted changes: {}\nSelected route: {}",
+        app.imports_state.routes.len(),
+        if app.imports_state.has_uncommitted_changes {
+            "uncommitted changes detected"
+        } else {
+            "clean"
+        },
+        if app.imports_state.allow_uncommitted {
+            "yes"
+        } else {
+            "no"
+        },
+        app.imports_state
+            .selected_route()
+            .map(|route| route.csv_file.as_str())
+            .unwrap_or("<none>")
+    ))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Statement Import (`a` apply, `u` toggle allow-uncommitted)"),
+    )
+    .wrap(Wrap { trim: true });
+    frame.render_widget(summary, sections[0]);
+
+    let body = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
+        .split(sections[1]);
+    let right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(10), Constraint::Min(8)])
+        .split(body[1]);
+
+    let route_items: Vec<ListItem> = app
+        .imports_state
+        .routes
+        .iter()
+        .map(|route| ListItem::new(Line::from(route.display_label())))
+        .collect();
+    let routes = List::new(route_items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!("Routes ({})", app.imports_state.routes.len()))
+                .border_style(if app.imports_state.focus == ImportPaneFocus::Routes {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default()
+                }),
+        )
+        .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+        .highlight_symbol(">> ");
+    frame.render_stateful_widget(routes, body[0], &mut app.imports_state.route_state);
+
+    let account_items: Vec<ListItem> = app
+        .imports_state
+        .account_options
+        .iter()
+        .map(|account| ListItem::new(Line::from(account.clone())))
+        .collect();
+    let account_title = app
+        .imports_state
+        .account_label
+        .clone()
+        .unwrap_or_else(|| "Accounts".to_string());
+    let accounts = List::new(account_items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(account_title)
+                .border_style(if app.imports_state.focus == ImportPaneFocus::Accounts {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default()
+                }),
+        )
+        .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+        .highlight_symbol(">> ");
+    frame.render_stateful_widget(accounts, right[0], &mut app.imports_state.account_state);
+
+    let details = Paragraph::new(Text::from(
+        app.imports_state
+            .detail_lines()
+            .into_iter()
+            .map(Line::from)
+            .collect::<Vec<_>>(),
+    ))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Import Details"),
+    )
+    .wrap(Wrap { trim: false });
+    frame.render_widget(details, right[1]);
+}
+
 fn render_review_screen(
     frame: &mut ratatui::Frame<'_>,
     review_state: &mut ReviewState,
@@ -3264,8 +4141,10 @@ fn render_review_screen(
         .split(area);
 
     let header = Paragraph::new(format!(
-        "Review Scanned Receipt  |  {} / {}",
-        review_state.receipt_dir, review_state.stage_file
+        "{}  |  {} / {}",
+        review_state.mode_label(),
+        review_state.receipt_dir,
+        review_state.stage_file
     ))
     .block(Block::default().borders(Borders::ALL).title("Review Mode"))
     .wrap(Wrap { trim: true });
@@ -3285,6 +4164,7 @@ fn render_review_screen(
         .iter()
         .map(|item| {
             let removed = if item.removed { " [removed]" } else { "" };
+            let new_item = if item.is_new { " [new]" } else { "" };
             let notes = if item.notes.trim().is_empty() {
                 ""
             } else {
@@ -3296,8 +4176,9 @@ fn render_review_screen(
                 item.category.as_str()
             };
             ListItem::new(Line::from(format!(
-                "{}  ${}  {}{}{}",
+                "{}{}  ${}  {}{}{}",
                 item.description,
+                new_item,
                 if item.price.is_empty() {
                     "0.00"
                 } else {
@@ -3382,9 +4263,10 @@ fn render_review_screen(
     .wrap(Wrap { trim: false });
     frame.render_widget(preview, right[1]);
 
-    let help = Paragraph::new(
-        "h/l pane  |  j/k move  |  Enter open item editor / edit field  |  v price  |  n notes  |  c category picker  |  x toggle removed  |  p preview tab  |  a approve  |  Esc cancel",
-    )
+    let help = Paragraph::new(format!(
+        "h/l pane  |  j/k move  |  Enter open item editor / edit field  |  i add item  |  v price  |  n notes  |  c category picker  |  x toggle removed  |  p preview tab  |  a {}  |  Esc cancel",
+        review_state.submit_label()
+    ))
     .wrap(Wrap { trim: true });
     frame.render_widget(help, rows[2]);
 
@@ -3416,7 +4298,11 @@ fn render_item_editor_modal(frame: &mut ratatui::Frame<'_>, review_state: &mut R
     frame.render_widget(
         Block::default()
             .borders(Borders::ALL)
-            .title(format!("Edit Item ({})", item.id))
+            .title(if item.is_new {
+                format!("Edit New Item ({})", item.id)
+            } else {
+                format!("Edit Item ({})", item.id)
+            })
             .style(popup_style()),
         popup,
     );
@@ -3774,7 +4660,10 @@ fn setup_terminal() -> AppResult<Terminal<CrosstermBackend<Stdout>>> {
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
-    Ok(Terminal::new(backend)?)
+    let mut terminal = Terminal::new(backend)?;
+    terminal.clear()?;
+    terminal.hide_cursor()?;
+    Ok(terminal)
 }
 
 fn restore_terminal(mut terminal: Terminal<CrosstermBackend<Stdout>>) -> AppResult<()> {
@@ -3821,9 +4710,6 @@ fn run_app(
         let Event::Key(key) = event::read()? else {
             continue;
         };
-        if key.kind != KeyEventKind::Press {
-            continue;
-        }
 
         if app.review_state.is_some() {
             let mut review_cancelled = false;
@@ -4009,6 +4895,14 @@ fn run_app(
                             ReviewPane::Fields => review_state.start_selected_field_edit(),
                             ReviewPane::Preview => {}
                         },
+                        (KeyCode::Char('i'), _) => {
+                            if review_state.pane == ReviewPane::Items {
+                                let item_id = review_state.add_item();
+                                status_message = Some(format!(
+                                    "Added {item_id}; blank new items are ignored on submit"
+                                ));
+                            }
+                        }
                         (KeyCode::Char('c'), _) => {
                             if review_state.pane == ReviewPane::Items {
                                 review_state.open_selected_category_picker();
@@ -4129,6 +5023,10 @@ fn run_app(
                     app.set_error(error.to_string());
                 }
             }
+            (KeyCode::Char('5'), _) => {
+                app.switch_page(Page::Imports);
+                app.set_status("Switched to Imports. Press `r` to load statement routes.");
+            }
             (KeyCode::Char('r'), _) => {
                 if let Err(error) = app.refresh_current_page() {
                     app.set_error(error.to_string());
@@ -4197,39 +5095,7 @@ fn run_app(
                         }
                     }
                     (KeyCode::Char('e'), _) => {
-                        if app.active_queue == Queue::Approved {
-                            let Some(path) =
-                                app.selected_receipt().map(|receipt| receipt.path.clone())
-                            else {
-                                app.set_status("No approved receipt selected");
-                                continue;
-                            };
-                            suspend_terminal(terminal)?;
-                            let reedit_result = run_backend_interactive(&["re-edit", &path]);
-                            resume_terminal(terminal)?;
-                            match reedit_result {
-                                Ok(0) => {
-                                    if let Err(error) = app.refresh() {
-                                        app.set_error(error.to_string());
-                                        continue;
-                                    }
-                                    app.show_status_log();
-                                    app.set_status(format!("Returned from external editor for approved receipt: {path}"));
-                                }
-                                Ok(exit_code) => {
-                                    app.show_status_log();
-                                    app.set_error(format!(
-                                        "`bb re-edit` exited with code {exit_code}."
-                                    ));
-                                }
-                                Err(error) => {
-                                    app.show_status_log();
-                                    app.set_error(format!("Failed to run `bb re-edit`: {error}"));
-                                }
-                            }
-                        } else {
-                            app.begin_edit_selected();
-                        }
+                        app.begin_edit_selected();
                     }
                     (KeyCode::Char('m'), KeyModifiers::NONE) => {
                         if let Err(error) = app.begin_match_selected_approved() {
@@ -4328,6 +5194,94 @@ fn run_app(
                         app.set_error(error.to_string());
                     }
                 }
+                Page::Imports => match (key.code, key.modifiers) {
+                    (KeyCode::Tab, _)
+                    | (KeyCode::Char('l'), KeyModifiers::NONE)
+                    | (KeyCode::Right, _) => {
+                        app.imports_state.focus = ImportPaneFocus::Accounts;
+                    }
+                    (KeyCode::BackTab, _)
+                    | (KeyCode::Char('h'), KeyModifiers::NONE)
+                    | (KeyCode::Left, _) => {
+                        app.imports_state.focus = ImportPaneFocus::Routes;
+                    }
+                    (KeyCode::Down, _) | (KeyCode::Char('j'), KeyModifiers::NONE) => {
+                        if app.imports_state.focus == ImportPaneFocus::Routes {
+                            if let Err(error) = app.move_import_route_selection(1) {
+                                app.set_error(error.to_string());
+                            }
+                        } else {
+                            app.imports_state.move_account_selection(1);
+                        }
+                    }
+                    (KeyCode::Up, _) | (KeyCode::Char('k'), KeyModifiers::NONE) => {
+                        if app.imports_state.focus == ImportPaneFocus::Routes {
+                            if let Err(error) = app.move_import_route_selection(-1) {
+                                app.set_error(error.to_string());
+                            }
+                        } else {
+                            app.imports_state.move_account_selection(-1);
+                        }
+                    }
+                    (KeyCode::Enter, _) => {
+                        if let Err(error) = app.resolve_selected_import_accounts() {
+                            app.set_error(error.to_string());
+                        } else {
+                            app.set_status("Reloaded account choices for selected statement");
+                        }
+                    }
+                    (KeyCode::Char('u'), KeyModifiers::NONE) => {
+                        app.imports_state.allow_uncommitted = !app.imports_state.allow_uncommitted;
+                        app.set_status(format!(
+                            "Allow import with uncommitted changes: {}",
+                            if app.imports_state.allow_uncommitted {
+                                "enabled"
+                            } else {
+                                "disabled"
+                            }
+                        ));
+                    }
+                    (KeyCode::Char('a'), _) => {
+                        if let Err(error) = app.apply_selected_import() {
+                            app.set_error(error.to_string());
+                        }
+                    }
+                    (KeyCode::Char('v'), KeyModifiers::NONE) => {
+                        match app.selected_import_source_path() {
+                            Ok(Some(path)) => {
+                                suspend_terminal(terminal)?;
+                                let view_result = process_util::view_csv_file(&path);
+                                resume_terminal(terminal)?;
+                                match view_result {
+                                    Ok(status) if status.success() => {
+                                        app.set_status(format!("Viewed {}", path));
+                                    }
+                                    Ok(status) => {
+                                        app.set_error(format!(
+                                            "CSV viewer exited with code {} for {}",
+                                            status
+                                                .code()
+                                                .map(|code| code.to_string())
+                                                .unwrap_or_else(|| "signal".to_string()),
+                                            path
+                                        ));
+                                    }
+                                    Err(error) => {
+                                        app.set_error(format!("Failed to view {}: {}", path, error))
+                                    }
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(error) => app.set_error(error.to_string()),
+                        }
+                    }
+                    (KeyCode::Char('x'), KeyModifiers::NONE) => {
+                        if let Err(error) = app.trash_selected_import_csv() {
+                            app.set_error(error.to_string());
+                        }
+                    }
+                    _ => {}
+                },
             },
         }
     }
@@ -4350,6 +5304,31 @@ pub fn run(quit_after_launch: bool) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sample_review_detail() -> ShowReceiptResponse {
+        ShowReceiptResponse {
+            path: "/tmp/review_stage_1.receipt.json".to_string(),
+            summary: ReceiptSummary {
+                path: "/tmp/review_stage_1.receipt.json".to_string(),
+                receipt_dir: "2026-03-07_costco_466_68_ad51".to_string(),
+                stage_file: "review_stage_1.receipt.json".to_string(),
+                merchant: Some("COSTCO".to_string()),
+                date: Some("2026-03-07".to_string()),
+                total: Some("466.68".to_string()),
+            },
+            document: serde_json::json!({
+                "receipt": {
+                    "merchant": "COSTCO",
+                    "date": "2026-03-07",
+                    "total": "466.68"
+                },
+                "items": [],
+                "debug": {
+                    "ocr_payload": {"detections": []}
+                }
+            }),
+        }
+    }
 
     #[test]
     fn render_detail_lines_scanned_shows_human_readable_summary() {
@@ -4453,5 +5432,226 @@ mod tests {
         assert!(rendered.contains("    Notes: gift"));
         assert!(!rendered.contains("REMOVE ME"));
         assert!(!rendered.contains("\"debug\""));
+    }
+
+    #[test]
+    fn review_payload_includes_create_patch_for_added_items() {
+        let detail = sample_review_detail();
+        let mut review_state = ReviewState::from_detail(Queue::Approved, &detail, Vec::new());
+
+        review_state.add_item();
+        let item = review_state.items.get_mut(0).expect("new item");
+        item.description = "BANANAS".to_string();
+        item.price = "3.99".to_string();
+        item.category = "Expenses:Food:Grocery:Fruit".to_string();
+        item.notes = "manual add".to_string();
+
+        assert_eq!(
+            review_state.payload(),
+            serde_json::json!({
+                "review": {},
+                "items": [
+                    {
+                        "id": "item-added-0001",
+                        "create": true,
+                        "review": {
+                            "description": "BANANAS",
+                            "price": "3.99",
+                            "category": "Expenses:Food:Grocery:Fruit",
+                            "notes": "manual add",
+                        }
+                    }
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn review_payload_ignores_blank_added_item_drafts() {
+        let detail = sample_review_detail();
+        let mut review_state = ReviewState::from_detail(Queue::Approved, &detail, Vec::new());
+
+        review_state.add_item();
+
+        assert_eq!(
+            review_state.payload(),
+            serde_json::json!({
+                "review": {},
+                "items": []
+            })
+        );
+    }
+
+    #[test]
+    fn sync_selection_to_path_preserves_selected_receipt_across_insertions() {
+        let mut app = App::new();
+        app.scanned = vec![
+            ReceiptSummary {
+                path: "/tmp/older.receipt.json".to_string(),
+                receipt_dir: "older".to_string(),
+                stage_file: "parsed.receipt.json".to_string(),
+                merchant: Some("OLDER".to_string()),
+                date: Some("2026-03-09".to_string()),
+                total: Some("10.00".to_string()),
+            },
+            ReceiptSummary {
+                path: "/tmp/current.receipt.json".to_string(),
+                receipt_dir: "current".to_string(),
+                stage_file: "parsed.receipt.json".to_string(),
+                merchant: Some("CURRENT".to_string()),
+                date: Some("2026-03-10".to_string()),
+                total: Some("20.00".to_string()),
+            },
+        ];
+        app.scanned_state.select(Some(1));
+
+        let selected_path = app.selected_path_for_queue(Queue::Scanned);
+
+        app.scanned = vec![
+            ReceiptSummary {
+                path: "/tmp/newest.receipt.json".to_string(),
+                receipt_dir: "newest".to_string(),
+                stage_file: "parsed.receipt.json".to_string(),
+                merchant: Some("NEWEST".to_string()),
+                date: Some("2026-03-11".to_string()),
+                total: Some("30.00".to_string()),
+            },
+            ReceiptSummary {
+                path: "/tmp/older.receipt.json".to_string(),
+                receipt_dir: "older".to_string(),
+                stage_file: "parsed.receipt.json".to_string(),
+                merchant: Some("OLDER".to_string()),
+                date: Some("2026-03-09".to_string()),
+                total: Some("10.00".to_string()),
+            },
+            ReceiptSummary {
+                path: "/tmp/current.receipt.json".to_string(),
+                receipt_dir: "current".to_string(),
+                stage_file: "parsed.receipt.json".to_string(),
+                merchant: Some("CURRENT".to_string()),
+                date: Some("2026-03-10".to_string()),
+                total: Some("20.00".to_string()),
+            },
+        ];
+
+        app.sync_selection_to_path(Queue::Scanned, selected_path.as_deref());
+
+        assert_eq!(app.scanned_state.selected(), Some(2));
+        assert_eq!(
+            app.selected_path_for_queue(Queue::Scanned).as_deref(),
+            Some("/tmp/current.receipt.json")
+        );
+    }
+
+    #[test]
+    fn import_page_state_preserves_selected_route_by_source_path() {
+        let mut state = ImportPageState::new();
+        state.set_routes(
+            vec![
+                ImportRouteOption {
+                    csv_file: "statement.csv".to_string(),
+                    source_path: "/tmp/statement.csv".to_string(),
+                    import_type: "cc".to_string(),
+                    importer_id: "bmo".to_string(),
+                    rule_id: "cc-bmo-statement".to_string(),
+                    stage: 1,
+                },
+                ImportRouteOption {
+                    csv_file: "Preferred_Package_foo.csv".to_string(),
+                    source_path: "/tmp/Preferred_Package_foo.csv".to_string(),
+                    import_type: "chequing".to_string(),
+                    importer_id: "scotia_chequing".to_string(),
+                    rule_id: "chequing-scotia".to_string(),
+                    stage: 1,
+                },
+            ],
+            None,
+        );
+        state.route_state.select(Some(1));
+
+        state.set_routes(
+            vec![
+                ImportRouteOption {
+                    csv_file: "new.csv".to_string(),
+                    source_path: "/tmp/new.csv".to_string(),
+                    import_type: "cc".to_string(),
+                    importer_id: "rogers".to_string(),
+                    rule_id: "cc-rogers".to_string(),
+                    stage: 1,
+                },
+                ImportRouteOption {
+                    csv_file: "Preferred_Package_foo.csv".to_string(),
+                    source_path: "/tmp/Preferred_Package_foo.csv".to_string(),
+                    import_type: "chequing".to_string(),
+                    importer_id: "scotia_chequing".to_string(),
+                    rule_id: "chequing-scotia".to_string(),
+                    stage: 1,
+                },
+            ],
+            None,
+        );
+
+        assert_eq!(state.route_state.selected(), Some(1));
+        assert_eq!(
+            state
+                .selected_route()
+                .map(|route| route.source_path.as_str()),
+            Some("/tmp/Preferred_Package_foo.csv")
+        );
+    }
+
+    #[test]
+    fn import_page_detail_lines_include_last_result_and_warnings() {
+        let mut state = ImportPageState::new();
+        state.planner_status = "ready".to_string();
+        state.has_uncommitted_changes = true;
+        state.allow_uncommitted = true;
+        state.set_routes(
+            vec![ImportRouteOption {
+                csv_file: "statement.csv".to_string(),
+                source_path: "/tmp/statement.csv".to_string(),
+                import_type: "cc".to_string(),
+                importer_id: "bmo".to_string(),
+                rule_id: "cc-bmo-statement".to_string(),
+                stage: 1,
+            }],
+            None,
+        );
+        state.apply_account_resolution(
+            ResolveImportAccountsResponse {
+                status: "ready".to_string(),
+                _import_type: "cc".to_string(),
+                _csv_file: "statement.csv".to_string(),
+                _importer_id: "bmo".to_string(),
+                account_label: Some("BMO credit card".to_string()),
+                account_options: Some(vec!["Liabilities:CreditCard:Primary:BMO:CardA".to_string()]),
+                as_of: Some("2026-03-04".to_string()),
+                error: None,
+            },
+            None,
+        );
+        state.last_result = Some(ApplyImportResponse {
+            status: "ok".to_string(),
+            import_type: "cc".to_string(),
+            result_file_path: Some("/tmp/carda_0304_0304.beancount".to_string()),
+            result_file_name: Some("carda_0304_0304.beancount".to_string()),
+            account: Some("Liabilities:CreditCard:Primary:BMO:CardA".to_string()),
+            start_date: Some("0304".to_string()),
+            end_date: Some("0304".to_string()),
+            error: None,
+            warnings: vec!["Ledger validation found errors after import.".to_string()],
+            validation_errors: vec!["Validation error 1".to_string()],
+            summary: Some("Import complete: /tmp/carda_0304_0304.beancount".to_string()),
+        });
+
+        let rendered = state.detail_lines().join("\n");
+
+        assert!(rendered.contains("Planner Status: ready"));
+        assert!(rendered.contains("Git Working Tree: uncommitted changes detected"));
+        assert!(rendered.contains("Selected Route"));
+        assert!(rendered.contains("Selected Account: Liabilities:CreditCard:Primary:BMO:CardA"));
+        assert!(rendered.contains("Last Import Result"));
+        assert!(rendered.contains("Warnings:"));
+        assert!(rendered.contains("Validation Errors:"));
     }
 }

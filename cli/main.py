@@ -104,6 +104,11 @@ Notes:
     api_subparsers.add_parser("list-item-categories", help="List available item categories as JSON")
     api_subparsers.add_parser("get-config", help="Get TUI/backend config as JSON")
     api_subparsers.add_parser("set-config", help="Persist TUI/backend config from stdin JSON")
+    api_subparsers.add_parser("plan-import", help="Plan statement import from stdin JSON")
+    api_subparsers.add_parser("refresh-import-page", help="Refresh the Imports page from stdin JSON")
+    api_subparsers.add_parser("resolve-import-accounts", help="List candidate import accounts from stdin JSON")
+    api_subparsers.add_parser("apply-import", help="Apply one statement import from stdin JSON")
+    api_subparsers.add_parser("import-apply", help="Apply one statement import with a JSON-only response")
 
     show_receipt_parser = api_subparsers.add_parser("show-receipt", help="Show one staged receipt document as JSON")
     show_receipt_parser.add_argument("path", help="Path to a staged receipt JSON file")
@@ -214,15 +219,20 @@ Notes:
         return _run_legacy_command(cmd_re_edit, args)
     elif args.command == "api":
         from beanbeaver.cli.api import (
+            cmd_api_apply_import,
             cmd_api_apply_match,
             cmd_api_approve_scanned,
             cmd_api_approve_scanned_with_review,
             cmd_api_get_config,
+            cmd_api_import_apply,
             cmd_api_list_approved,
             cmd_api_list_item_categories,
             cmd_api_list_scanned,
             cmd_api_match_candidates,
+            cmd_api_plan_import,
+            cmd_api_refresh_import_page,
             cmd_api_re_edit_approved_with_review,
+            cmd_api_resolve_import_accounts,
             cmd_api_set_config,
             cmd_api_show_receipt,
         )
@@ -245,6 +255,16 @@ Notes:
             return _run_legacy_command(cmd_api_match_candidates, args)
         if args.api_command == "apply-match":
             return _run_legacy_command(cmd_api_apply_match, args)
+        if args.api_command == "plan-import":
+            return _run_legacy_command(cmd_api_plan_import, args)
+        if args.api_command == "refresh-import-page":
+            return _run_legacy_command(cmd_api_refresh_import_page, args)
+        if args.api_command == "resolve-import-accounts":
+            return _run_legacy_command(cmd_api_resolve_import_accounts, args)
+        if args.api_command == "apply-import":
+            return _run_legacy_command(cmd_api_apply_import, args)
+        if args.api_command == "import-apply":
+            return _run_legacy_command(cmd_api_import_apply, args)
         if args.api_command == "get-config":
             return _run_legacy_command(cmd_api_get_config, args)
         if args.api_command == "set-config":

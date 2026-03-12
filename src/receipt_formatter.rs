@@ -53,11 +53,7 @@ fn decimal_to_cents(value: &str) -> i64 {
     let negative = trimmed.starts_with('-');
     let unsigned = trimmed.trim_start_matches('-');
     let mut parts = unsigned.splitn(2, '.');
-    let whole = parts
-        .next()
-        .unwrap_or("0")
-        .parse::<i64>()
-        .unwrap_or(0);
+    let whole = parts.next().unwrap_or("0").parse::<i64>().unwrap_or(0);
     let frac_raw = parts.next().unwrap_or("0");
     let mut frac = frac_raw.chars().take(2).collect::<String>();
     while frac.len() < 2 {
@@ -65,7 +61,11 @@ fn decimal_to_cents(value: &str) -> i64 {
     }
     let frac_value = frac.parse::<i64>().unwrap_or(0);
     let value = whole * 100 + frac_value;
-    if negative { -value } else { value }
+    if negative {
+        -value
+    } else {
+        value
+    }
 }
 
 fn cents_to_fixed(value: i64) -> String {
@@ -74,13 +74,24 @@ fn cents_to_fixed(value: i64) -> String {
     format!("{sign}{}.{:02}", abs / 100, abs % 100)
 }
 
-fn format_postings_aligned(postings: &[(String, String, Option<String>)], indent: &str) -> Vec<String> {
+fn format_postings_aligned(
+    postings: &[(String, String, Option<String>)],
+    indent: &str,
+) -> Vec<String> {
     if postings.is_empty() {
         return Vec::new();
     }
 
-    let max_account_len = postings.iter().map(|(account, _, _)| account.len()).max().unwrap_or(0);
-    let max_amount_len = postings.iter().map(|(_, amount, _)| amount.len()).max().unwrap_or(0);
+    let max_account_len = postings
+        .iter()
+        .map(|(account, _, _)| account.len())
+        .max()
+        .unwrap_or(0);
+    let max_amount_len = postings
+        .iter()
+        .map(|(_, amount, _)| amount.len())
+        .max()
+        .unwrap_or(0);
 
     postings
         .iter()
@@ -119,7 +130,8 @@ fn extract_card_last4(raw_text: &str) -> Option<String> {
                 if idx + 4 <= chars.len() {
                     let candidate: String = chars[idx..idx + 4].iter().collect();
                     if candidate.chars().all(|ch| ch.is_ascii_digit()) {
-                        let boundary_ok = idx + 4 == chars.len() || !chars[idx + 4].is_ascii_digit();
+                        let boundary_ok =
+                            idx + 4 == chars.len() || !chars[idx + 4].is_ascii_digit();
                         if boundary_ok {
                             return Some(candidate);
                         }
@@ -156,7 +168,10 @@ fn build_posting_warning_map(
     mapped
 }
 
-fn inject_posting_warnings(formatted_postings: Vec<String>, posting_warnings: Vec<(usize, String)>) -> Vec<String> {
+fn inject_posting_warnings(
+    formatted_postings: Vec<String>,
+    posting_warnings: Vec<(usize, String)>,
+) -> Vec<String> {
     if posting_warnings.is_empty() {
         return formatted_postings;
     }
@@ -164,7 +179,10 @@ fn inject_posting_warnings(formatted_postings: Vec<String>, posting_warnings: Ve
     let mut output = Vec::new();
     for (idx, posting_line) in formatted_postings.into_iter().enumerate() {
         output.push(posting_line);
-        for (warning_idx, message) in posting_warnings.iter().filter(|(warning_idx, _)| *warning_idx == idx) {
+        for (warning_idx, message) in posting_warnings
+            .iter()
+            .filter(|(warning_idx, _)| *warning_idx == idx)
+        {
             let _ = warning_idx;
             output.push(format!("; WARN:PARSER {message}"));
         }
@@ -185,7 +203,10 @@ pub(crate) fn format_parsed_receipt(
     lines.push(format!("; @merchant: {}", receipt.merchant));
     if receipt.date_is_placeholder {
         lines.push("; @date: UNKNOWN".to_string());
-        lines.push(format!("; FIXME: unknown date (placeholder used: {})", receipt.date_iso));
+        lines.push(format!(
+            "; FIXME: unknown date (placeholder used: {})",
+            receipt.date_iso
+        ));
     } else {
         lines.push(format!("; @date: {}", receipt.date_iso));
     }
@@ -206,11 +227,19 @@ pub(crate) fn format_parsed_receipt(
     lines.push(String::new());
 
     let merchant_clean = receipt.merchant.replace('"', "'");
-    lines.push(format!(r#"{} * "{}" "Receipt scan""#, receipt.date_iso, merchant_clean));
+    lines.push(format!(
+        r#"{} * "{}" "Receipt scan""#,
+        receipt.date_iso, merchant_clean
+    ));
 
     let total_str = cents_to_fixed(-total_cents);
-    let card_comment = extract_card_last4(&receipt.raw_text).map(|last4| format!("card ****{last4}"));
-    let mut postings = vec![(credit_card_account.to_string(), format!("{total_str} CAD"), card_comment)];
+    let card_comment =
+        extract_card_last4(&receipt.raw_text).map(|last4| format!("card ****{last4}"));
+    let mut postings = vec![(
+        credit_card_account.to_string(),
+        format!("{total_str} CAD"),
+        card_comment,
+    )];
 
     let mut item_total_cents = 0i64;
     let mut item_posting_indexes = Vec::new();
@@ -232,7 +261,11 @@ pub(crate) fn format_parsed_receipt(
 
     if let Some(tax_cents) = tax_cents {
         if tax_cents != 0 {
-            postings.push(("Expenses:Tax:HST".to_string(), format!("{} CAD", cents_to_fixed(tax_cents)), None));
+            postings.push((
+                "Expenses:Tax:HST".to_string(),
+                format!("{} CAD", cents_to_fixed(tax_cents)),
+                None,
+            ));
             item_total_cents += tax_cents;
         }
     }
@@ -250,7 +283,10 @@ pub(crate) fn format_parsed_receipt(
 
     let formatted_postings = format_postings_aligned(&postings, "  ");
     let posting_warnings = build_posting_warning_map(&receipt.warnings, &item_posting_indexes);
-    lines.extend(inject_posting_warnings(formatted_postings, posting_warnings));
+    lines.extend(inject_posting_warnings(
+        formatted_postings,
+        posting_warnings,
+    ));
 
     if !receipt.raw_text.is_empty() {
         lines.push(String::new());
@@ -266,7 +302,10 @@ pub(crate) fn format_parsed_receipt(
     lines.join("\n")
 }
 
-pub(crate) fn format_draft_beancount(receipt: &FormatterReceiptInput, credit_card_account: &str) -> String {
+pub(crate) fn format_draft_beancount(
+    receipt: &FormatterReceiptInput,
+    credit_card_account: &str,
+) -> String {
     let total_cents = decimal_to_cents(&receipt.total);
     let tax_cents = receipt.tax.as_deref().map(decimal_to_cents);
     let mut lines = Vec::new();
@@ -277,7 +316,10 @@ pub(crate) fn format_draft_beancount(receipt: &FormatterReceiptInput, credit_car
     lines.push(String::new());
 
     if receipt.date_is_placeholder {
-        lines.push(format!("; FIXME: unknown date (placeholder used: {})", receipt.date_iso));
+        lines.push(format!(
+            "; FIXME: unknown date (placeholder used: {})",
+            receipt.date_iso
+        ));
     }
     let merchant_clean = receipt.merchant.replace('"', "'");
     lines.push(format!(
@@ -286,8 +328,13 @@ pub(crate) fn format_draft_beancount(receipt: &FormatterReceiptInput, credit_car
     ));
 
     let total_str = cents_to_fixed(-total_cents);
-    let card_comment = extract_card_last4(&receipt.raw_text).map(|last4| format!("card ****{last4}"));
-    let mut postings = vec![(credit_card_account.to_string(), format!("{total_str} CAD"), card_comment)];
+    let card_comment =
+        extract_card_last4(&receipt.raw_text).map(|last4| format!("card ****{last4}"));
+    let mut postings = vec![(
+        credit_card_account.to_string(),
+        format!("{total_str} CAD"),
+        card_comment,
+    )];
 
     let mut item_total_cents = 0i64;
     let mut item_posting_indexes = Vec::new();
@@ -309,7 +356,11 @@ pub(crate) fn format_draft_beancount(receipt: &FormatterReceiptInput, credit_car
 
     if let Some(tax_cents) = tax_cents {
         if tax_cents != 0 {
-            postings.push(("Expenses:Tax:HST".to_string(), format!("{} CAD", cents_to_fixed(tax_cents)), None));
+            postings.push((
+                "Expenses:Tax:HST".to_string(),
+                format!("{} CAD", cents_to_fixed(tax_cents)),
+                None,
+            ));
             item_total_cents += tax_cents;
         }
     }
@@ -333,7 +384,10 @@ pub(crate) fn format_draft_beancount(receipt: &FormatterReceiptInput, credit_car
 
     let formatted_postings = format_postings_aligned(&postings, "  ");
     let posting_warnings = build_posting_warning_map(&receipt.warnings, &item_posting_indexes);
-    lines.extend(inject_posting_warnings(formatted_postings, posting_warnings));
+    lines.extend(inject_posting_warnings(
+        formatted_postings,
+        posting_warnings,
+    ));
     lines.push(String::new());
     lines.push("; --- Raw OCR Text (for reference) ---".to_string());
     for ocr_line in receipt.raw_text.lines() {
@@ -345,8 +399,16 @@ pub(crate) fn format_draft_beancount(receipt: &FormatterReceiptInput, credit_car
     lines.join("\n")
 }
 
-pub(crate) fn generate_filename(date_iso: &str, date_is_placeholder: bool, merchant: &str) -> String {
-    let date_str = if date_is_placeholder { "unknown-date" } else { date_iso };
+pub(crate) fn generate_filename(
+    date_iso: &str,
+    date_is_placeholder: bool,
+    merchant: &str,
+) -> String {
+    let date_str = if date_is_placeholder {
+        "unknown-date"
+    } else {
+        date_iso
+    };
 
     let mut merchant_clean = String::new();
     let mut previous_dash = false;
@@ -419,7 +481,11 @@ pub(crate) fn format_enriched_transaction(
     let expense_base = original_expense.unwrap_or_else(|| default_expense.to_string());
     let mut postings = Vec::new();
     if let (Some(cc_account), Some(cc_amount_cents)) = (cc_account.clone(), cc_amount_cents) {
-        postings.push((cc_account, format!("{} CAD", cents_to_fixed(cc_amount_cents)), None));
+        postings.push((
+            cc_account,
+            format!("{} CAD", cents_to_fixed(cc_amount_cents)),
+            None,
+        ));
     } else {
         postings.push((
             "Liabilities:CreditCard:FIXME".to_string(),
@@ -446,12 +512,18 @@ pub(crate) fn format_enriched_transaction(
 
     if let Some(tax_cents) = tax_cents {
         if tax_cents != 0 {
-            postings.push(("Expenses:Tax:HST".to_string(), format!("{} CAD", cents_to_fixed(tax_cents)), None));
+            postings.push((
+                "Expenses:Tax:HST".to_string(),
+                format!("{} CAD", cents_to_fixed(tax_cents)),
+                None,
+            ));
             items_total_cents += tax_cents;
         }
     }
 
-    let expected_total_cents = cc_amount_cents.map(|value| value.abs()).unwrap_or(receipt_total_cents);
+    let expected_total_cents = cc_amount_cents
+        .map(|value| value.abs())
+        .unwrap_or(receipt_total_cents);
     if expected_total_cents > 0 && items_total_cents != expected_total_cents {
         let diff = expected_total_cents - items_total_cents;
         if diff > 1 {

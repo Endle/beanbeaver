@@ -91,7 +91,8 @@ fn resolve_account_target(
 }
 
 fn categorize_description(description: &str, rule_layers: &ParserRuleLayers) -> Option<String> {
-    let category_key = receipt_categories::classify_item_key(description, &rule_layers.category_rules, None);
+    let category_key =
+        receipt_categories::classify_item_key(description, &rule_layers.category_rules, None);
     resolve_account_target(category_key.as_deref(), rule_layers, None)
 }
 
@@ -111,8 +112,12 @@ pub(crate) fn parse_receipt(
         .map(str::to_string)
         .collect::<Vec<_>>();
 
-    let merchant =
-        receipt_parse_helpers::extract_merchant(&lines, full_text, pages_for_helper, known_merchants);
+    let merchant = receipt_parse_helpers::extract_merchant(
+        &lines,
+        full_text,
+        pages_for_helper,
+        known_merchants,
+    );
     let parsed_date = receipt_fields::extract_date(&lines, full_text, current_year);
     let date = parsed_date.map(|value| (value.year, value.month, value.day));
     let date_is_placeholder = date.is_none();
@@ -139,7 +144,8 @@ pub(crate) fn parse_receipt(
         if spatial_outcome.items.is_empty() {
             let (items, warnings) = receipt_text::extract_text_items(&lines, &summary_amounts);
             (
-                items.into_iter()
+                items
+                    .into_iter()
                     .map(|item| ParsedReceiptItem {
                         description: item.description.clone(),
                         price: cents_to_fixed(item.price_cents),
@@ -180,7 +186,8 @@ pub(crate) fn parse_receipt(
     } else {
         let (items, warnings) = receipt_text::extract_text_items(&lines, &summary_amounts);
         (
-            items.into_iter()
+            items
+                .into_iter()
                 .map(|item| ParsedReceiptItem {
                     description: item.description.clone(),
                     price: cents_to_fixed(item.price_cents),

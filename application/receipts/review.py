@@ -8,7 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from beanbeaver.application.receipts.approval import _validate_review_patch
+from beanbeaver.application.receipts.approval import (
+    _apply_review_patches,
+    _validate_item_review_patches,
+    _validate_review_patch,
+)
 from beanbeaver.receipt.receipt_structuring import load_stage_document, save_stage_document
 from beanbeaver.runtime.receipt_storage import (
     create_next_review_stage,
@@ -145,19 +149,31 @@ def run_re_edit_approved_receipt_with_review(
     request: ReEditApprovedReceiptRequest,
     *,
     review_patch: dict[str, object],
+    item_review_patches: list[dict[str, object]] | None = None,
 ) -> ReEditApprovedReceiptResult:
-    """Create a new approved review stage and apply receipt-level review overrides."""
+    """Create a new approved review stage and apply structured review overrides."""
     review_stage_path = create_next_review_stage(
         request.target_path,
         created_by="tui_review",
         pass_name="tui_reedit",
     )
     normalized_patch = _validate_review_patch(review_patch)
-    if normalized_patch:
-        document = load_stage_document(review_stage_path)
-        review = dict(document.get("review") or {})
-        review.update(normalized_patch)
-        document["review"] = review
+    document = load_stage_document(review_stage_path)
+    known_item_ids = {
+        str(item_id).strip()
+        for item_id in (item.get("id") for item in document.get("items") or [] if isinstance(item, dict))
+        if str(item_id).strip()
+    }
+    normalized_item_patches = _validate_item_review_patches(
+        item_review_patches or [],
+        known_item_ids=known_item_ids,
+    )
+    if normalized_patch or normalized_item_patches:
+        _apply_review_patches(
+            document,
+            review_patch=normalized_patch,
+            item_review_patches=normalized_item_patches,
+        )
         save_stage_document(review_stage_path, document)
 
     try:

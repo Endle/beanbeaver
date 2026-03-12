@@ -1,5 +1,5 @@
 use regex::Regex;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 #[derive(Clone, Debug)]
@@ -14,6 +14,29 @@ pub(crate) struct ParsedTextItem {
 pub(crate) struct TextParserWarning {
     pub(crate) message: String,
     pub(crate) after_item_index: Option<usize>,
+}
+
+#[derive(Clone, Debug)]
+struct MalformedTrailingPriceCandidate {
+    description: String,
+    category_source: String,
+    observed_token: String,
+    observed_fraction: String,
+    whole_dollars: i64,
+    context: String,
+}
+
+#[derive(Clone, Debug)]
+struct CandidatePriceOption {
+    price_cents: i64,
+    score: usize,
+}
+
+#[derive(Clone, Debug)]
+enum DeferredTextOutcome {
+    Item(ParsedTextItem),
+    Warning(String),
+    Malformed(MalformedTrailingPriceCandidate),
 }
 
 #[derive(Clone, Debug)]
@@ -142,6 +165,11 @@ fn re_malformed_ocr_price() -> &'static Regex {
     RE.get_or_init(|| {
         Regex::new(r"(\d+[Il]\.\d{2}|\d+\.[Il]\d|\d+\.\d[Il])\s*[HhTtJj]?\s*$").unwrap()
     })
+}
+
+fn re_trailing_noisy_price() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(\d+)\.(\d{3})\s*[HhTtJj]?\s*$").unwrap())
 }
 
 fn re_count_at_price() -> &'static Regex {
@@ -536,12 +564,241 @@ fn maybe_push_warning(warnings: &mut Vec<TextParserWarning>, items_len: usize, m
     });
 }
 
+fn truncated_context(line: &str) -> String {
+    let mut context = line.trim().to_string();
+    if context.len() > 80 {
+        context.truncate(80);
+    }
+    context
+}
+
+fn extract_trailing_noisy_price(line: &str) -> Option<(String, String, i64, usize)> {
+    let captures = re_trailing_noisy_price().captures(line)?;
+    let whole = captures.get(1)?.as_str().to_string();
+    let fraction = captures.get(2)?.as_str().to_string();
+    let whole_dollars = whole.parse::<i64>().ok()?;
+    let start = captures.get(1)?.start();
+    Some((
+        format!("{whole}.{fraction}"),
+        fraction,
+        whole_dollars,
+        start,
+    ))
+}
+
+fn build_malformed_price_candidate(line: &str) -> Option<MalformedTrailingPriceCandidate> {
+    let line_upper = line.to_ascii_uppercase();
+    if line_upper.contains("TOTAL")
+        || line_upper.contains("SUBTOTAL")
+        || line_upper.contains("SUB TOTAL")
+        || re_tax_tokens().is_match(&line_upper)
+    {
+        return None;
+    }
+
+    let (observed_token, observed_fraction, whole_dollars, price_start) =
+        extract_trailing_noisy_price(line)?;
+    let desc_part = line[..price_start].trim();
+    if desc_part.is_empty() {
+        return None;
+    }
+
+    let cleaned = strip_leading_receipt_codes(desc_part);
+    if cleaned.is_empty()
+        || cleaned.len() <= 2
+        || looks_like_summary_line(&cleaned)
+        || looks_like_quantity_expression(&cleaned)
+        || is_section_header_text(&cleaned)
+        || alpha_ratio(&cleaned) < 0.4
+    {
+        return None;
+    }
+
+    Some(MalformedTrailingPriceCandidate {
+        description: cleaned.clone(),
+        category_source: cleaned,
+        observed_token,
+        observed_fraction,
+        whole_dollars,
+        context: truncated_context(line),
+    })
+}
+
+fn levenshtein_distance(left: &str, right: &str) -> usize {
+    let left_chars: Vec<char> = left.chars().collect();
+    let right_chars: Vec<char> = right.chars().collect();
+    let mut prev = (0..=right_chars.len()).collect::<Vec<_>>();
+    let mut curr = vec![0; right_chars.len() + 1];
+
+    for (i, left_char) in left_chars.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, right_char) in right_chars.iter().enumerate() {
+            let substitution_cost = usize::from(left_char != right_char);
+            curr[j + 1] = (prev[j + 1] + 1)
+                .min(curr[j] + 1)
+                .min(prev[j] + substitution_cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[right_chars.len()]
+}
+
+fn malformed_candidate_price_options(
+    candidate: &MalformedTrailingPriceCandidate,
+) -> Vec<CandidatePriceOption> {
+    let mut best_by_price: HashMap<i64, usize> = HashMap::new();
+
+    for cents in 0..=99i64 {
+        let fraction = format!("{cents:02}");
+        let score = levenshtein_distance(&candidate.observed_fraction, &fraction);
+        if score > 2 {
+            continue;
+        }
+        let price_cents = candidate.whole_dollars * 100 + cents;
+        best_by_price
+            .entry(price_cents)
+            .and_modify(|best_score| *best_score = (*best_score).min(score))
+            .or_insert(score);
+    }
+
+    let mut options = best_by_price
+        .into_iter()
+        .map(|(price_cents, score)| CandidatePriceOption { price_cents, score })
+        .collect::<Vec<_>>();
+    options.sort_by_key(|option| (option.score, option.price_cents));
+    options
+}
+
+#[derive(Clone, Debug)]
+struct ReconciliationState {
+    score: usize,
+    prices: Vec<i64>,
+    ambiguous: bool,
+}
+
+#[derive(Clone, Debug)]
+struct ReconciledMalformedPrices {
+    prices: Vec<i64>,
+}
+
+fn reconcile_malformed_price_candidates(
+    regular_total_cents: i64,
+    summary_amounts: &HashSet<i64>,
+    candidates: &[MalformedTrailingPriceCandidate],
+) -> Option<ReconciledMalformedPrices> {
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let mut results = Vec::new();
+    let mut targets = summary_amounts
+        .iter()
+        .copied()
+        .filter(|amount| *amount >= regular_total_cents)
+        .collect::<Vec<_>>();
+    targets.sort_unstable();
+    targets.dedup();
+
+    for target in targets {
+        let mut states = HashMap::new();
+        states.insert(
+            regular_total_cents,
+            ReconciliationState {
+                score: 0,
+                prices: Vec::new(),
+                ambiguous: false,
+            },
+        );
+
+        let mut failed_target = false;
+        for candidate in candidates {
+            let options = malformed_candidate_price_options(candidate);
+            if options.is_empty() {
+                failed_target = true;
+                break;
+            }
+
+            let mut next_states: HashMap<i64, ReconciliationState> = HashMap::new();
+            for (running_total, state) in &states {
+                for option in &options {
+                    let next_total = running_total + option.price_cents;
+                    if next_total > target {
+                        continue;
+                    }
+                    let next_score = state.score + option.score;
+                    let mut next_prices = state.prices.clone();
+                    next_prices.push(option.price_cents);
+
+                    match next_states.get_mut(&next_total) {
+                        Some(existing) => {
+                            if next_score < existing.score {
+                                *existing = ReconciliationState {
+                                    score: next_score,
+                                    prices: next_prices,
+                                    ambiguous: state.ambiguous,
+                                };
+                            } else if next_score == existing.score
+                                && (existing.prices != next_prices
+                                    || existing.ambiguous
+                                    || state.ambiguous)
+                            {
+                                existing.ambiguous = true;
+                            }
+                        }
+                        None => {
+                            next_states.insert(
+                                next_total,
+                                ReconciliationState {
+                                    score: next_score,
+                                    prices: next_prices,
+                                    ambiguous: state.ambiguous,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+            states = next_states;
+            if states.is_empty() {
+                failed_target = true;
+                break;
+            }
+        }
+
+        if failed_target {
+            continue;
+        }
+
+        let Some(state) = states.get(&target) else {
+            continue;
+        };
+        if state.ambiguous {
+            continue;
+        }
+        results.push((state.score, state.prices.clone()));
+    }
+
+    results.sort_by_key(|(score, prices)| (*score, prices.clone()));
+    let (best_score, best_prices) = results.first()?.clone();
+    if results
+        .iter()
+        .skip(1)
+        .any(|(score, prices)| *score == best_score && *prices != best_prices)
+    {
+        return None;
+    }
+
+    Some(ReconciledMalformedPrices {
+        prices: best_prices,
+    })
+}
+
 pub(crate) fn extract_text_items(
     lines: &[String],
     summary_amounts: &HashSet<i64>,
 ) -> (Vec<ParsedTextItem>, Vec<TextParserWarning>) {
-    let mut items = Vec::new();
-    let mut warnings = Vec::new();
+    let mut deferred = Vec::new();
     let normalized_lines: Vec<String> = lines
         .iter()
         .map(|line| normalize_decimal_spacing(line))
@@ -571,17 +828,12 @@ pub(crate) fn extract_text_items(
                     .and_then(|captures| captures.get(1).map(|m| m.as_str().to_string()))
                     .unwrap_or_default();
                 if !tail_token.is_empty() && tail_token.chars().any(|ch| ch.is_ascii_alphabetic()) {
-                    let mut context = line.trim().to_string();
-                    if context.len() > 80 {
-                        context.truncate(80);
-                    }
-                    maybe_push_warning(
-                        &mut warnings,
-                        items.len(),
+                    let context = truncated_context(line);
+                    deferred.push(DeferredTextOutcome::Warning(
                         format!(
                             "maybe missed item near malformed multi-buy total \"{tail_token}\" (context: \"{context}\")"
                         ),
-                    );
+                    ));
                 }
             }
             continue;
@@ -754,12 +1006,12 @@ pub(crate) fn extract_text_items(
             }
 
             if !desc_part.is_empty() && desc_part.len() > 2 && !is_qty_expr && !force_backward {
-                items.push(ParsedTextItem {
+                deferred.push(DeferredTextOutcome::Item(ParsedTextItem {
                     description: desc_part.clone(),
                     category_source: desc_part,
                     price_cents,
                     quantity: 1,
-                });
+                }));
             } else {
                 let mut qty_info = Vec::new();
                 let mut qty_modifiers = Vec::new();
@@ -903,36 +1155,30 @@ pub(crate) fn extract_text_items(
                         description_suffix = format!(" ({})", reversed.join(", "));
                     }
 
-                    items.push(ParsedTextItem {
+                    deferred.push(DeferredTextOutcome::Item(ParsedTextItem {
                         category_source: found_desc_value.clone(),
                         description: format!("{found_desc_value}{description_suffix}"),
                         price_cents,
                         quantity,
-                    });
+                    }));
                 } else if price_cents > 0 {
-                    let mut context = line.trim().to_string();
-                    if context.len() > 80 {
-                        context.truncate(80);
-                    }
                     let mut message =
                         format!("maybe missed item near price {}", format_cents(price_cents));
+                    let context = truncated_context(line);
                     if !context.is_empty() {
                         message.push_str(&format!(" (context: \"{context}\")"));
                     }
-                    maybe_push_warning(&mut warnings, items.len(), message);
+                    deferred.push(DeferredTextOutcome::Warning(message));
                 }
             }
+        } else if let Some(candidate) = build_malformed_price_candidate(line) {
+            deferred.push(DeferredTextOutcome::Malformed(candidate));
         } else if let Some(captures) = re_malformed_ocr_price().captures(line) {
             let token = captures.get(1).map(|m| m.as_str()).unwrap_or("");
-            let mut context = line.trim().to_string();
-            if context.len() > 80 {
-                context.truncate(80);
-            }
-            maybe_push_warning(
-                &mut warnings,
-                items.len(),
-                format!("maybe missed item with malformed OCR price \"{token}\" (context: \"{context}\")"),
-            );
+            let context = truncated_context(line);
+            deferred.push(DeferredTextOutcome::Warning(format!(
+                "maybe missed item with malformed OCR price \"{token}\" (context: \"{context}\")"
+            )));
         } else if line.to_ascii_lowercase().contains("/for")
             && re_tail_token().is_match(line)
             && re_tail_token()
@@ -944,19 +1190,128 @@ pub(crate) fn extract_text_items(
                 .captures(line)
                 .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
                 .unwrap_or_default();
-            let mut context = line.trim().to_string();
-            if context.len() > 80 {
-                context.truncate(80);
-            }
-            maybe_push_warning(
-                &mut warnings,
-                items.len(),
+            let context = truncated_context(line);
+            deferred.push(DeferredTextOutcome::Warning(
                 format!(
                     "maybe missed item near malformed multi-buy total \"{tail_token}\" (context: \"{context}\")"
                 ),
-            );
+            ));
+        }
+    }
+
+    let regular_total_cents = deferred
+        .iter()
+        .filter_map(|outcome| match outcome {
+            DeferredTextOutcome::Item(item) => Some(item.price_cents),
+            _ => None,
+        })
+        .sum();
+    let malformed_candidates = deferred
+        .iter()
+        .filter_map(|outcome| match outcome {
+            DeferredTextOutcome::Malformed(candidate) => Some(candidate.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let reconciled = reconcile_malformed_price_candidates(
+        regular_total_cents,
+        summary_amounts,
+        &malformed_candidates,
+    )
+    .map(|resolved| resolved.prices.into_iter());
+
+    let mut malformed_prices = reconciled;
+    let mut items = Vec::new();
+    let mut warnings = Vec::new();
+    for outcome in deferred {
+        match outcome {
+            DeferredTextOutcome::Item(item) => items.push(item),
+            DeferredTextOutcome::Warning(message) => {
+                maybe_push_warning(&mut warnings, items.len(), message);
+            }
+            DeferredTextOutcome::Malformed(candidate) => {
+                if let Some(recovered_price_cents) =
+                    malformed_prices.as_mut().and_then(|prices| prices.next())
+                {
+                    items.push(ParsedTextItem {
+                        description: candidate.description.clone(),
+                        category_source: candidate.category_source.clone(),
+                        price_cents: recovered_price_cents,
+                        quantity: 1,
+                    });
+                    maybe_push_warning(
+                        &mut warnings,
+                        items.len(),
+                        format!(
+                            "auto-corrected malformed OCR price \"{}\" -> \"{}\" using summary reconciliation",
+                            candidate.observed_token,
+                            format_cents(recovered_price_cents),
+                        ),
+                    );
+                } else {
+                    maybe_push_warning(
+                        &mut warnings,
+                        items.len(),
+                        format!(
+                            "maybe missed item with malformed OCR price \"{}\" (context: \"{}\")",
+                            candidate.observed_token, candidate.context
+                        ),
+                    );
+                }
+            }
         }
     }
 
     (items, warnings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_text_items;
+    use std::collections::HashSet;
+
+    #[test]
+    fn recovers_unique_malformed_three_decimal_prices_via_summary_reconciliation() {
+        let lines = vec![
+            "COSTCO".to_string(),
+            "435259 2% FINE-FILT 6.691".to_string(),
+            "430 XL EGGS 9.651".to_string(),
+            "SUBTOTAL 16.38".to_string(),
+            "TOTAL 16.38".to_string(),
+        ];
+        let summary_amounts = HashSet::from([1638]);
+
+        let (items, warnings) = extract_text_items(&lines, &summary_amounts);
+
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].description, "2% FINE-FILT");
+        assert_eq!(items[0].price_cents, 669);
+        assert_eq!(items[1].description, "430 XL EGGS");
+        assert_eq!(items[1].price_cents, 969);
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings[0]
+            .message
+            .contains("auto-corrected malformed OCR price \"6.691\" -> \"6.69\""));
+        assert!(warnings[1]
+            .message
+            .contains("auto-corrected malformed OCR price \"9.651\" -> \"9.69\""));
+    }
+
+    #[test]
+    fn leaves_malformed_three_decimal_prices_as_warnings_without_corroborating_summary_amount() {
+        let lines = vec![
+            "TEST SHOP".to_string(),
+            "MILK 2.991".to_string(),
+            "TOTAL 2.99".to_string(),
+        ];
+        let summary_amounts = HashSet::new();
+
+        let (items, warnings) = extract_text_items(&lines, &summary_amounts);
+
+        assert!(items.is_empty());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0]
+            .message
+            .contains("maybe missed item with malformed OCR price \"2.991\""));
+    }
 }

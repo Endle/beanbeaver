@@ -7,6 +7,9 @@ import io
 import json
 from pathlib import Path
 
+import beanbeaver.application.imports.chequing as chequing_import
+import beanbeaver.application.imports.credit_card as credit_card_import
+import beanbeaver.application.imports.service as import_service
 import beanbeaver.runtime.paths as runtime_paths
 import beanbeaver.runtime.receipt_storage as receipt_storage
 from _pytest.capture import CaptureFixture
@@ -47,6 +50,9 @@ def _configure_temp_root(tmp_path: Path, monkeypatch: MonkeyPatch) -> ProjectPat
     monkeypatch.setenv("BEANBEAVER_ROOT", str(tmp_path))
     runtime_paths.reset_paths()
     importlib.reload(receipt_storage)
+    importlib.reload(credit_card_import)
+    importlib.reload(chequing_import)
+    importlib.reload(import_service)
     return paths
 
 
@@ -368,6 +374,78 @@ def test_api_re_edit_approved_with_review_applies_receipt_overrides(
     }
 
 
+def test_api_re_edit_approved_with_review_appends_new_item(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    paths = _configure_temp_root(tmp_path, monkeypatch)
+    approved_dir = paths.receipts_json_approved / "2026-03-04_market_10_00_feed"
+    stage_path = approved_dir / "review_stage_1.receipt.json"
+    save_stage_document(
+        stage_path,
+        {
+            **_stage_document(
+                merchant="Market",
+                receipt_date="2026-03-04",
+                total="10.00",
+                stage="review_stage_1",
+                stage_index=1,
+            ),
+            "items": [
+                {
+                    "id": "item-0001",
+                    "description": "MILK",
+                    "price": "4.99",
+                    "quantity": 1,
+                    "classification": {"category": "grocery_drink_cocacola"},
+                    "warnings": [],
+                    "meta": {"source": "parser"},
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": "item-added-0001",
+                            "create": True,
+                            "review": {
+                                "description": "BANANAS",
+                                "price": "3.99",
+                                "notes": "manually added from receipt edge",
+                                "category": "grocery_drink_cocacola",
+                            },
+                        }
+                    ]
+                }
+            )
+        ),
+    )
+
+    exit_code = unified_cli.main(["api", "re-edit-approved-with-review", str(stage_path)])
+
+    captured = json.loads(capsys.readouterr().out)
+    updated_path = Path(captured["updated_path"])
+    updated_document = json.loads(updated_path.read_text())
+    assert exit_code == 0
+    assert captured["status"] == "updated"
+    assert updated_document["items"][-1] == {
+        "id": "item-added-0001",
+        "description": "BANANAS",
+        "price": "3.99",
+        "quantity": 1,
+        "classification": {"category": "grocery_drink_cocacola"},
+        "notes": "manually added from receipt edge",
+        "warnings": [],
+        "meta": {"source": "tui_review"},
+    }
+
+
 def test_api_match_candidates_and_apply_match_for_approved_receipt(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -481,6 +559,266 @@ include "records/2026/carda_0101_0131.beancount"
     assert exit_code == 0
     assert applied["status"] in {"applied", "already_applied"}
     assert applied["message"].startswith("Weak candidate applied after relaxed fallback.")
+
+
+def test_api_plan_import_lists_multiple_route_options(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    _configure_temp_root(tmp_path, monkeypatch)
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    monkeypatch.setenv("XDG_DOWNLOAD_DIR", str(downloads))
+    runtime_paths.reset_paths()
+    importlib.reload(credit_card_import)
+    importlib.reload(chequing_import)
+    importlib.reload(import_service)
+
+    (downloads / "statement.csv").write_text(
+        "ignored line 1\nignored line 2\nTransaction Date,Description,Transaction Amount\n20260304,Market,10.00\n",
+        encoding="utf-8",
+    )
+    (downloads / "Preferred_Package_foo.csv").write_text(
+        "Date,Description,Type of Transaction,Sub-description,Amount,Balance\n2026-03-04,Deposit,Deposit,,100.00,100.00\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    exit_code = unified_cli.main(["api", "plan-import"])
+
+    captured = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert captured["status"] == "needs_selection"
+    assert captured["error"] is None
+    assert len(captured["route_options"]) == 2
+    assert {option["import_type"] for option in captured["route_options"]} == {"cc", "chequing"}
+    assert {option["csv_file"] for option in captured["route_options"]} == {
+        "statement.csv",
+        "Preferred_Package_foo.csv",
+    }
+    assert captured["has_uncommitted_changes"] is False
+
+
+def test_api_refresh_import_page_returns_routes_and_selected_account_resolution(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    paths = _configure_temp_root(tmp_path, monkeypatch)
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    monkeypatch.setenv("XDG_DOWNLOAD_DIR", str(downloads))
+    runtime_paths.reset_paths()
+    importlib.reload(credit_card_import)
+    importlib.reload(chequing_import)
+    importlib.reload(import_service)
+
+    paths.records_current_year.mkdir(parents=True, exist_ok=True)
+    _write(
+        paths.main_beancount,
+        """
+option "operating_currency" "CAD"
+2026-01-01 open Liabilities:CreditCard:Primary:BMO:CardA CAD
+2026-01-01 open Assets:CA:EQBank:Chequing CAD
+""".lstrip(),
+    )
+    statement_path = downloads / "statement.csv"
+    statement_path.write_text(
+        "ignored line 1\nignored line 2\nTransaction Date,Description,Transaction Amount\n20260304,Market,10.00\n",
+        encoding="utf-8",
+    )
+    (downloads / "EQ Bank Details.csv").write_text(
+        "Transfer Date,Description,Amount,Balance\n2026-03-04,Deposit,100.00,100.00\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(json.dumps({"preferred_source_path": str(statement_path)})),
+    )
+    exit_code = unified_cli.main(["api", "refresh-import-page"])
+
+    captured = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert captured["planner_status"] == "needs_selection"
+    assert captured["planner_error"] is None
+    assert len(captured["routes"]) == 2
+    assert captured["selected_source_path"] == str(statement_path)
+    assert captured["account_resolution"]["status"] == "ready"
+    assert captured["account_resolution"]["import_type"] == "cc"
+    assert captured["account_resolution"]["importer_id"] == "bmo"
+    assert captured["account_resolution"]["account_label"] == "BMO credit card"
+    assert captured["account_resolution"]["account_options"] == [
+        "Liabilities:CreditCard:Primary:BMO:CardA"
+    ]
+    assert captured["account_resolution"]["as_of"] == "2026-03-04"
+
+
+def test_api_resolve_import_accounts_for_credit_card_route(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    paths = _configure_temp_root(tmp_path, monkeypatch)
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    monkeypatch.setenv("XDG_DOWNLOAD_DIR", str(downloads))
+    runtime_paths.reset_paths()
+    importlib.reload(credit_card_import)
+    importlib.reload(chequing_import)
+    importlib.reload(import_service)
+
+    paths.records_current_year.mkdir(parents=True, exist_ok=True)
+    _write(
+        paths.main_beancount,
+        """
+option "operating_currency" "CAD"
+2026-01-01 open Liabilities:CreditCard:Primary:BMO:CardA CAD
+2026-01-01 open Liabilities:CreditCard:Travel:Porter CAD
+""".lstrip(),
+    )
+    (downloads / "statement.csv").write_text(
+        "ignored line 1\nignored line 2\nTransaction Date,Description,Transaction Amount\n20260304,Market,10.00\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(json.dumps({"import_type": "cc", "csv_file": "statement.csv", "importer_id": "bmo"})),
+    )
+    exit_code = unified_cli.main(["api", "resolve-import-accounts"])
+
+    captured = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert captured["status"] == "ready"
+    assert captured["import_type"] == "cc"
+    assert captured["importer_id"] == "bmo"
+    assert captured["account_label"] == "BMO credit card"
+    assert captured["account_options"] == ["Liabilities:CreditCard:Primary:BMO:CardA"]
+    assert captured["as_of"] == "2026-03-04"
+
+
+def test_api_apply_import_credit_card_with_selected_account(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    paths = _configure_temp_root(tmp_path, monkeypatch)
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    monkeypatch.setenv("XDG_DOWNLOAD_DIR", str(downloads))
+    runtime_paths.reset_paths()
+    importlib.reload(credit_card_import)
+    importlib.reload(chequing_import)
+    importlib.reload(import_service)
+
+    paths.records_current_year.mkdir(parents=True, exist_ok=True)
+    _write(
+        paths.main_beancount,
+        """
+option "operating_currency" "CAD"
+2026-01-01 open Liabilities:CreditCard:Primary:BMO:CardA CAD
+""".lstrip(),
+    )
+    (downloads / "statement.csv").write_text(
+        "ignored line 1\nignored line 2\nTransaction Date,Description,Transaction Amount\n20260304,Market,10.00\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "import_type": "cc",
+                    "csv_file": "statement.csv",
+                    "importer_id": "bmo",
+                    "selected_account": "Liabilities:CreditCard:Primary:BMO:CardA",
+                    "allow_uncommitted": True,
+                }
+            )
+        ),
+    )
+    exit_code = unified_cli.main(["api", "apply-import"])
+
+    captured = json.loads(capsys.readouterr().out)
+    result_path = Path(captured["result_file_path"])
+    assert exit_code == 0
+    assert captured["status"] == "ok"
+    assert captured["account"] == "Liabilities:CreditCard:Primary:BMO:CardA"
+    assert captured["start_date"] == "0304"
+    assert captured["end_date"] == "0304"
+    assert result_path.exists()
+    assert 'include "' + result_path.name + '"' in paths.yearly_summary.read_text(encoding="utf-8")
+
+
+def test_api_import_apply_chequing_returns_json_only_with_validation_details(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    capsys: CaptureFixture[str],
+) -> None:
+    paths = _configure_temp_root(tmp_path, monkeypatch)
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    monkeypatch.setenv("XDG_DOWNLOAD_DIR", str(downloads))
+    runtime_paths.reset_paths()
+    importlib.reload(credit_card_import)
+    importlib.reload(chequing_import)
+    importlib.reload(import_service)
+
+    paths.records_current_year.mkdir(parents=True, exist_ok=True)
+    _write(
+        paths.main_beancount,
+        """
+option "operating_currency" "CAD"
+2026-01-01 open Assets:Bank:Chequing:Scotia:Primary CAD
+2026-01-01 open Expenses:Uncategorized CAD
+""".lstrip(),
+    )
+    _write(
+        paths.chequing_rules,
+        """
+[[rules]]
+pattern = "DEPOSIT"
+account = "Income:Unknown"
+""".lstrip(),
+    )
+    (downloads / "Preferred_Package_foo.csv").write_text(
+        "Date,Description,Type of Transaction,Sub-description,Amount,Balance\n"
+        "2026-03-04,Deposit,Deposit,,100.00,100.00\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        chequing_import,
+        "validate_ledger",
+        lambda ledger_path: ["Validation error 1", "Validation error 2"],
+    )
+    monkeypatch.setattr(
+        "sys.stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "import_type": "chequing",
+                    "csv_file": "Preferred_Package_foo.csv",
+                    "selected_account": "Assets:Bank:Chequing:Scotia:Primary",
+                    "allow_uncommitted": True,
+                }
+            )
+        ),
+    )
+
+    exit_code = unified_cli.main(["api", "import-apply"])
+
+    captured = json.loads(capsys.readouterr().out)
+    result_path = Path(captured["result_file_path"])
+    assert exit_code == 0
+    assert captured["status"] == "ok"
+    assert captured["account"] == "Assets:Bank:Chequing:Scotia:Primary"
+    assert captured["warnings"] == ["Ledger validation found errors after import."]
+    assert captured["validation_errors"] == ["Validation error 1", "Validation error 2"]
+    assert captured["summary"].startswith("Import complete: ")
+    assert result_path.exists()
 
 
 def test_api_get_config_returns_resolved_project_root(
