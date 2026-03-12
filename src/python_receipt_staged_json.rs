@@ -503,6 +503,82 @@ fn structured_warning_dict<'py>(
 }
 
 #[pyfunction]
+fn receipt_clone_stage_document(
+    py: Python<'_>,
+    document: &Bound<'_, PyAny>,
+    stage: String,
+    created_by: String,
+    pass_name: String,
+    parent_file: String,
+    created_at: String,
+) -> PyResult<Py<PyDict>> {
+    let copy = PyModule::import(py, "copy")?;
+    let cloned = copy.call_method1("deepcopy", (document,))?;
+    let cloned_dict = cloned
+        .cast_into::<PyDict>()
+        .map_err(|_| PyTypeError::new_err("document must be a dict"))?;
+
+    let meta = match cloned_dict.get_item("meta")? {
+        Some(existing) => existing
+            .cast_into::<PyDict>()
+            .map_err(|_| PyTypeError::new_err("document.meta must be a dict"))?,
+        None => {
+            let new_meta = PyDict::new(py);
+            cloned_dict.set_item("meta", &new_meta)?;
+            new_meta
+        }
+    };
+
+    let current_index = meta
+        .get_item("stage_index")?
+        .and_then(|value| value.extract::<i32>().ok())
+        .unwrap_or(0);
+
+    meta.set_item("stage", stage)?;
+    meta.set_item("stage_index", current_index + 1)?;
+    meta.set_item("created_at", created_at)?;
+    meta.set_item("created_by", created_by)?;
+    meta.set_item("pass_name", pass_name)?;
+    meta.set_item("parent_file", parent_file)?;
+
+    Ok(cloned_dict.unbind())
+}
+
+#[pyfunction]
+fn receipt_get_stage_index(document: &Bound<'_, PyAny>) -> PyResult<i32> {
+    let document = document
+        .cast::<PyDict>()
+        .map_err(|_| PyTypeError::new_err("document must be a dict"))?;
+    let Some(meta_any) = document.get_item("meta")? else {
+        return Ok(0);
+    };
+    let Ok(meta) = meta_any.cast::<PyDict>() else {
+        return Ok(0);
+    };
+    Ok(meta
+        .get_item("stage_index")?
+        .and_then(|value| value.extract::<i32>().ok())
+        .unwrap_or(0))
+}
+
+#[pyfunction]
+fn receipt_get_receipt_id(document: &Bound<'_, PyAny>) -> PyResult<String> {
+    let document = document
+        .cast::<PyDict>()
+        .map_err(|_| PyTypeError::new_err("document must be a dict"))?;
+    let Some(meta_any) = document.get_item("meta")? else {
+        return Ok(String::new());
+    };
+    let Ok(meta) = meta_any.cast::<PyDict>() else {
+        return Ok(String::new());
+    };
+    Ok(meta
+        .get_item("receipt_id")?
+        .and_then(|value| value.extract::<String>().ok())
+        .unwrap_or_default())
+}
+
+#[pyfunction]
 fn receipt_build_parsed_receipt_stage(
     py: Python<'_>,
     receipt: &Bound<'_, PyAny>,
@@ -660,10 +736,13 @@ fn receipt_resolve_stage_document(
 }
 
 pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add_function(wrap_pyfunction!(receipt_clone_stage_document, module)?)?;
     module.add_function(wrap_pyfunction!(
         receipt_build_parsed_receipt_stage,
         module
     )?)?;
+    module.add_function(wrap_pyfunction!(receipt_get_stage_index, module)?)?;
+    module.add_function(wrap_pyfunction!(receipt_get_receipt_id, module)?)?;
     module.add_function(wrap_pyfunction!(receipt_get_stage_summary, module)?)?;
     module.add_function(wrap_pyfunction!(receipt_resolve_stage_document, module)?)?;
     Ok(())
