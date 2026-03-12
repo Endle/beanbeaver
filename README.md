@@ -24,13 +24,8 @@ Recommended: Pixi
 
 ```bash
 pixi install
-pixi run bb --help
-```
-
-For ledger-backed commands such as `bb import` and `bb match`, install the native extension once:
-
-```bash
 pixi run maturin-develop
+pixi run bb --help
 ```
 
 Standard Python editable install:
@@ -43,13 +38,7 @@ python -m pip install -e ".[dev,test]"
 bb --help
 ```
 
-For contributors who want the Rust/PyO3 toolchain ready as well:
-
-```bash
-python -m pip install -e ".[dev,test]"
-maturin develop
-python -m pip install -e ".[dev,test]"
-```
+The Rust/PyO3 extension is required for receipt parsing and matching.
 
 
 ### Import Statement

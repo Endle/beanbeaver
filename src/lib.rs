@@ -1,6 +1,7 @@
 mod match_domain;
 mod match_service;
 mod matcher;
+mod python_receipt_common;
 mod python_ledger_access;
 mod python_match_service;
 mod python_receipt_categories;
@@ -12,6 +13,7 @@ mod python_receipt_spatial;
 mod python_receipt_staged_json;
 mod python_receipt_text;
 mod python_spatial;
+mod receipt_common;
 mod receipt_categories;
 mod receipt_fields;
 mod receipt_formatter;
@@ -182,6 +184,7 @@ fn _rust_matcher(module: &Bound<'_, PyModule>) -> PyResult<()> {
     python_match_service::register(module)?;
     python_ledger_access::register(module)?;
     python_receipt_categories::register(module)?;
+    python_receipt_common::register(module)?;
     python_receipt_formatter::register(module)?;
     python_receipt_fields::register(module)?;
     python_receipt_parser::register(module)?;

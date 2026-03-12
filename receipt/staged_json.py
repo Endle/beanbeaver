@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from copy import deepcopy
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -107,16 +106,14 @@ def clone_stage_document(
     parent_file: str,
 ) -> dict[str, Any]:
     """Create a new stage document by cloning an existing stage."""
-    cloned = deepcopy(document)
-    meta = dict(cloned.get("meta") or {})
-    meta["stage"] = stage
-    meta["stage_index"] = int(meta.get("stage_index", 0)) + 1
-    meta["created_at"] = _utc_now_iso()
-    meta["created_by"] = created_by
-    meta["pass_name"] = pass_name
-    meta["parent_file"] = parent_file
-    cloned["meta"] = meta
-    return cloned
+    return require_rust_matcher().receipt_clone_stage_document(
+        document,
+        stage,
+        created_by,
+        pass_name,
+        parent_file,
+        _utc_now_iso(),
+    )
 
 
 def load_stage_document(path: Path) -> dict[str, Any]:
@@ -132,46 +129,12 @@ def save_stage_document(path: Path, document: dict[str, Any]) -> None:
 
 def get_stage_index(document: dict[str, Any]) -> int:
     """Return stage_index from the document, defaulting to zero."""
-    meta = document.get("meta") or {}
-    try:
-        return int(meta.get("stage_index", 0))
-    except (TypeError, ValueError):
-        return 0
+    return int(require_rust_matcher().receipt_get_stage_index(document))
 
 
 def get_receipt_id(document: dict[str, Any]) -> str:
     """Return the receipt chain UUID."""
-    meta = document.get("meta") or {}
-    receipt_id = meta.get("receipt_id")
-    return str(receipt_id) if receipt_id else ""
-
-
-def _effective_receipt_value(document: dict[str, Any], key: str) -> Any:
-    """Resolve one receipt-level field using review-first precedence."""
-    review = document.get("review") or {}
-    if key in review and review[key] is not None:
-        return review[key]
-    receipt_data = document.get("receipt") or {}
-    return receipt_data.get(key)
-
-
-def _effective_item_value(item: dict[str, Any], key: str) -> Any:
-    """Resolve one item-level field using review-first precedence."""
-    review = item.get("review") or {}
-    if key in review and review[key] is not None:
-        return review[key]
-    return item.get(key)
-
-
-def _effective_item_classification(item: dict[str, Any]) -> dict[str, Any] | None:
-    """Resolve item classification with partial review override support."""
-    classification = deepcopy(item.get("classification") or {})
-    review = item.get("review") or {}
-    review_classification = review.get("classification") or {}
-    if classification or review_classification:
-        classification.update(review_classification)
-        return classification
-    return None
+    return str(require_rust_matcher().receipt_get_receipt_id(document))
 
 
 def get_stage_summary(document: dict[str, Any]) -> tuple[str | None, date | None, Decimal | None]:

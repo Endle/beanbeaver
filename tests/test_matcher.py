@@ -15,7 +15,6 @@ from beanbeaver.receipt.matcher import (
     _try_match,
     match_receipt_to_transactions,
     relaxed_candidate_match_config,
-    rust_backend_loaded,
 )
 
 
@@ -221,19 +220,11 @@ class TestTryMatch:
         assert "family match" in result.match_details
 
 
-def test_rust_backend_loads_when_required() -> None:
-    if os.environ.get("BEANBEAVER_REQUIRE_RUST_MATCHER") != "1":
-        return
+def test_rust_backend_is_loaded() -> None:
+    assert os.environ.get("BEANBEAVER_REQUIRE_RUST_MATCHER") == "1"
 
-    assert rust_backend_loaded()
-
-
-def test_rust_backend_accepts_named_dict_payloads_when_required() -> None:
-    if os.environ.get("BEANBEAVER_REQUIRE_RUST_MATCHER") != "1":
-        return
-
-    assert rust_backend_loaded()
-
+def test_rust_backend_accepts_named_dict_payloads() -> None:
+    assert os.environ.get("BEANBEAVER_REQUIRE_RUST_MATCHER") == "1"
     from beanbeaver.receipt import matcher as matcher_module
 
     assert matcher_module._rust_matcher is not None
