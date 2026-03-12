@@ -6,6 +6,7 @@ version = "0.1.0"
 
 [dependencies]
 python = "3.12.*"
+pip = "*"
 rust = "*"
 
 [pypi-dependencies]
@@ -31,4 +32,4 @@ test-e2e-cached = [{ task = "maturin-develop" }, { task = "pytest-e2e-cached" }]
 test-e2e-live = [{ task = "maturin-develop" }, { task = "pytest-e2e-live" }]
 serve = "python -m beanbeaver.cli.main serve"
 bb-tui-native = "cargo run --bin bb-tui"
-bb-tui = [{ task = "maturin-develop-native" }, { task = "bb-tui-native" }]
+bb-tui = [{ task = "maturin-develop" }, { task = "bb-tui-native" }]
