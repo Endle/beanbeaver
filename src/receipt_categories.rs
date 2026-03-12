@@ -23,6 +23,21 @@ pub(crate) struct CategoryRuleLayers {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct BuildRuleEntry {
+    pub(crate) keywords: Vec<String>,
+    pub(crate) target: Option<String>,
+    pub(crate) tags: Vec<String>,
+    pub(crate) priority: i32,
+    pub(crate) exact_only: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct BuildClassifierConfig {
+    pub(crate) exact_only_keywords: Vec<String>,
+    pub(crate) rules: Vec<BuildRuleEntry>,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct RuleMatch {
     pub(crate) category: Option<String>,
     pub(crate) tags: Vec<String>,
@@ -233,6 +248,118 @@ fn compare_match_rank(left: &RuleMatch, right: &RuleMatch) -> Ordering {
         .then_with(|| (left.is_exact as u8).cmp(&(right.is_exact as u8)))
         .then_with(|| left.keyword_length.cmp(&right.keyword_length))
         .then_with(|| right.rule_index.cmp(&left.rule_index))
+}
+
+fn invert_account_mapping(account_mapping: &HashMap<String, String>) -> HashMap<String, String> {
+    let mut inverted = HashMap::new();
+    for (key, account) in account_mapping {
+        inverted.entry(account.clone()).or_insert_with(|| key.clone());
+    }
+    inverted
+}
+
+fn normalize_rule_target(
+    target: Option<&str>,
+    account_mapping: &HashMap<String, String>,
+) -> Option<String> {
+    let cleaned = target.map(str::trim).filter(|value| !value.is_empty())?;
+    if cleaned.starts_with("Expenses:") {
+        return Some(
+            invert_account_mapping(account_mapping)
+                .remove(cleaned)
+                .unwrap_or_else(|| cleaned.to_string()),
+        );
+    }
+    Some(cleaned.to_string())
+}
+
+fn legacy_account_alias(target: &str) -> Option<&'static str> {
+    match target {
+        "Expenses:Food:Grocery:IceCream" => Some("Expenses:Food:Grocery:Frozen:IceCream"),
+        _ => None,
+    }
+}
+
+fn normalize_legacy_account_target(target: &str) -> String {
+    legacy_account_alias(target).unwrap_or(target).to_string()
+}
+
+pub(crate) fn resolve_account_target(
+    target: Option<&str>,
+    account_mapping: &HashMap<String, String>,
+    default: Option<&str>,
+) -> Option<String> {
+    match target {
+        None => default.map(str::to_string),
+        Some(raw) => {
+            let cleaned = raw.trim();
+            if cleaned.is_empty() {
+                return default.map(str::to_string);
+            }
+            if cleaned.starts_with("Expenses:") {
+                return Some(normalize_legacy_account_target(cleaned));
+            }
+            let resolved = account_mapping.get(cleaned).map(String::as_str).or(default)?;
+            Some(normalize_legacy_account_target(resolved))
+        }
+    }
+}
+
+pub(crate) fn build_rule_layers(
+    default_account_mapping: HashMap<String, String>,
+    classifier_configs: Vec<BuildClassifierConfig>,
+    account_configs: Vec<HashMap<String, String>>,
+) -> CategoryRuleLayers {
+    let mut account_mapping = default_account_mapping;
+    for config in account_configs {
+        for (key, value) in config {
+            let key = key.trim();
+            let value = value.trim();
+            if !key.is_empty() && !value.is_empty() {
+                account_mapping.insert(key.to_string(), value.to_string());
+            }
+        }
+    }
+
+    let mut exact_only_keywords = HashSet::new();
+    let mut rules = Vec::new();
+
+    for (idx, config) in classifier_configs.into_iter().enumerate() {
+        let layer_priority = ((idx + 1) as i32) * 100;
+        for keyword in config.exact_only_keywords {
+            let cleaned = keyword.trim();
+            if !cleaned.is_empty() {
+                exact_only_keywords.insert(cleaned.to_string());
+            }
+        }
+
+        for rule in config.rules {
+            if rule.keywords.is_empty() {
+                continue;
+            }
+            let category = normalize_rule_target(rule.target.as_deref(), &account_mapping);
+            if category.is_none() && rule.tags.is_empty() {
+                continue;
+            }
+            if rule.exact_only {
+                for keyword in &rule.keywords {
+                    exact_only_keywords.insert(keyword.clone());
+                }
+            }
+            rules.push(CategoryRule {
+                keywords: rule.keywords,
+                category,
+                tags: rule.tags,
+                priority: rule.priority + layer_priority,
+            });
+        }
+    }
+
+    CategoryRuleLayers {
+        rules,
+        exact_only_keywords,
+        account_mapping,
+    }
 }
 
 pub(crate) fn classify_item_key(
