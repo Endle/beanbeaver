@@ -253,7 +253,9 @@ fn compare_match_rank(left: &RuleMatch, right: &RuleMatch) -> Ordering {
 fn invert_account_mapping(account_mapping: &HashMap<String, String>) -> HashMap<String, String> {
     let mut inverted = HashMap::new();
     for (key, account) in account_mapping {
-        inverted.entry(account.clone()).or_insert_with(|| key.clone());
+        inverted
+            .entry(account.clone())
+            .or_insert_with(|| key.clone());
     }
     inverted
 }
@@ -299,7 +301,10 @@ pub(crate) fn resolve_account_target(
             if cleaned.starts_with("Expenses:") {
                 return Some(normalize_legacy_account_target(cleaned));
             }
-            let resolved = account_mapping.get(cleaned).map(String::as_str).or(default)?;
+            let resolved = account_mapping
+                .get(cleaned)
+                .map(String::as_str)
+                .or(default)?;
             Some(normalize_legacy_account_target(resolved))
         }
     }

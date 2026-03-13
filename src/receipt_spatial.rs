@@ -1199,13 +1199,7 @@ mod tests {
             lines: vec![
                 LineInput {
                     text: "FF SHEPHERDS PURSE FILLING".to_string(),
-                    words: vec![word(
-                        "FF SHEPHERDS PURSE FILLING",
-                        0.05,
-                        0.700,
-                        0.40,
-                        0.712,
-                    )],
+                    words: vec![word("FF SHEPHERDS PURSE FILLING", 0.05, 0.700, 0.40, 0.712)],
                 },
                 LineInput {
                     text: "2 @ $3.49ea. W $6.98".to_string(),
