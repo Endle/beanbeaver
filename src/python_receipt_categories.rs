@@ -224,7 +224,10 @@ fn receipt_build_item_category_rule_layers(
                     .collect(),
             })
             .collect(),
-        account_configs.into_iter().map(|config| config.accounts).collect(),
+        account_configs
+            .into_iter()
+            .map(|config| config.accounts)
+            .collect(),
     );
 
     let result = PyDict::new(py);
@@ -295,7 +298,10 @@ fn receipt_account_for_category_key(
 }
 
 pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
-    module.add_function(wrap_pyfunction!(receipt_build_item_category_rule_layers, module)?)?;
+    module.add_function(wrap_pyfunction!(
+        receipt_build_item_category_rule_layers,
+        module
+    )?)?;
     module.add_function(wrap_pyfunction!(receipt_classify_item_key, module)?)?;
     module.add_function(wrap_pyfunction!(receipt_classify_item_tags, module)?)?;
     module.add_function(wrap_pyfunction!(receipt_find_item_matches, module)?)?;

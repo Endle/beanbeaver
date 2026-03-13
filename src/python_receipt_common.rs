@@ -117,28 +117,34 @@ fn receipt_is_priced_generic_item_label(left_text: &str, full_text: &str) -> boo
 }
 
 #[pyfunction]
-fn receipt_parse_quantity_modifier(
-    py: Python<'_>,
-    line: &str,
-) -> PyResult<Option<Py<PyDict>>> {
+fn receipt_parse_quantity_modifier(py: Python<'_>, line: &str) -> PyResult<Option<Py<PyDict>>> {
     let Some(modifier) = receipt_common::parse_quantity_modifier(line) else {
         return Ok(None);
     };
 
     let dict = PyDict::new(py);
     dict.set_item("quantity", modifier.quantity)?;
-    dict.set_item("unit_price", match modifier.unit_price_scaled {
-        Some(value) => Some(decimal_object(py, &receipt_common::format_scaled_4(value))?),
-        None => None,
-    })?;
-    dict.set_item("weight", match modifier.weight {
-        Some(value) => Some(decimal_object(py, &value)?),
-        None => None,
-    })?;
-    dict.set_item("deal_price", match modifier.deal_price_scaled {
-        Some(value) => Some(decimal_object(py, &receipt_common::format_scaled_4(value))?),
-        None => None,
-    })?;
+    dict.set_item(
+        "unit_price",
+        match modifier.unit_price_scaled {
+            Some(value) => Some(decimal_object(py, &receipt_common::format_scaled_4(value))?),
+            None => None,
+        },
+    )?;
+    dict.set_item(
+        "weight",
+        match modifier.weight {
+            Some(value) => Some(decimal_object(py, &value)?),
+            None => None,
+        },
+    )?;
+    dict.set_item(
+        "deal_price",
+        match modifier.deal_price_scaled {
+            Some(value) => Some(decimal_object(py, &receipt_common::format_scaled_4(value))?),
+            None => None,
+        },
+    )?;
     dict.set_item("pattern_type", modifier.pattern_type)?;
     dict.set_item("raw_line", modifier.raw_line)?;
     Ok(Some(dict.unbind()))
@@ -188,15 +194,27 @@ fn receipt_clean_description(text: &str) -> String {
 pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(receipt_normalize_decimal_spacing, module)?)?;
     module.add_function(wrap_pyfunction!(receipt_is_section_header_text, module)?)?;
-    module.add_function(wrap_pyfunction!(receipt_strip_leading_receipt_codes, module)?)?;
+    module.add_function(wrap_pyfunction!(
+        receipt_strip_leading_receipt_codes,
+        module
+    )?)?;
     module.add_function(wrap_pyfunction!(receipt_looks_like_summary_line, module)?)?;
-    module.add_function(wrap_pyfunction!(receipt_looks_like_receipt_metadata_line, module)?)?;
+    module.add_function(wrap_pyfunction!(
+        receipt_looks_like_receipt_metadata_line,
+        module
+    )?)?;
     module.add_function(wrap_pyfunction!(receipt_line_has_trailing_price, module)?)?;
     module.add_function(wrap_pyfunction!(receipt_looks_like_onsale_marker, module)?)?;
-    module.add_function(wrap_pyfunction!(receipt_is_priced_generic_item_label, module)?)?;
+    module.add_function(wrap_pyfunction!(
+        receipt_is_priced_generic_item_label,
+        module
+    )?)?;
     module.add_function(wrap_pyfunction!(receipt_parse_quantity_modifier, module)?)?;
     module.add_function(wrap_pyfunction!(receipt_validate_quantity_price, module)?)?;
-    module.add_function(wrap_pyfunction!(receipt_looks_like_quantity_expression, module)?)?;
+    module.add_function(wrap_pyfunction!(
+        receipt_looks_like_quantity_expression,
+        module
+    )?)?;
     module.add_function(wrap_pyfunction!(receipt_extract_price_word, module)?)?;
     module.add_function(wrap_pyfunction!(receipt_clean_description, module)?)?;
     Ok(())
