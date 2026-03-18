@@ -29,16 +29,16 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          script -qec 'pixi run bb-tui-native -- --quit-after-launch' /dev/null
+          script -qec 'cargo run --bin bb-tui -- --quit-after-launch' /dev/null
 
       - name: Run bb-tui smoke test
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          script -q /dev/null pixi run bb-tui-native -- --quit-after-launch
+          script -q /dev/null cargo run --bin bb-tui -- --quit-after-launch
 
       - name: Run bb-tui smoke test
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          pixi run bb-tui-native -- --quit-after-launch
+          cargo run --bin bb-tui -- --quit-after-launch
