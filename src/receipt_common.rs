@@ -68,9 +68,7 @@ fn re_count_at_price() -> &'static Regex {
 
 fn re_weight_at_price() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r"(?i)^(\d+\.?\d*)\s*(?:lb|lk|kg|k[g9]|1b|1k)\s*@").unwrap()
-    })
+    RE.get_or_init(|| Regex::new(r"(?i)^(\d+\.?\d*)\s*(?:lb|lk|kg|k[g9]|1b|1k)\s*@").unwrap())
 }
 
 fn re_multi_for_price() -> &'static Regex {
@@ -292,7 +290,11 @@ pub(crate) fn looks_like_summary_line(text: &str) -> bool {
     if upper.contains("SUBTOTAL") || upper.contains("SUB TOTAL") || upper.contains("TOTAL") {
         return true;
     }
-    if upper.contains("HST") || upper.contains("GST") || upper.contains("PST") || upper.contains("TAX") {
+    if upper.contains("HST")
+        || upper.contains("GST")
+        || upper.contains("PST")
+        || upper.contains("TAX")
+    {
         return true;
     }
     upper.starts_with("H=")
@@ -318,7 +320,10 @@ pub(crate) fn looks_like_onsale_marker(text: &str) -> bool {
         return false;
     }
     let normalized = normalize_decimal_spacing(&text.trim().to_ascii_uppercase());
-    let trimmed = re_trailing_price().replace(&normalized, "").trim().to_string();
+    let trimmed = re_trailing_price()
+        .replace(&normalized, "")
+        .trim()
+        .to_string();
     let compact = trimmed
         .chars()
         .filter(|ch| ch.is_ascii_alphanumeric())
@@ -382,9 +387,9 @@ pub(crate) fn validate_quantity_price(
     tolerance_scaled: i64,
 ) -> bool {
     match modifier.pattern_type.as_str() {
-        "count_at_price" => modifier
-            .unit_price_scaled
-            .is_some_and(|unit_price| (modifier.quantity as i64 * unit_price - total_price_scaled).abs() <= tolerance_scaled),
+        "count_at_price" => modifier.unit_price_scaled.is_some_and(|unit_price| {
+            (modifier.quantity as i64 * unit_price - total_price_scaled).abs() <= tolerance_scaled
+        }),
         "multi_for_price" => modifier
             .deal_price_scaled
             .is_some_and(|deal_price| (deal_price - total_price_scaled).abs() <= tolerance_scaled),
@@ -412,8 +417,14 @@ pub(crate) fn looks_like_quantity_expression(text: &str) -> bool {
     }
 
     if upper.contains('@') && upper.contains("/$") {
-        let compact = upper.chars().filter(|ch| !ch.is_ascii_whitespace()).collect::<String>();
-        let alpha_count = compact.chars().filter(|ch| ch.is_ascii_alphabetic()).count();
+        let compact = upper
+            .chars()
+            .filter(|ch| !ch.is_ascii_whitespace())
+            .collect::<String>();
+        let alpha_count = compact
+            .chars()
+            .filter(|ch| ch.is_ascii_alphabetic())
+            .count();
         let digit_count = compact.chars().filter(|ch| ch.is_ascii_digit()).count();
         if digit_count >= 3 && alpha_count <= 4 {
             return true;
@@ -440,14 +451,26 @@ pub(crate) fn extract_price_word(text: &str) -> Option<String> {
 pub(crate) fn clean_description(description: &str) -> String {
     let mut cleaned = description.to_string();
     cleaned = re_quantity_prefix().replace(&cleaned, "").into_owned();
-    cleaned = re_remove_sale_marker().replace_all(&cleaned, "").into_owned();
+    cleaned = re_remove_sale_marker()
+        .replace_all(&cleaned, "")
+        .into_owned();
     cleaned = re_remove_hed().replace_all(&cleaned, "").into_owned();
     cleaned = re_remove_hhed().replace_all(&cleaned, "").into_owned();
-    cleaned = re_remove_at_price_ratio().replace_all(&cleaned, "").into_owned();
-    cleaned = re_remove_price_ratio().replace_all(&cleaned, "").into_owned();
-    cleaned = re_remove_price_per_unit().replace_all(&cleaned, "").into_owned();
-    cleaned = re_remove_standalone_price().replace_all(&cleaned, "").into_owned();
-    cleaned = re_remove_garbled_ea().replace_all(&cleaned, "").into_owned();
+    cleaned = re_remove_at_price_ratio()
+        .replace_all(&cleaned, "")
+        .into_owned();
+    cleaned = re_remove_price_ratio()
+        .replace_all(&cleaned, "")
+        .into_owned();
+    cleaned = re_remove_price_per_unit()
+        .replace_all(&cleaned, "")
+        .into_owned();
+    cleaned = re_remove_standalone_price()
+        .replace_all(&cleaned, "")
+        .into_owned();
+    cleaned = re_remove_garbled_ea()
+        .replace_all(&cleaned, "")
+        .into_owned();
     cleaned = re_long_leading_sku().replace(&cleaned, "").into_owned();
     cleaned = re_remove_cahrd().replace_all(&cleaned, "").into_owned();
     cleaned = re_remove_hed_word().replace_all(&cleaned, "").into_owned();

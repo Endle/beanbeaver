@@ -4,6 +4,7 @@ use std::io::{self, BufRead, BufReader, Read, Stdout, Write};
 use std::net::TcpStream;
 use std::path::Path;
 use std::process::{Child, ExitStatus};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -25,10 +26,13 @@ use serde_json::Value;
 type AppResult<T> = Result<T, Box<dyn Error>>;
 
 mod process_util {
-    use super::{FAVA_HOST, FAVA_PORT, OCR_CONTAINER_NAME, SERVE_HOST};
+    use super::{
+        OcrContainerRuntime, FAVA_HOST, FAVA_PORT, OCR_CONTAINER_NAME, OCR_IMAGE, SERVE_HOST,
+    };
     use std::collections::VecDeque;
     use std::ffi::OsStr;
     use std::io::{self, Write};
+    use std::path::Path;
     use std::process::{Child, Command, ExitStatus, Output, Stdio};
     use std::sync::{Arc, Mutex};
 
@@ -95,25 +99,60 @@ mod process_util {
         run_program_output("trash", [path])
     }
 
-    pub(super) fn podman_start_ocr() -> io::Result<Output> {
-        run_program_output("podman", ["start", OCR_CONTAINER_NAME])
+    pub(super) fn command_on_path(program: &str) -> bool {
+        let Some(paths) = std::env::var_os("PATH") else {
+            return false;
+        };
+
+        std::env::split_paths(&paths).any(|directory| Path::new(&directory).join(program).is_file())
     }
 
-    pub(super) fn podman_stop_ocr() -> io::Result<Output> {
-        run_program_output("podman", ["stop", OCR_CONTAINER_NAME])
+    pub(super) fn ocr_start(runtime: OcrContainerRuntime) -> io::Result<Output> {
+        run_program_output(runtime.command(), ["start", OCR_CONTAINER_NAME])
     }
 
-    pub(super) fn podman_restart_ocr() -> io::Result<Output> {
-        run_program_output("podman", ["restart", OCR_CONTAINER_NAME])
+    pub(super) fn ocr_stop(runtime: OcrContainerRuntime) -> io::Result<Output> {
+        run_program_output(runtime.command(), ["stop", OCR_CONTAINER_NAME])
     }
 
-    pub(super) fn podman_container_exists() -> io::Result<Output> {
-        run_program_output("podman", ["container", "exists", OCR_CONTAINER_NAME])
+    pub(super) fn ocr_restart(runtime: OcrContainerRuntime) -> io::Result<Output> {
+        run_program_output(runtime.command(), ["restart", OCR_CONTAINER_NAME])
     }
 
-    pub(super) fn podman_inspect_running() -> io::Result<Output> {
+    pub(super) fn ocr_create_and_start(runtime: OcrContainerRuntime) -> io::Result<Output> {
+        match runtime {
+            OcrContainerRuntime::Podman => run_program_output(
+                runtime.command(),
+                [
+                    "run",
+                    "-d",
+                    "--replace",
+                    "--name",
+                    OCR_CONTAINER_NAME,
+                    "--network=slirp4netns",
+                    "-p",
+                    "8001:8000",
+                    OCR_IMAGE,
+                ],
+            ),
+            OcrContainerRuntime::Docker => run_program_output(
+                runtime.command(),
+                [
+                    "run",
+                    "-d",
+                    "--name",
+                    OCR_CONTAINER_NAME,
+                    "-p",
+                    "8001:8000",
+                    OCR_IMAGE,
+                ],
+            ),
+        }
+    }
+
+    pub(super) fn ocr_inspect_running(runtime: OcrContainerRuntime) -> io::Result<Output> {
         run_program_output(
-            "podman",
+            runtime.command(),
             [
                 "inspect",
                 "--format",
@@ -123,12 +162,15 @@ mod process_util {
         )
     }
 
-    pub(super) fn podman_inspect_ocr() -> io::Result<Output> {
-        run_program_output("podman", ["inspect", OCR_CONTAINER_NAME])
+    pub(super) fn ocr_inspect(runtime: OcrContainerRuntime) -> io::Result<Output> {
+        run_program_output(runtime.command(), ["inspect", OCR_CONTAINER_NAME])
     }
 
-    pub(super) fn podman_logs_ocr_tail() -> io::Result<Output> {
-        run_program_output("podman", ["logs", "--tail", "80", OCR_CONTAINER_NAME])
+    pub(super) fn ocr_logs_tail(runtime: OcrContainerRuntime) -> io::Result<Output> {
+        run_program_output(
+            runtime.command(),
+            ["logs", "--tail", "80", OCR_CONTAINER_NAME],
+        )
     }
 
     fn backend_command() -> Vec<String> {
@@ -304,11 +346,45 @@ const SERVE_PORT: u16 = 8080;
 const FAVA_HOST: &str = "127.0.0.1";
 const FAVA_PORT: u16 = 5000;
 const OCR_CONTAINER_NAME: &str = "beanbeaver-ocr";
+const OCR_IMAGE: &str = "ghcr.io/endle/beanbeaver-ocr:latest";
 const MAX_RUNTIME_LOG_LINES: usize = 400;
 const RECEIPTS_REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 const SERVE_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const FAVA_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const OCR_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OcrContainerRuntime {
+    Podman,
+    Docker,
+}
+
+impl OcrContainerRuntime {
+    fn command(self) -> &'static str {
+        match self {
+            Self::Podman => "podman",
+            Self::Docker => "docker",
+        }
+    }
+
+    fn display_name(self) -> &'static str {
+        match self {
+            Self::Podman => "Podman",
+            Self::Docker => "Docker",
+        }
+    }
+
+    fn suggested_run_command(self) -> &'static str {
+        match self {
+            Self::Podman => {
+                "podman run -d --replace --name beanbeaver-ocr --network=slirp4netns -p 8001:8000 ghcr.io/endle/beanbeaver-ocr:latest"
+            }
+            Self::Docker => {
+                "docker run -d --name beanbeaver-ocr -p 8001:8000 ghcr.io/endle/beanbeaver-ocr:latest"
+            }
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Page {
@@ -1153,6 +1229,10 @@ struct ManagedProcess {
     command: String,
 }
 
+struct PendingOcrAction {
+    receiver: Receiver<Result<String, String>>,
+}
+
 struct ServePageState {
     process: Option<ManagedProcess>,
     log_lines: Arc<Mutex<VecDeque<String>>>,
@@ -1170,8 +1250,79 @@ struct FavaPageState {
 }
 
 struct OcrPageState {
+    runtime: OcrContainerRuntime,
     summary_lines: Vec<String>,
     log_lines: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OcrAction {
+    Start,
+    Stop,
+    Restart,
+    CreateAndStart,
+}
+
+impl OcrAction {
+    fn progress_message(self, runtime: OcrContainerRuntime) -> String {
+        match self {
+            Self::Start => format!(
+                "Starting {} container `{OCR_CONTAINER_NAME}` in the background...",
+                runtime.display_name()
+            ),
+            Self::Stop => format!(
+                "Stopping {} container `{OCR_CONTAINER_NAME}` in the background...",
+                runtime.display_name()
+            ),
+            Self::Restart => format!(
+                "Restarting {} container `{OCR_CONTAINER_NAME}` in the background...",
+                runtime.display_name()
+            ),
+            Self::CreateAndStart => format!(
+                "Creating and starting {} container `{OCR_CONTAINER_NAME}` in the background...",
+                runtime.display_name()
+            ),
+        }
+    }
+
+    fn success_message(self, runtime: OcrContainerRuntime) -> String {
+        match self {
+            Self::Start => format!(
+                "Started {} container `{OCR_CONTAINER_NAME}`",
+                runtime.display_name()
+            ),
+            Self::Stop => format!(
+                "Stopped {} container `{OCR_CONTAINER_NAME}`",
+                runtime.display_name()
+            ),
+            Self::Restart => format!(
+                "Restarted {} container `{OCR_CONTAINER_NAME}`",
+                runtime.display_name()
+            ),
+            Self::CreateAndStart => format!(
+                "Created and started {} container `{OCR_CONTAINER_NAME}`",
+                runtime.display_name()
+            ),
+        }
+    }
+
+    fn rendered_command(self, runtime: OcrContainerRuntime) -> String {
+        match self {
+            Self::Start => render_ocr_runtime_command(runtime, &["start", OCR_CONTAINER_NAME]),
+            Self::Stop => render_ocr_runtime_command(runtime, &["stop", OCR_CONTAINER_NAME]),
+            Self::Restart => render_ocr_runtime_command(runtime, &["restart", OCR_CONTAINER_NAME]),
+            Self::CreateAndStart => runtime.suggested_run_command().to_string(),
+        }
+    }
+
+    fn execute(self, runtime: OcrContainerRuntime) -> io::Result<std::process::Output> {
+        match self {
+            Self::Start => process_util::ocr_start(runtime),
+            Self::Stop => process_util::ocr_stop(runtime),
+            Self::Restart => process_util::ocr_restart(runtime),
+            Self::CreateAndStart => process_util::ocr_create_and_start(runtime),
+        }
+    }
 }
 
 impl ConfigState {
@@ -1211,8 +1362,13 @@ impl ServePageState {
 
 impl OcrPageState {
     fn new() -> Self {
+        let runtime = preferred_ocr_runtime();
         Self {
-            summary_lines: vec!["Refreshing Podman container state...".to_string()],
+            runtime,
+            summary_lines: vec![format!(
+                "Refreshing {} container state...",
+                runtime.display_name()
+            )],
             log_lines: vec!["No container logs loaded yet.".to_string()],
         }
     }
@@ -1846,6 +2002,7 @@ struct App {
     serve_state: ServePageState,
     fava_state: FavaPageState,
     ocr_state: OcrPageState,
+    pending_ocr_action: Option<PendingOcrAction>,
     imports_state: ImportPageState,
     last_receipts_refresh: Option<Instant>,
     last_serve_refresh: Option<Instant>,
@@ -1889,6 +2046,7 @@ impl App {
             serve_state: ServePageState::new(),
             fava_state: FavaPageState::new(),
             ocr_state: OcrPageState::new(),
+            pending_ocr_action: None,
             imports_state: ImportPageState::new(),
             last_receipts_refresh: None,
             last_serve_refresh: None,
@@ -1916,7 +2074,7 @@ impl App {
                 "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | s start Fava | x stop Fava | R restart | r refresh health | q quit"
             }
             Page::Ocr => {
-                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | s start container | x stop container | R restart container | r refresh podman status/logs | q quit"
+                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | s start/create container | x stop container | R restart container | r refresh container status/logs | q quit"
             }
             Page::Imports => {
                 "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | r load routes | h/l or Tab switch pane | j/k move | Enter reload accounts | v view csv | x trash csv | a apply import | u toggle allow-uncommitted | q quit"
@@ -2523,8 +2681,10 @@ impl App {
             }
             Page::Ocr => {
                 self.refresh_runtime_pages(true)?;
+                let runtime = preferred_ocr_runtime();
                 self.set_status(format!(
-                    "Refreshed Podman container `{}` status and logs",
+                    "Refreshed {} container `{}` status and logs",
+                    runtime.display_name(),
                     OCR_CONTAINER_NAME
                 ));
                 Ok(())
@@ -2541,6 +2701,7 @@ impl App {
         self.refresh_receipts_page(force)?;
         self.poll_serve_process()?;
         self.poll_fava_process()?;
+        self.poll_ocr_action();
         let now = Instant::now();
 
         if force
@@ -2604,50 +2765,96 @@ impl App {
         self.ocr_state = query_ocr_page_state();
     }
 
+    fn start_ocr_action(
+        &mut self,
+        runtime: OcrContainerRuntime,
+        action: OcrAction,
+    ) -> AppResult<()> {
+        if self.pending_ocr_action.is_some() {
+            self.set_status("An OCR container action is already running");
+            return Ok(());
+        }
+
+        let (sender, receiver) = mpsc::channel();
+        self.pending_ocr_action = Some(PendingOcrAction { receiver });
+        self.set_status(action.progress_message(runtime));
+
+        thread::spawn(move || {
+            let command = action.rendered_command(runtime);
+            let result = match action.execute(runtime) {
+                Ok(output) => ensure_ocr_runtime_success(runtime, output, &command)
+                    .map(|_| action.success_message(runtime))
+                    .map_err(|error| error.to_string()),
+                Err(error) => Err(error.to_string()),
+            };
+            let _ = sender.send(result);
+        });
+
+        Ok(())
+    }
+
+    fn poll_ocr_action(&mut self) {
+        let outcome = match self.pending_ocr_action.as_mut() {
+            Some(action) => match action.receiver.try_recv() {
+                Ok(outcome) => Some(outcome),
+                Err(TryRecvError::Empty) => None,
+                Err(TryRecvError::Disconnected) => Some(Err(
+                    "OCR container action worker exited unexpectedly".to_string(),
+                )),
+            },
+            None => None,
+        };
+
+        let Some(outcome) = outcome else {
+            return;
+        };
+
+        self.pending_ocr_action = None;
+        self.refresh_ocr_page();
+        self.last_ocr_refresh = Some(Instant::now());
+        match outcome {
+            Ok(message) => self.set_status(message),
+            Err(error) => self.set_error(error),
+        }
+    }
+
     fn start_ocr_container(&mut self) -> AppResult<()> {
-        match podman_container_state()? {
+        let runtime = preferred_ocr_runtime();
+        match ocr_container_state(runtime)? {
             OcrContainerState::Running => {
                 self.refresh_runtime_pages(true)?;
                 self.set_status(format!(
-                    "Podman container `{OCR_CONTAINER_NAME}` is already running"
+                    "{} container `{OCR_CONTAINER_NAME}` is already running",
+                    runtime.display_name()
                 ));
             }
             OcrContainerState::Stopped => {
-                ensure_podman_success(
-                    process_util::podman_start_ocr()?,
-                    "podman start beanbeaver-ocr",
-                )?;
-                self.refresh_runtime_pages(true)?;
-                self.set_status(format!("Started Podman container `{OCR_CONTAINER_NAME}`"));
+                self.start_ocr_action(runtime, OcrAction::Start)?;
             }
             OcrContainerState::Missing => {
-                self.set_status(format!(
-                    "Container `{OCR_CONTAINER_NAME}` does not exist. Create it first with `podman run --replace --name beanbeaver-ocr --network=slirp4netns -p 8001:8000 ghcr.io/endle/beanbeaver-ocr:latest`"
-                ));
+                self.start_ocr_action(runtime, OcrAction::CreateAndStart)?;
             }
         }
         Ok(())
     }
 
     fn stop_ocr_container(&mut self) -> AppResult<()> {
-        match podman_container_state()? {
+        let runtime = preferred_ocr_runtime();
+        match ocr_container_state(runtime)? {
             OcrContainerState::Running => {
-                ensure_podman_success(
-                    process_util::podman_stop_ocr()?,
-                    "podman stop beanbeaver-ocr",
-                )?;
-                self.refresh_runtime_pages(true)?;
-                self.set_status(format!("Stopped Podman container `{OCR_CONTAINER_NAME}`"));
+                self.start_ocr_action(runtime, OcrAction::Stop)?;
             }
             OcrContainerState::Stopped => {
                 self.refresh_runtime_pages(true)?;
                 self.set_status(format!(
-                    "Podman container `{OCR_CONTAINER_NAME}` is already stopped"
+                    "{} container `{OCR_CONTAINER_NAME}` is already stopped",
+                    runtime.display_name()
                 ));
             }
             OcrContainerState::Missing => {
                 self.set_status(format!(
-                    "Container `{OCR_CONTAINER_NAME}` does not exist. Create it first with `podman run --replace --name beanbeaver-ocr --network=slirp4netns -p 8001:8000 ghcr.io/endle/beanbeaver-ocr:latest`"
+                    "Container `{OCR_CONTAINER_NAME}` does not exist. Create it first with `{}`",
+                    runtime.suggested_run_command()
                 ));
             }
         }
@@ -2655,18 +2862,15 @@ impl App {
     }
 
     fn restart_ocr_container(&mut self) -> AppResult<()> {
-        match podman_container_state()? {
+        let runtime = preferred_ocr_runtime();
+        match ocr_container_state(runtime)? {
             OcrContainerState::Running | OcrContainerState::Stopped => {
-                ensure_podman_success(
-                    process_util::podman_restart_ocr()?,
-                    "podman restart beanbeaver-ocr",
-                )?;
-                self.refresh_runtime_pages(true)?;
-                self.set_status(format!("Restarted Podman container `{OCR_CONTAINER_NAME}`"));
+                self.start_ocr_action(runtime, OcrAction::Restart)?;
             }
             OcrContainerState::Missing => {
                 self.set_status(format!(
-                    "Container `{OCR_CONTAINER_NAME}` does not exist. Create it first with `podman run --replace --name beanbeaver-ocr --network=slirp4netns -p 8001:8000 ghcr.io/endle/beanbeaver-ocr:latest`"
+                    "Container `{OCR_CONTAINER_NAME}` does not exist. Create it first with `{}`",
+                    runtime.suggested_run_command()
                 ));
             }
         }
@@ -3148,7 +3352,39 @@ fn check_local_health(port: u16, path: &str, success_codes: &[u16]) -> Result<St
     }
 }
 
-fn ensure_podman_success(output: std::process::Output, rendered_command: &str) -> AppResult<()> {
+fn select_ocr_runtime(podman_on_path: bool) -> OcrContainerRuntime {
+    if podman_on_path {
+        OcrContainerRuntime::Podman
+    } else {
+        OcrContainerRuntime::Docker
+    }
+}
+
+fn preferred_ocr_runtime() -> OcrContainerRuntime {
+    select_ocr_runtime(process_util::command_on_path(
+        OcrContainerRuntime::Podman.command(),
+    ))
+}
+
+fn render_ocr_runtime_command(runtime: OcrContainerRuntime, args: &[&str]) -> String {
+    std::iter::once(runtime.command())
+        .chain(args.iter().copied())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn error_mentions_missing_container(stdout: &str, stderr: &str) -> bool {
+    let combined = format!("{stdout}\n{stderr}").to_ascii_lowercase();
+    ["no such", "not found", "does not exist", "no container"]
+        .iter()
+        .any(|needle| combined.contains(needle))
+}
+
+fn ensure_ocr_runtime_success(
+    runtime: OcrContainerRuntime,
+    output: std::process::Output,
+    rendered_command: &str,
+) -> AppResult<()> {
     if output.status.success() {
         return Ok(());
     }
@@ -3156,36 +3392,34 @@ fn ensure_podman_success(output: std::process::Output, rendered_command: &str) -
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     Err(format!(
-        "podman command failed: {rendered_command}\nstdout:\n{}\nstderr:\n{}",
+        "{} command failed: {rendered_command}\nstdout:\n{}\nstderr:\n{}",
+        runtime.command(),
         stdout.trim(),
         stderr.trim()
     )
     .into())
 }
 
-fn podman_container_state() -> AppResult<OcrContainerState> {
-    let exists_output = process_util::podman_container_exists()?;
-    match exists_output.status.code().unwrap_or(1) {
-        0 => {}
-        1 => return Ok(OcrContainerState::Missing),
-        _ => {
-            let stdout = String::from_utf8_lossy(&exists_output.stdout);
-            let stderr = String::from_utf8_lossy(&exists_output.stderr);
-            return Err(format!(
-                "podman command failed: podman container exists {OCR_CONTAINER_NAME}\nstdout:\n{}\nstderr:\n{}",
-                stdout.trim(),
-                stderr.trim()
-            )
-            .into());
-        }
-    }
-
-    let inspect_output = process_util::podman_inspect_running()?;
+fn ocr_container_state(runtime: OcrContainerRuntime) -> AppResult<OcrContainerState> {
+    let inspect_output = process_util::ocr_inspect_running(runtime)?;
     if !inspect_output.status.success() {
         let stdout = String::from_utf8_lossy(&inspect_output.stdout);
         let stderr = String::from_utf8_lossy(&inspect_output.stderr);
+        if error_mentions_missing_container(stdout.trim(), stderr.trim()) {
+            return Ok(OcrContainerState::Missing);
+        }
         return Err(format!(
-            "podman command failed: podman inspect --format {{{{.State.Running}}}} {OCR_CONTAINER_NAME}\nstdout:\n{}\nstderr:\n{}",
+            "{} command failed: {}\nstdout:\n{}\nstderr:\n{}",
+            runtime.command(),
+            render_ocr_runtime_command(
+                runtime,
+                &[
+                    "inspect",
+                    "--format",
+                    "{{.State.Running}}",
+                    OCR_CONTAINER_NAME
+                ],
+            ),
             stdout.trim(),
             stderr.trim()
         )
@@ -3203,63 +3437,21 @@ fn podman_container_state() -> AppResult<OcrContainerState> {
 }
 
 fn query_ocr_page_state() -> OcrPageState {
-    let exists_output = match process_util::podman_container_exists() {
+    let runtime = preferred_ocr_runtime();
+    let inspect_output = match process_util::ocr_inspect(runtime) {
         Ok(output) => output,
         Err(error) => {
             return OcrPageState {
+                runtime,
                 summary_lines: vec![
-                    "Podman unavailable".to_string(),
+                    format!("{} unavailable", runtime.display_name()),
                     format!("Error: {error}"),
                     format!("Container: {OCR_CONTAINER_NAME}"),
                 ],
-                log_lines: vec![
-                    "Install Podman or ensure `podman` is available on PATH.".to_string()
-                ],
-            };
-        }
-    };
-
-    match exists_output.status.code().unwrap_or(1) {
-        0 => {}
-        1 => {
-            return OcrPageState {
-                summary_lines: vec![
-                    "Podman available".to_string(),
-                    format!("Container `{OCR_CONTAINER_NAME}` not found."),
-                    "Suggested command:".to_string(),
-                    "podman run --replace --name beanbeaver-ocr --network=slirp4netns -p 8001:8000 ghcr.io/endle/beanbeaver-ocr:latest".to_string(),
-                ],
-                log_lines: vec!["No logs because the container does not exist.".to_string()],
-            };
-        }
-        _ => {
-            let stderr = String::from_utf8_lossy(&exists_output.stderr)
-                .trim()
-                .to_string();
-            let stdout = String::from_utf8_lossy(&exists_output.stdout)
-                .trim()
-                .to_string();
-            return OcrPageState {
-                summary_lines: vec![
-                    "Podman failed".to_string(),
-                    format!("`podman container exists {OCR_CONTAINER_NAME}` returned a non-zero status."),
-                    format!("stdout: {}", if stdout.is_empty() { "<empty>" } else { &stdout }),
-                    format!("stderr: {}", if stderr.is_empty() { "<empty>" } else { &stderr }),
-                ],
-                log_lines: vec!["Unable to inspect container logs.".to_string()],
-            };
-        }
-    }
-
-    let inspect_output = match process_util::podman_inspect_ocr() {
-        Ok(output) => output,
-        Err(error) => {
-            return OcrPageState {
-                summary_lines: vec![
-                    "Podman inspect failed".to_string(),
-                    format!("Error: {error}"),
-                ],
-                log_lines: vec!["Unable to inspect container logs.".to_string()],
+                log_lines: vec![format!(
+                    "Install Podman or Docker, or ensure `{}` is available on PATH.",
+                    runtime.command()
+                )],
             };
         }
     };
@@ -3268,9 +3460,38 @@ fn query_ocr_page_state() -> OcrPageState {
         let stderr = String::from_utf8_lossy(&inspect_output.stderr)
             .trim()
             .to_string();
+        let stdout = String::from_utf8_lossy(&inspect_output.stdout)
+            .trim()
+            .to_string();
+        if error_mentions_missing_container(&stdout, &stderr) {
+            return OcrPageState {
+                runtime,
+                summary_lines: vec![
+                    format!("{} available", runtime.display_name()),
+                    format!("Container `{OCR_CONTAINER_NAME}` not found."),
+                    "Press `s` to create and start it.".to_string(),
+                    "Manual command:".to_string(),
+                    runtime.suggested_run_command().to_string(),
+                ],
+                log_lines: vec!["No logs because the container does not exist.".to_string()],
+            };
+        }
         return OcrPageState {
+            runtime,
             summary_lines: vec![
-                "Podman inspect failed".to_string(),
+                format!("{} inspect failed", runtime.display_name()),
+                format!(
+                    "Command: {}",
+                    render_ocr_runtime_command(runtime, &["inspect", OCR_CONTAINER_NAME])
+                ),
+                format!(
+                    "stdout: {}",
+                    if stdout.is_empty() {
+                        "<empty>"
+                    } else {
+                        &stdout
+                    }
+                ),
                 format!(
                     "stderr: {}",
                     if stderr.is_empty() {
@@ -3284,19 +3505,19 @@ fn query_ocr_page_state() -> OcrPageState {
         };
     }
 
-    let summary_lines = match podman_summary_lines(&String::from_utf8_lossy(&inspect_output.stdout))
-    {
+    let summary_lines = match ocr_summary_lines(&String::from_utf8_lossy(&inspect_output.stdout)) {
         Ok(lines) => lines,
         Err(error) => vec![
-            "Failed to parse `podman inspect` output".to_string(),
+            format!("Failed to parse `{}` inspect output", runtime.command()),
             format!("Error: {error}"),
         ],
     };
 
-    let logs_output = match process_util::podman_logs_ocr_tail() {
+    let logs_output = match process_util::ocr_logs_tail(runtime) {
         Ok(output) => output,
         Err(error) => {
             return OcrPageState {
+                runtime,
                 summary_lines,
                 log_lines: vec![format!("Failed to fetch container logs: {error}")],
             };
@@ -3315,7 +3536,8 @@ fn query_ocr_page_state() -> OcrPageState {
             .trim()
             .to_string();
         vec![format!(
-            "Failed to fetch `podman logs`: {}",
+            "Failed to fetch `{}` logs: {}",
+            runtime.command(),
             if stderr.is_empty() {
                 "<empty>"
             } else {
@@ -3325,12 +3547,13 @@ fn query_ocr_page_state() -> OcrPageState {
     };
 
     OcrPageState {
+        runtime,
         summary_lines,
         log_lines,
     }
 }
 
-fn podman_summary_lines(raw_json: &str) -> AppResult<Vec<String>> {
+fn ocr_summary_lines(raw_json: &str) -> AppResult<Vec<String>> {
     let payload: Value = serde_json::from_str(raw_json)?;
     let entry = payload
         .as_array()
@@ -3358,6 +3581,7 @@ fn podman_summary_lines(raw_json: &str) -> AppResult<Vec<String>> {
     let image = entry
         .get("ImageName")
         .and_then(Value::as_str)
+        .or_else(|| entry.pointer("/Config/Image").and_then(Value::as_str))
         .or_else(|| entry.get("Image").and_then(Value::as_str))
         .unwrap_or("unknown");
     let created = entry
@@ -3388,7 +3612,7 @@ fn podman_summary_lines(raw_json: &str) -> AppResult<Vec<String>> {
     };
     let ports = entry
         .pointer("/NetworkSettings/Ports")
-        .map(format_podman_ports)
+        .map(format_container_ports)
         .unwrap_or_else(|| "unknown".to_string());
 
     Ok(vec![
@@ -3408,7 +3632,7 @@ fn podman_summary_lines(raw_json: &str) -> AppResult<Vec<String>> {
     ])
 }
 
-fn format_podman_ports(ports_value: &Value) -> String {
+fn format_container_ports(ports_value: &Value) -> String {
     let Some(ports) = ports_value.as_object() else {
         return "unknown".to_string();
     };
@@ -3988,6 +4212,7 @@ fn render_ocr_page(frame: &mut ratatui::Frame<'_>, app: &App, area: ratatui::lay
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(11), Constraint::Min(8)])
         .split(area);
+    let runtime = app.ocr_state.runtime;
 
     let summary = Paragraph::new(Text::from(
         app.ocr_state
@@ -3997,11 +4222,10 @@ fn render_ocr_page(frame: &mut ratatui::Frame<'_>, app: &App, area: ratatui::lay
             .map(Line::from)
             .collect::<Vec<_>>(),
     ))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Podman Container (`s` start, `x` stop, `R` restart)"),
-    )
+    .block(Block::default().borders(Borders::ALL).title(format!(
+        "{} Container (`s` start, `x` stop, `R` restart)",
+        runtime.display_name()
+    )))
     .wrap(Wrap { trim: true });
     frame.render_widget(summary, sections[0]);
 
@@ -4013,11 +4237,10 @@ fn render_ocr_page(frame: &mut ratatui::Frame<'_>, app: &App, area: ratatui::lay
             .map(Line::from)
             .collect::<Vec<_>>(),
     ))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(format!("`podman logs --tail 80 {OCR_CONTAINER_NAME}`")),
-    )
+    .block(Block::default().borders(Borders::ALL).title(format!(
+        "`{} logs --tail 80 {OCR_CONTAINER_NAME}`",
+        runtime.command()
+    )))
     .wrap(Wrap { trim: false });
     frame.render_widget(logs, sections[1]);
 }
@@ -5328,6 +5551,102 @@ mod tests {
                 }
             }),
         }
+    }
+
+    #[test]
+    fn select_ocr_runtime_prefers_podman_when_available() {
+        assert_eq!(select_ocr_runtime(true), OcrContainerRuntime::Podman);
+        assert_eq!(select_ocr_runtime(false), OcrContainerRuntime::Docker);
+    }
+
+    #[test]
+    fn suggested_ocr_run_commands_start_detached() {
+        let podman = OcrContainerRuntime::Podman.suggested_run_command();
+        let docker = OcrContainerRuntime::Docker.suggested_run_command();
+
+        assert!(podman.starts_with("podman run -d "));
+        assert!(podman.contains("--replace"));
+        assert!(podman.contains(OCR_IMAGE));
+
+        assert!(docker.starts_with("docker run -d "));
+        assert!(docker.contains("-p 8001:8000"));
+        assert!(docker.contains(OCR_IMAGE));
+    }
+
+    #[test]
+    fn ocr_action_renders_expected_commands_and_messages() {
+        assert_eq!(
+            OcrAction::Start.rendered_command(OcrContainerRuntime::Docker),
+            "docker start beanbeaver-ocr"
+        );
+        assert_eq!(
+            OcrAction::Restart.rendered_command(OcrContainerRuntime::Podman),
+            "podman restart beanbeaver-ocr"
+        );
+        assert_eq!(
+            OcrAction::CreateAndStart.rendered_command(OcrContainerRuntime::Docker),
+            OcrContainerRuntime::Docker.suggested_run_command()
+        );
+        assert_eq!(
+            OcrAction::CreateAndStart.success_message(OcrContainerRuntime::Docker),
+            "Created and started Docker container `beanbeaver-ocr`"
+        );
+    }
+
+    #[test]
+    fn error_mentions_missing_container_handles_podman_and_docker_messages() {
+        assert!(error_mentions_missing_container(
+            "",
+            "Error: no such container beanbeaver-ocr"
+        ));
+        assert!(error_mentions_missing_container(
+            "",
+            "Error response from daemon: No such container: beanbeaver-ocr"
+        ));
+        assert!(!error_mentions_missing_container(
+            "",
+            "permission denied while trying to connect to the Docker daemon socket"
+        ));
+    }
+
+    #[test]
+    fn ocr_summary_lines_supports_docker_inspect_shape() {
+        let raw = serde_json::json!([
+            {
+                "Name": "/beanbeaver-ocr",
+                "State": {
+                    "Status": "running",
+                    "Running": true,
+                    "ExitCode": 0,
+                    "StartedAt": "2026-03-12T10:00:00Z",
+                    "FinishedAt": "0001-01-01T00:00:00Z"
+                },
+                "Config": {
+                    "Image": "ghcr.io/endle/beanbeaver-ocr:latest"
+                },
+                "Created": "2026-03-12T09:59:00Z",
+                "Path": "python",
+                "Args": ["-m", "app"],
+                "NetworkSettings": {
+                    "Ports": {
+                        "8000/tcp": [
+                            {
+                                "HostIp": "0.0.0.0",
+                                "HostPort": "8001"
+                            }
+                        ]
+                    }
+                }
+            }
+        ]);
+
+        let summary = ocr_summary_lines(&raw.to_string()).expect("docker inspect summary");
+
+        assert!(summary.contains(&"Container: beanbeaver-ocr".to_string()));
+        assert!(summary.contains(&"Status: running (running)".to_string()));
+        assert!(summary.contains(&"Image: ghcr.io/endle/beanbeaver-ocr:latest".to_string()));
+        assert!(summary.contains(&"Ports: 0.0.0.0:8001 -> 8000/tcp".to_string()));
+        assert!(summary.contains(&"Command: python -m app".to_string()));
     }
 
     #[test]
