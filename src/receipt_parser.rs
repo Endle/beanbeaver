@@ -56,6 +56,7 @@ fn scaled_to_fixed(value: i64, scale: i64) -> String {
 
 fn legacy_account_alias(target: &str) -> Option<&'static str> {
     match target {
+        "Expenses:Food:Grocery:Icecream" => Some("Expenses:Food:Grocery:Frozen:IceCream"),
         "Expenses:Food:Grocery:IceCream" => Some("Expenses:Food:Grocery:Frozen:IceCream"),
         _ => None,
     }

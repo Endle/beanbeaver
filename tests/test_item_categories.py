@@ -233,6 +233,10 @@ def test_legacy_direct_icecream_account_alias_maps_to_frozen_icecream() -> None:
     assert account_for_category_key("Expenses:Food:Grocery:IceCream") == "Expenses:Food:Grocery:Frozen:IceCream"
 
 
+def test_legacy_direct_icecream_lowercase_c_alias_maps_to_frozen_icecream() -> None:
+    assert account_for_category_key("Expenses:Food:Grocery:Icecream") == "Expenses:Food:Grocery:Frozen:IceCream"
+
+
 def test_pork_large_intestine_prefers_meat_over_lard_false_positive() -> None:
     assert (
         categorize_item(

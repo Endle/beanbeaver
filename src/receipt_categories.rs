@@ -277,6 +277,7 @@ fn normalize_rule_target(
 
 fn legacy_account_alias(target: &str) -> Option<&'static str> {
     match target {
+        "Expenses:Food:Grocery:Icecream" => Some("Expenses:Food:Grocery:Frozen:IceCream"),
         "Expenses:Food:Grocery:IceCream" => Some("Expenses:Food:Grocery:Frozen:IceCream"),
         _ => None,
     }
@@ -438,4 +439,22 @@ pub(crate) fn sorted_matches_for_debug(
     let mut matches = find_all_matches(description, rule_layers);
     matches.sort_by(|left, right| compare_match_rank(right, left));
     matches
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_account_target;
+    use std::collections::HashMap;
+
+    #[test]
+    fn resolve_account_target_normalizes_legacy_icecream_lowercase_c_alias() {
+        assert_eq!(
+            resolve_account_target(
+                Some("Expenses:Food:Grocery:Icecream"),
+                &HashMap::new(),
+                None
+            ),
+            Some("Expenses:Food:Grocery:Frozen:IceCream".to_string())
+        );
+    }
 }
