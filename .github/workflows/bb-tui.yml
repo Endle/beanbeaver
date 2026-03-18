@@ -26,19 +26,6 @@ jobs:
         run: pixi run maturin-develop-native
 
       - name: Run bb-tui smoke test
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          script -qec 'cargo run --bin bb-tui -- --quit-after-launch' /dev/null
-
-      - name: Run bb-tui smoke test
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          script -q /dev/null cargo run --bin bb-tui -- --quit-after-launch
-
-      - name: Run bb-tui smoke test
-        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           cargo run --bin bb-tui -- --quit-after-launch
