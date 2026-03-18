@@ -277,6 +277,8 @@ fn normalize_rule_target(
 
 fn legacy_account_alias(target: &str) -> Option<&'static str> {
     match target {
+        "Expenses:Food:Grocery:Dumolings" => Some("Expenses:Food:Grocery:Frozen:Dumpling"),
+        "Expenses:Food:Grocery:Dumplings" => Some("Expenses:Food:Grocery:Frozen:Dumpling"),
         "Expenses:Food:Grocery:Icecream" => Some("Expenses:Food:Grocery:Frozen:IceCream"),
         "Expenses:Food:Grocery:IceCream" => Some("Expenses:Food:Grocery:Frozen:IceCream"),
         _ => None,
@@ -455,6 +457,26 @@ mod tests {
                 None
             ),
             Some("Expenses:Food:Grocery:Frozen:IceCream".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_account_target_normalizes_legacy_dumpling_aliases() {
+        assert_eq!(
+            resolve_account_target(
+                Some("Expenses:Food:Grocery:Dumplings"),
+                &HashMap::new(),
+                None
+            ),
+            Some("Expenses:Food:Grocery:Frozen:Dumpling".to_string())
+        );
+        assert_eq!(
+            resolve_account_target(
+                Some("Expenses:Food:Grocery:Dumolings"),
+                &HashMap::new(),
+                None
+            ),
+            Some("Expenses:Food:Grocery:Frozen:Dumpling".to_string())
         );
     }
 }

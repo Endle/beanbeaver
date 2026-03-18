@@ -147,6 +147,8 @@ pub(crate) struct ResolvedReceiptData {
 
 fn legacy_account_alias(target: &str) -> Option<&'static str> {
     match target {
+        "Expenses:Food:Grocery:Dumolings" => Some("Expenses:Food:Grocery:Frozen:Dumpling"),
+        "Expenses:Food:Grocery:Dumplings" => Some("Expenses:Food:Grocery:Frozen:Dumpling"),
         "Expenses:Food:Grocery:Icecream" => Some("Expenses:Food:Grocery:Frozen:IceCream"),
         "Expenses:Food:Grocery:IceCream" => Some("Expenses:Food:Grocery:Frozen:IceCream"),
         _ => None,
