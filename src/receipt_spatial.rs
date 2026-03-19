@@ -500,6 +500,11 @@ fn is_deposit_stub(text: &str) -> bool {
     upper == "DEPOSIT" || upper.starts_with("DEPOSIT ")
 }
 
+fn lacks_description_context(text: &str) -> bool {
+    let stripped = strip_leading_receipt_codes(text);
+    stripped.is_empty() || alpha_ratio(&stripped) < 0.5
+}
+
 fn is_price_word(text: &str) -> Option<i64> {
     let normalized = normalize_decimal_spacing(text.trim());
     let stripped = normalized
@@ -852,8 +857,21 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
         let selection_anchor_y = source_line.line_y;
         let source_line_is_quantity_expression =
             looks_like_quantity_expression(&source_line.left_text);
-        let source_line_needs_item_context =
-            strip_leading_receipt_codes(&source_line.left_text).is_empty();
+        let source_line_needs_item_context = lacks_description_context(&source_line.left_text);
+        let source_line_repeats_previous_priced_item = source_line_needs_item_context
+            && all_lines
+                .iter()
+                .enumerate()
+                .filter(|(_, candidate)| {
+                    candidate.line_y < selection_anchor_y
+                        && selection_anchor_y - candidate.line_y <= MAX_ITEM_DISTANCE
+                        && is_valid_item_line(candidate, total_line_y)
+                        && line_has_trailing_price(&candidate.full_text)
+                        && trailing_price_scaled(&candidate.full_text)
+                            == Some(price_candidate.price_scaled)
+                })
+                .max_by(|(_, left), (_, right)| left.line_y.partial_cmp(&right.line_y).unwrap())
+                .is_some();
 
         if source_line_is_quantity_expression {
             let source_modifier = parse_quantity_modifier(&source_line.left_text);
@@ -970,6 +988,9 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
         }
 
         if chosen_line_index.is_none() {
+            if source_line_repeats_previous_priced_item {
+                continue;
+            }
             if let Some((index, distance)) = crate::spatial::select_spatial_item_line(
                 selection_anchor_y,
                 Y_TOLERANCE,

@@ -133,3 +133,48 @@ def test_extract_items_with_bbox_keeps_quantity_total_off_deposit_stub() -> None
     pairs = [(item.description, item.price) for item in items]
     assert any("GROW CIDER" in description and price == Decimal("2.79") for description, price in pairs)
     assert not any(description == "DEPOSIT 1" and price == Decimal("2.79") for description, price in pairs)
+
+
+def test_extract_items_with_bbox_skips_duplicate_code_row_price_before_next_item() -> None:
+    lines = [
+        {
+            "text": "27-PRODUCE CANTALOUPE MRJ 1.99",
+            "words": [
+                _word("27-PRODUCE", 0.017, 0.493, 0.205, 0.514),
+                _word("CANTALOUPE", 0.318, 0.510, 0.496, 0.529),
+                _word("MRJ", 0.676, 0.510, 0.738, 0.529),
+                _word("1.99", 0.817, 0.507, 0.896, 0.528),
+            ],
+        },
+        {
+            "text": "4050 1.99",
+            "words": [
+                _word("4050", 0.055, 0.513, 0.132, 0.532),
+                _word("1.99", 0.784, 0.525, 0.862, 0.547),
+            ],
+        },
+        {
+            "text": "81363501124 BLACKBERRIES 60Z MRJ",
+            "words": [
+                _word("81363501124", 0.054, 0.531, 0.254, 0.551),
+                _word("BLACKBERRIES 60Z", 0.319, 0.528, 0.602, 0.549),
+                _word("MRJ", 0.641, 0.528, 0.704, 0.547),
+            ],
+        },
+        {
+            "text": "TOTAL 3.98",
+            "words": [
+                _word("TOTAL", 0.090, 0.600, 0.180, 0.612),
+                _word("3.98", 0.880, 0.600, 0.950, 0.612),
+            ],
+        },
+    ]
+
+    items = _extract_items_with_bbox(
+        pages=[{"lines": lines}],
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
+    )
+
+    pairs = [(item.description, item.price) for item in items]
+    assert ("CANTALOUPE", Decimal("1.99")) in pairs
+    assert not any("BLACKBERRIES" in description and price == Decimal("1.99") for description, price in pairs)
