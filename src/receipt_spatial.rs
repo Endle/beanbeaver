@@ -494,6 +494,12 @@ fn clean_description(desc: &str) -> String {
     cleaned.trim().to_string()
 }
 
+fn is_deposit_stub(text: &str) -> bool {
+    let cleaned = clean_description(text);
+    let upper = cleaned.to_ascii_uppercase();
+    upper == "DEPOSIT" || upper.starts_with("DEPOSIT ")
+}
+
 fn is_price_word(text: &str) -> Option<i64> {
     let normalized = normalize_decimal_spacing(text.trim());
     let stripped = normalized
@@ -858,6 +864,7 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
                 if used_line_indices[index]
                     || !is_valid_item_line(candidate, total_line_y)
                     || line_has_trailing_price(&candidate.full_text)
+                    || is_deposit_stub(&candidate.left_text)
                 {
                     continue;
                 }

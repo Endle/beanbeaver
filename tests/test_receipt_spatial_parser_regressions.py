@@ -72,3 +72,64 @@ def test_extract_items_with_bbox_keeps_next_priced_item_from_stealing_code_only_
     assert ("26-L.IQUOR COORS LIGHT 6 PK HQ", Decimal("15.79")) in pairs
     assert any("COORS PINEAPPLE" in description and price == Decimal("3.19") for description, price in pairs)
     assert not any("COORS PINEAPPLE" in description and price == Decimal("0.60") for description, price in pairs)
+
+
+def test_extract_items_with_bbox_keeps_quantity_total_off_deposit_stub() -> None:
+    lines = [
+        {
+            "text": "(3)06365703339 GROWERS CIDER HQ 10.47",
+            "words": [
+                _word("(3)06365703339", 0.074, 0.385, 0.310, 0.403),
+                _word("GROWERS CIDER", 0.373, 0.381, 0.597, 0.403),
+                _word("HQ", 0.657, 0.379, 0.702, 0.400),
+                _word("10.47", 0.869, 0.393, 0.963, 0.415),
+            ],
+        },
+        {
+            "text": "3 @ $3.49",
+            "words": [_word("3 @ $3.49", 0.102, 0.403, 0.261, 0.422)],
+        },
+        {
+            "text": "DEPOSIT 1 0.30",
+            "words": [
+                _word("DEPOSIT 1", 0.100, 0.421, 0.258, 0.439),
+                _word("0.30", 0.884, 0.430, 0.961, 0.452),
+            ],
+        },
+        {
+            "text": "3@$0.10 2.79",
+            "words": [
+                _word("3@$0.10", 0.098, 0.438, 0.225, 0.457),
+                _word("2.79", 0.812, 0.451, 0.893, 0.473),
+            ],
+        },
+        {
+            "text": "06365703620 GROW CIDER HQ 0.10",
+            "words": [
+                _word("06365703620", 0.061, 0.457, 0.259, 0.475),
+                _word("GROW CIDER", 0.322, 0.456, 0.498, 0.476),
+                _word("HQ", 0.676, 0.454, 0.720, 0.475),
+                _word("0.10", 0.882, 0.469, 0.964, 0.492),
+            ],
+        },
+        {
+            "text": "DEPOSIT 1",
+            "words": [_word("DEPOSIT 1", 0.094, 0.475, 0.256, 0.495)],
+        },
+        {
+            "text": "TOTAL 13.66",
+            "words": [
+                _word("TOTAL", 0.090, 0.500, 0.180, 0.512),
+                _word("13.66", 0.880, 0.500, 0.950, 0.512),
+            ],
+        },
+    ]
+
+    items = _extract_items_with_bbox(
+        pages=[{"lines": lines}],
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
+    )
+
+    pairs = [(item.description, item.price) for item in items]
+    assert any("GROW CIDER" in description and price == Decimal("2.79") for description, price in pairs)
+    assert not any(description == "DEPOSIT 1" and price == Decimal("2.79") for description, price in pairs)
