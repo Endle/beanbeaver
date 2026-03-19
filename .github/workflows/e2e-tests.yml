@@ -3,6 +3,8 @@ name: E2E Tests (Cached)
 on:
   push:
   pull_request:
+    branches:
+      - master
   workflow_dispatch:
 
 jobs:
