@@ -268,43 +268,63 @@ class ProjectPaths:
         return self.root / "receipts"
 
     @property
+    def receipts_source_dirname(self) -> str:
+        """Canonical per-receipt source-artifact directory name."""
+        return "source"
+
+    @property
+    def receipts_ocr_dirname(self) -> str:
+        """Canonical per-receipt OCR-artifact directory name."""
+        return "ocr"
+
+    @property
+    def receipts_stages_dirname(self) -> str:
+        """Canonical per-receipt stage directory name."""
+        return "stages"
+
+    @property
+    def receipts_rendered_dirname(self) -> str:
+        """Canonical per-receipt rendered-artifact directory name."""
+        return "rendered"
+
+    @property
     def receipts_json(self) -> Path:
-        """Root staged receipt JSON directory."""
+        """Legacy staged receipt JSON root retained for migration compatibility."""
         return self.receipts / "json"
 
     @property
     def receipts_json_scanned(self) -> Path:
-        """Parsed receipt JSON awaiting manual review."""
+        """Legacy scanned receipt JSON root retained for migration compatibility."""
         return self.receipts_json / "scanned"
 
     @property
     def receipts_json_approved(self) -> Path:
-        """Reviewed receipt JSON awaiting CC match."""
+        """Legacy approved receipt JSON root retained for migration compatibility."""
         return self.receipts_json / "approved"
 
     @property
     def receipts_json_matched(self) -> Path:
-        """Receipt JSON already matched into the ledger."""
+        """Legacy matched receipt JSON root retained for migration compatibility."""
         return self.receipts_json / "matched"
 
     @property
     def receipts_rendered(self) -> Path:
-        """Root rendered receipt output directory."""
+        """Legacy rendered receipt output root retained for migration compatibility."""
         return self.receipts / "rendered"
 
     @property
     def receipts_rendered_scanned(self) -> Path:
-        """Rendered Beancount output for scanned receipts."""
+        """Legacy rendered output for scanned receipts."""
         return self.receipts_rendered / "scanned"
 
     @property
     def receipts_rendered_approved(self) -> Path:
-        """Rendered Beancount output for approved receipts."""
+        """Legacy rendered output for approved receipts."""
         return self.receipts_rendered / "approved"
 
     @property
     def receipts_rendered_matched(self) -> Path:
-        """Rendered Beancount output for matched receipts."""
+        """Legacy rendered output for matched receipts."""
         return self.receipts_rendered / "matched"
 
     @property
@@ -340,12 +360,7 @@ class ProjectPaths:
 
     def ensure_receipt_directories(self) -> None:
         """Create all receipt-related directories if they don't exist."""
-        self.receipts_json_scanned.mkdir(parents=True, exist_ok=True)
-        self.receipts_json_approved.mkdir(parents=True, exist_ok=True)
-        self.receipts_json_matched.mkdir(parents=True, exist_ok=True)
-        self.receipts_rendered_scanned.mkdir(parents=True, exist_ok=True)
-        self.receipts_rendered_approved.mkdir(parents=True, exist_ok=True)
-        self.receipts_rendered_matched.mkdir(parents=True, exist_ok=True)
+        self.receipts.mkdir(parents=True, exist_ok=True)
         self.receipts_images.mkdir(parents=True, exist_ok=True)
         self.receipts_ocr_json.mkdir(parents=True, exist_ok=True)
 

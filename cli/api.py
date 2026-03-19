@@ -36,9 +36,10 @@ def _resolve_stage_path(raw_path: str) -> Path:
 
 
 def _receipt_summary_payload(path: Path, merchant: str | None, receipt_date: object, total: object) -> dict[str, Any]:
+    receipt_dir = path.parent.parent.name if path.parent.name == "stages" else path.parent.name
     return {
         "path": str(path),
-        "receipt_dir": path.parent.name,
+        "receipt_dir": receipt_dir,
         "stage_file": path.name,
         "merchant": merchant,
         "date": _json_default(receipt_date) if receipt_date is not None else None,

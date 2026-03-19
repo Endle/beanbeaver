@@ -79,18 +79,14 @@ def test_api_list_scanned_returns_json(tmp_path: Path, monkeypatch: MonkeyPatch,
 
     captured = json.loads(capsys.readouterr().out)
     assert exit_code == 0
-    assert captured == {
-        "receipts": [
-            {
-                "date": "2026-03-01",
-                "merchant": "Store",
-                "path": str(stage_path),
-                "receipt_dir": "2026-03-01_store_12_34_abcd",
-                "stage_file": "parsed.receipt.json",
-                "total": "12.34",
-            }
-        ]
-    }
+    assert len(captured["receipts"]) == 1
+    receipt = captured["receipts"][0]
+    assert receipt["date"] == "2026-03-01"
+    assert receipt["merchant"] == "Store"
+    assert receipt["stage_file"] == "000_parsed.receipt.json"
+    assert receipt["total"] == "12.34"
+    assert receipt["receipt_dir"].startswith("2026-03-01_store_12_34_")
+    assert receipt["path"].endswith(f"{receipt['receipt_dir']}/stages/000_parsed.receipt.json")
 
 
 def test_api_list_scanned_uses_configured_project_root(
@@ -127,7 +123,8 @@ def test_api_list_scanned_uses_configured_project_root(
 
     captured = json.loads(capsys.readouterr().out)
     assert exit_code == 0
-    assert captured["receipts"][0]["path"] == str(stage_path)
+    assert captured["receipts"][0]["path"].startswith(str(project_root / "receipts" / "2026-03-01_store_12_34_"))
+    assert captured["receipts"][0]["path"].endswith("/stages/000_parsed.receipt.json")
 
 
 def test_api_show_receipt_returns_document(
@@ -208,8 +205,10 @@ def test_api_approve_scanned_moves_receipt_and_creates_review_stage(
     assert captured["status"] == "approved"
     assert captured["source_path"] == str(stage_path)
     assert approved_path.exists()
-    assert not stage_path.exists()
-    assert approved_path.parent.parent == paths.receipts_json_approved
+    assert stage_path.exists()
+    assert approved_path.parent.name == "stages"
+    assert approved_path.parent.parent.parent == paths.receipts
+    assert approved_path.name == "010_review.receipt.json"
     assert approved_document["meta"]["stage_index"] == 1
     assert approved_document["meta"]["created_by"] == "tui_review"
     assert approved_document["meta"]["pass_name"] == "tui_approve"

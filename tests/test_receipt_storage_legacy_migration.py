@@ -60,13 +60,14 @@ def test_list_approved_receipts_migrates_legacy_flat_files(tmp_path: Path, monke
     assert receipt_date == date(2026, 2, 15)
     assert total == Decimal("124.60")
 
-    assert stage_path.parent.parent == tmp_path / "receipts" / "json" / "approved"
-    assert stage_path.name == "parsed.receipt.json"
+    receipt_dir = stage_path.parent.parent
+    assert receipt_dir.parent == tmp_path / "receipts"
+    assert stage_path.parent == receipt_dir / "stages"
+    assert stage_path.name == "010_review.receipt.json"
     assert not legacy_file.exists()
 
-    rendered_files = list((tmp_path / "receipts" / "rendered" / "approved").glob("*.beancount"))
-    assert len(rendered_files) == 1
-    assert rendered_files[0].read_text(encoding="utf-8") == original_content
+    rendered_path = receipt_dir / "rendered" / "current.beancount"
+    assert rendered_path.read_text(encoding="utf-8") == original_content
 
     migrated = receipt_storage.parse_receipt_from_stage_json(stage_path)
     assert migrated.merchant == "COSTCO"
