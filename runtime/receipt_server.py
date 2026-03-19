@@ -17,15 +17,17 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from beanbeaver.receipt.ocr_extraction import resize_image_bytes, transform_paddleocr_result
 from beanbeaver.receipt.receipt_structuring import parse_receipt
 from beanbeaver.runtime import get_logger, get_paths, load_known_merchant_keywords, load_receipt_structuring_rule_layers
-from beanbeaver.runtime.receipt_pipeline import create_debug_overlay, save_ocr_json, save_stage1_ocr_json
-from beanbeaver.runtime.receipt_storage import save_scanned_receipt
+from beanbeaver.runtime.receipt_pipeline import create_debug_overlay
+from beanbeaver.runtime.receipt_storage import (
+    receipt_dir_from_stage_path,
+    receipt_ocr_overlay_path,
+    save_scanned_receipt,
+)
 
 logger = get_logger(__name__)
 
 _paths = get_paths()
 RECEIPTS_DIR = _paths.receipts
-SCANNED_DIR = _paths.receipts_scanned
-OCR_JSON_DIR = _paths.receipts_ocr_json
 OCR_SERVICE_URL = os.environ.get("OCR_SERVICE_URL", "http://localhost:8001")
 
 
@@ -154,17 +156,6 @@ async def upload_receipt(request: Request) -> JSONResponse:
                 raw_ocr_result = response.json()
                 ocr_result = transform_paddleocr_result(raw_ocr_result)
 
-                ocr_json_path = save_ocr_json(raw_ocr_result, filepath)
-                stage1_json_path = save_stage1_ocr_json(ocr_result, filepath)
-                logger.debug(f"Saved OCR JSON to {ocr_json_path}")
-                logger.debug(f"Saved Step 1 OCR JSON to {stage1_json_path}")
-
-                try:
-                    debug_image_path = create_debug_overlay(filepath, raw_ocr_result)
-                    logger.debug(f"Created debug overlay: {debug_image_path}")
-                except Exception as e:
-                    logger.warning(f"Failed to create debug overlay: {e}")
-
                 try:
                     receipt = parse_receipt(
                         ocr_result,
@@ -183,12 +174,29 @@ async def upload_receipt(request: Request) -> JSONResponse:
                     output_path = save_scanned_receipt(
                         receipt,
                         raw_ocr_payload=raw_ocr_result,
+                        stage1_ocr_payload=ocr_result,
                         image_sha256=image_sha256,
-                        ocr_json_path=ocr_json_path,
+                        source_image_path=filepath,
+                        resized_image_bytes=resized_contents,
                     )
+                    try:
+                        receipt_dir = receipt_dir_from_stage_path(output_path)
+                        debug_image_path = create_debug_overlay(
+                            filepath,
+                            raw_ocr_result,
+                            output_path=receipt_ocr_overlay_path(receipt_dir),
+                        )
+                        logger.debug(f"Created debug overlay: {debug_image_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to create debug overlay: {e}")
                     draft_filename = output_path.name
                     print(f"Saved for review: {output_path}")
                     print(f"{'=' * 60}\n")
+
+                    if filepath.exists():
+                        filepath.unlink()
+                    if resized_filepath.exists():
+                        resized_filepath.unlink()
 
                     return JSONResponse(
                         {

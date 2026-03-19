@@ -47,8 +47,8 @@ Commands:
   match [ledger]             Match approved receipts against ledger
 
 Notes:
-  receipts/json/scanned/  = OCR+parser succeeded, not reviewed
-  receipts/json/approved/ = human reviewed and edited
+  receipts/<receipt-dir>/stages/000_parsed.receipt.json = OCR+parser succeeded, not reviewed
+  receipts/<receipt-dir>/stages/010_review.receipt.json = human reviewed and edited
 """,
     )
 
@@ -218,57 +218,40 @@ Notes:
 
         return _run_legacy_command(cmd_re_edit, args)
     elif args.command == "api":
-        from beanbeaver.cli.api import (
-            cmd_api_apply_import,
-            cmd_api_apply_match,
-            cmd_api_approve_scanned,
-            cmd_api_approve_scanned_with_review,
-            cmd_api_get_config,
-            cmd_api_import_apply,
-            cmd_api_list_approved,
-            cmd_api_list_item_categories,
-            cmd_api_list_scanned,
-            cmd_api_match_candidates,
-            cmd_api_plan_import,
-            cmd_api_refresh_import_page,
-            cmd_api_re_edit_approved_with_review,
-            cmd_api_resolve_import_accounts,
-            cmd_api_set_config,
-            cmd_api_show_receipt,
-        )
+        from beanbeaver.cli import api as cli_api
 
         if args.api_command == "list-scanned":
-            return _run_legacy_command(cmd_api_list_scanned, args)
+            return _run_legacy_command(cli_api.cmd_api_list_scanned, args)
         if args.api_command == "list-approved":
-            return _run_legacy_command(cmd_api_list_approved, args)
+            return _run_legacy_command(cli_api.cmd_api_list_approved, args)
         if args.api_command == "list-item-categories":
-            return _run_legacy_command(cmd_api_list_item_categories, args)
+            return _run_legacy_command(cli_api.cmd_api_list_item_categories, args)
         if args.api_command == "show-receipt":
-            return _run_legacy_command(cmd_api_show_receipt, args)
+            return _run_legacy_command(cli_api.cmd_api_show_receipt, args)
         if args.api_command == "approve-scanned":
-            return _run_legacy_command(cmd_api_approve_scanned, args)
+            return _run_legacy_command(cli_api.cmd_api_approve_scanned, args)
         if args.api_command == "approve-scanned-with-review":
-            return _run_legacy_command(cmd_api_approve_scanned_with_review, args)
+            return _run_legacy_command(cli_api.cmd_api_approve_scanned_with_review, args)
         if args.api_command == "re-edit-approved-with-review":
-            return _run_legacy_command(cmd_api_re_edit_approved_with_review, args)
+            return _run_legacy_command(cli_api.cmd_api_re_edit_approved_with_review, args)
         if args.api_command == "match-candidates":
-            return _run_legacy_command(cmd_api_match_candidates, args)
+            return _run_legacy_command(cli_api.cmd_api_match_candidates, args)
         if args.api_command == "apply-match":
-            return _run_legacy_command(cmd_api_apply_match, args)
+            return _run_legacy_command(cli_api.cmd_api_apply_match, args)
         if args.api_command == "plan-import":
-            return _run_legacy_command(cmd_api_plan_import, args)
+            return _run_legacy_command(cli_api.cmd_api_plan_import, args)
         if args.api_command == "refresh-import-page":
-            return _run_legacy_command(cmd_api_refresh_import_page, args)
+            return _run_legacy_command(cli_api.cmd_api_refresh_import_page, args)
         if args.api_command == "resolve-import-accounts":
-            return _run_legacy_command(cmd_api_resolve_import_accounts, args)
+            return _run_legacy_command(cli_api.cmd_api_resolve_import_accounts, args)
         if args.api_command == "apply-import":
-            return _run_legacy_command(cmd_api_apply_import, args)
+            return _run_legacy_command(cli_api.cmd_api_apply_import, args)
         if args.api_command == "import-apply":
-            return _run_legacy_command(cmd_api_import_apply, args)
+            return _run_legacy_command(cli_api.cmd_api_import_apply, args)
         if args.api_command == "get-config":
-            return _run_legacy_command(cmd_api_get_config, args)
+            return _run_legacy_command(cli_api.cmd_api_get_config, args)
         if args.api_command == "set-config":
-            return _run_legacy_command(cmd_api_set_config, args)
+            return _run_legacy_command(cli_api.cmd_api_set_config, args)
         parser.print_help()
         return 1
 

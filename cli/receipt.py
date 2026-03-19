@@ -8,6 +8,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+from beanbeaver.runtime import get_logger
+
+logger = get_logger(__name__)
+
+
+def _receipt_chain_label(path: Path) -> str:
+    receipt_dir = path.parent.parent.name if path.parent.name == "stages" else path.parent.name
+    return f"{receipt_dir}/{path.name}"
+
+
 def cmd_serve(args: argparse.Namespace) -> None:
     """Start the FastAPI server for receiving receipt uploads."""
     import uvicorn
@@ -75,12 +85,12 @@ def cmd_edit(args: argparse.Namespace) -> None:
 
     receipts = list_scanned_receipts()
     if not receipts:
-        print("No scanned receipts found in receipts/json/scanned/")
+        print("No scanned receipts found in receipts/<receipt-dir>/stages/")
         return
 
     print("\nScanned receipts:")
     for i, path in enumerate(receipts, 1):
-        print(f"{i}. {path.parent.name}/{path.name}")
+        print(f"{i}. {_receipt_chain_label(path)}")
     print("q. Quit")
 
     choice = input("Select a receipt to edit: ").strip().lower()
@@ -108,7 +118,7 @@ def cmd_edit(args: argparse.Namespace) -> None:
         print(f"Editor not found: {' '.join(editor_cmd)}")
         return
     if result.status == "editor_failed":
-        print(f"Editor exited with code {result.editor_returncode}. Draft left in receipts/json/scanned/.")
+        print(f"Editor exited with code {result.editor_returncode}. Draft left in receipt staging.")
         return
     if result.status == "edited_file_missing":
         print("Edited file no longer exists. Leaving as-is.")
@@ -119,7 +129,7 @@ def cmd_edit(args: argparse.Namespace) -> None:
         return
 
     approved_path = result.approved_path
-    print(f"Staged to receipts/json/approved/: {approved_path}")
+    print(f"Staged approved review in receipt chain: {approved_path}")
 
 
 def cmd_re_edit(args: argparse.Namespace) -> None:
@@ -142,7 +152,7 @@ def cmd_re_edit(args: argparse.Namespace) -> None:
     else:
         receipts = list_approved_receipts()
         if not receipts:
-            print("No approved receipts found in receipts/json/approved/")
+            print("No approved receipts found in receipts/<receipt-dir>/stages/")
             return
 
         print("\nApproved receipts:")
@@ -150,7 +160,7 @@ def cmd_re_edit(args: argparse.Namespace) -> None:
             date_str = receipt_date.isoformat() if receipt_date else "UNKNOWN"
             amount_str = f"${amount:>7.2f}" if amount is not None else "$UNKNOWN"
             merchant_str = merchant or "UNKNOWN"
-            print(f"{i}. {date_str}  {amount_str}  {merchant_str:<30}  {path.parent.name}/{path.name}")
+            print(f"{i}. {date_str}  {amount_str}  {merchant_str:<30}  {_receipt_chain_label(path)}")
         print("q. Quit")
 
         choice = input("Select a receipt to re-edit: ").strip().lower()
@@ -202,7 +212,7 @@ def cmd_list_approved(args: argparse.Namespace) -> None:
     receipts = run_list_approved_receipts().receipts
 
     if not receipts:
-        print("No approved receipts found in receipts/json/approved/")
+        print("No approved receipts found in receipts/<receipt-dir>/stages/")
         return
 
     print(f"\nApproved receipts ({len(receipts)}):")
@@ -211,7 +221,7 @@ def cmd_list_approved(args: argparse.Namespace) -> None:
         date_str = receipt_date.isoformat() if receipt_date else "UNKNOWN"
         amount_str = f"${amount:>7.2f}" if amount is not None else "$UNKNOWN"
         merchant_str = merchant or "UNKNOWN"
-        print(f"  {date_str}  {amount_str}  {merchant_str:<30}  {path.parent.name}/{path.name}")
+        print(f"  {date_str}  {amount_str}  {merchant_str:<30}  {_receipt_chain_label(path)}")
     print("-" * 60)
     print(f"Total: {len(receipts)} receipt(s) awaiting CC match")
 
@@ -223,13 +233,13 @@ def cmd_list_scanned(args: argparse.Namespace) -> None:
     receipts = run_list_scanned_receipts().receipts
 
     if not receipts:
-        print("No scanned receipts found in receipts/json/scanned/")
+        print("No scanned receipts found in receipts/<receipt-dir>/stages/")
         return
 
     print(f"\nScanned receipts ({len(receipts)}):")
     print("-" * 60)
     for path in receipts:
-        print(f"  {path.parent.name}/{path.name}")
+        print(f"  {_receipt_chain_label(path)}")
     print("-" * 60)
     print(f"Total: {len(receipts)} receipt(s) awaiting manual review")
 

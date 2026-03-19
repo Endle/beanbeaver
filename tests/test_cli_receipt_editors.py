@@ -40,10 +40,10 @@ def test_cmd_re_edit_accepts_direct_path(
     monkeypatch: MonkeyPatch,
     capsys: CaptureFixture[str],
 ) -> None:
-    target = tmp_path / "receipts" / "json" / "approved" / "r1" / "parsed.receipt.json"
+    target = tmp_path / "receipts" / "r1" / "stages" / "010_review.receipt.json"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("{}", encoding="utf-8")
-    updated = target.parent / "review_stage_1.receipt.json"
+    updated = target.parent / "020_review.receipt.json"
     captured_path: dict[str, Path] = {}
 
     class _TtyStdin:

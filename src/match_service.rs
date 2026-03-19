@@ -535,13 +535,21 @@ fn formatter_match_input(
 }
 
 fn receipt_chain_name(approved_receipt_path: &str) -> PyResult<String> {
-    Path::new(approved_receipt_path)
+    let approved_receipt = Path::new(approved_receipt_path);
+    let parent = approved_receipt
         .parent()
-        .and_then(Path::file_name)
+        .ok_or_else(|| PyValueError::new_err("Approved receipt path must have a parent directory"))?;
+    let receipt_dir = if parent.file_name().and_then(|name| name.to_str()) == Some("stages") {
+        parent
+            .parent()
+            .ok_or_else(|| PyValueError::new_err("Approved receipt stage path must be inside a receipt directory"))?
+    } else {
+        parent
+    };
+    receipt_dir
+        .file_name()
         .map(|name| name.to_string_lossy().into_owned())
-        .ok_or_else(|| {
-            PyValueError::new_err("Approved receipt path must be inside a receipt directory")
-        })
+        .ok_or_else(|| PyValueError::new_err("Approved receipt path must be inside a receipt directory"))
 }
 
 fn move_to_matched(py: Python<'_>, approved_receipt_path: &str) -> PyResult<String> {

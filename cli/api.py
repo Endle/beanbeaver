@@ -493,8 +493,7 @@ def cmd_api_get_config(args: argparse.Namespace) -> None:
             "project_root": config.get("project_root", ""),
             "resolved_project_root": str(paths.root),
             "resolved_main_beancount_path": str(paths.main_beancount),
-            "scanned_dir": str(paths.receipts_json_scanned),
-            "approved_dir": str(paths.receipts_json_approved),
+            "receipts_dir": str(paths.receipts),
         }
     )
 
@@ -522,7 +521,6 @@ def cmd_api_set_config(args: argparse.Namespace) -> None:
             "project_root": project_root.strip(),
             "resolved_project_root": str(paths.root),
             "resolved_main_beancount_path": str(paths.main_beancount),
-            "scanned_dir": str(paths.receipts_json_scanned),
-            "approved_dir": str(paths.receipts_json_approved),
+            "receipts_dir": str(paths.receipts),
         }
     )

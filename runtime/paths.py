@@ -288,69 +288,14 @@ class ProjectPaths:
         return "rendered"
 
     @property
-    def receipts_json(self) -> Path:
-        """Legacy staged receipt JSON root retained for migration compatibility."""
-        return self.receipts / "json"
+    def receipt_stage_dir(self, receipt_dir: Path) -> Path:
+        """Return the canonical stage directory for one receipt chain."""
+        return receipt_dir / self.receipts_stages_dirname
 
     @property
-    def receipts_json_scanned(self) -> Path:
-        """Legacy scanned receipt JSON root retained for migration compatibility."""
-        return self.receipts_json / "scanned"
-
-    @property
-    def receipts_json_approved(self) -> Path:
-        """Legacy approved receipt JSON root retained for migration compatibility."""
-        return self.receipts_json / "approved"
-
-    @property
-    def receipts_json_matched(self) -> Path:
-        """Legacy matched receipt JSON root retained for migration compatibility."""
-        return self.receipts_json / "matched"
-
-    @property
-    def receipts_rendered(self) -> Path:
-        """Legacy rendered receipt output root retained for migration compatibility."""
-        return self.receipts / "rendered"
-
-    @property
-    def receipts_rendered_scanned(self) -> Path:
-        """Legacy rendered output for scanned receipts."""
-        return self.receipts_rendered / "scanned"
-
-    @property
-    def receipts_rendered_approved(self) -> Path:
-        """Legacy rendered output for approved receipts."""
-        return self.receipts_rendered / "approved"
-
-    @property
-    def receipts_rendered_matched(self) -> Path:
-        """Legacy rendered output for matched receipts."""
-        return self.receipts_rendered / "matched"
-
-    @property
-    def receipts_approved(self) -> Path:
-        """Compatibility alias for approved receipt JSON directory."""
-        return self.receipts_json_approved
-
-    @property
-    def receipts_matched(self) -> Path:
-        """Compatibility alias for matched receipt JSON directory."""
-        return self.receipts_json_matched
-
-    @property
-    def receipts_images(self) -> Path:
-        """Receipt photos/images."""
-        return self.receipts / "images"
-
-    @property
-    def receipts_scanned(self) -> Path:
-        """Compatibility alias for scanned receipt JSON directory."""
-        return self.receipts_json_scanned
-
-    @property
-    def receipts_ocr_json(self) -> Path:
-        """Raw OCR results (JSON)."""
-        return self.receipts / "ocr_json"
+    def receipts_root_description(self) -> str:
+        """Short user-facing description of the canonical receipt layout."""
+        return "receipts/<receipt-dir>/"
 
     # --- External paths ---
     @property
@@ -361,8 +306,6 @@ class ProjectPaths:
     def ensure_receipt_directories(self) -> None:
         """Create all receipt-related directories if they don't exist."""
         self.receipts.mkdir(parents=True, exist_ok=True)
-        self.receipts_images.mkdir(parents=True, exist_ok=True)
-        self.receipts_ocr_json.mkdir(parents=True, exist_ok=True)
 
 
 # Module-level singleton and temporary directory
