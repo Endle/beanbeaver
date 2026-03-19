@@ -9,13 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from beanbeaver.receipt.ocr_extraction import resize_image_bytes
 from beanbeaver.receipt.receipt_structuring import parse_receipt
 from beanbeaver.runtime import load_known_merchant_keywords, load_receipt_structuring_rule_layers
 from beanbeaver.runtime.receipt_pipeline import (
     OCRServiceUnavailable,
     call_ocr_service,
-    save_ocr_json,
-    save_stage1_ocr_json,
 )
 from beanbeaver.runtime.receipt_storage import move_scanned_to_approved, save_scanned_receipt
 
@@ -71,9 +70,6 @@ def run_receipt_scan(request: ReceiptScanRequest) -> ReceiptScanResult:
             error=str(exc),
         )
 
-    ocr_json_path = save_ocr_json(raw_ocr_result, request.image_path)
-    save_stage1_ocr_json(ocr_result, request.image_path)
-
     receipt = parse_receipt(
         ocr_result,
         image_filename=request.image_path.name,
@@ -81,11 +77,14 @@ def run_receipt_scan(request: ReceiptScanRequest) -> ReceiptScanResult:
         item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
     image_sha256 = hashlib.sha256(request.image_path.read_bytes()).hexdigest()
+    resized_image_bytes = resize_image_bytes(request.image_path.read_bytes())
     scanned_path = save_scanned_receipt(
         receipt,
         raw_ocr_payload=raw_ocr_result,
+        stage1_ocr_payload=ocr_result,
         image_sha256=image_sha256,
-        ocr_json_path=ocr_json_path,
+        source_image_path=request.image_path,
+        resized_image_bytes=resized_image_bytes,
     )
 
     if request.no_edit:

@@ -205,7 +205,7 @@ id = "legacy_0028"
 keywords = ["COORS", "BEER", "WINE", "VODKA", "WHISKEY", "WHISKY", "RUM", "GIN", "TEQUILA", "COGNAC", "CHAMPAGNE", "PROSECCO", "CIDER", "SAKE", "SOJU", "LIQUOR", "LIQUEUR", "LAGER", "STOUT", "PORTER"]
 category = "alcoholic_beverage"
 tags = ["alcoholic", "beverage"]
-priority = 0
+priority = 1
 exact_only = false
 
 [[rules]]

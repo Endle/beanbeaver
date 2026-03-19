@@ -182,6 +182,16 @@ fn re_section_aisle_prefix() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"^[^A-Z0-9]*\d{1,2}\s*[-:]").unwrap())
 }
 
+fn re_leading_section_item_prefix() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)^[^A-Z0-9]*\d{1,2}\s*[-:]\s*(MEAT|SEAFOOD|PRODUCE|DELI|GROCERY|BAKERY|FROZEN)\b\s*",
+        )
+        .unwrap()
+    })
+}
+
 fn re_ascii_words() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"[A-Z]+").unwrap())
@@ -192,6 +202,11 @@ fn re_price_word() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"^\$?(\d+\.\d{2})$").unwrap())
 }
 
+fn re_embedded_trailing_price_word() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)[A-Z]{1,6}\$?(\d+\.\d{2})$").unwrap())
+}
+
 fn re_leading_qty_prefix() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"^\(\d+\)\s*").unwrap())
@@ -199,7 +214,7 @@ fn re_leading_qty_prefix() -> &'static Regex {
 
 fn re_leading_long_sku() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"^\d{6,}\s*").unwrap())
+    RE.get_or_init(|| Regex::new(r"^\d{6,}[A-Za-z]?\s*").unwrap())
 }
 
 fn re_sale_marker() -> &'static Regex {
@@ -330,10 +345,18 @@ fn alpha_ratio(value: &str) -> f64 {
     alpha_count as f64 / value.len() as f64
 }
 
+fn is_section_name(text: &str) -> bool {
+    matches!(
+        text,
+        "MEAT" | "SEAFOOD" | "PRODUCE" | "DELI" | "GROCERY" | "BAKERY" | "FROZEN"
+    )
+}
+
 fn strip_leading_receipt_codes(text: &str) -> String {
     let trimmed = text.trim();
     let trimmed = re_leading_qty_prefix().replace(trimmed, "");
     let trimmed = re_leading_long_sku().replace(trimmed.as_ref(), "");
+    let trimmed = re_leading_section_item_prefix().replace(trimmed.as_ref(), "");
     trimmed.trim().to_string()
 }
 
@@ -344,23 +367,22 @@ fn is_section_header_text(text: &str) -> bool {
     let normalized = re_multi_spaces()
         .replace(&text.trim().to_ascii_uppercase(), " ")
         .to_string();
-    if matches!(
-        normalized.as_str(),
-        "MEAT" | "SEAFOOD" | "PRODUCE" | "DELI" | "GROCERY" | "BAKERY" | "FROZEN"
-    ) {
+    if is_section_name(normalized.as_str()) {
         return true;
     }
     if re_section_header_with_aisle().is_match(&normalized) {
         return true;
     }
     if re_section_aisle_prefix().is_match(&normalized) {
-        let has_section_token = re_ascii_words().find_iter(&normalized).any(|m| {
-            matches!(
-                m.as_str(),
-                "MEAT" | "SEAFOOD" | "PRODUCE" | "DELI" | "GROCERY" | "BAKERY" | "FROZEN"
-            )
-        });
-        if has_section_token {
+        let remainder = re_section_aisle_prefix()
+            .replace(&normalized, "")
+            .trim()
+            .to_string();
+        let words = re_ascii_words()
+            .find_iter(&remainder)
+            .map(|m| m.as_str())
+            .collect::<Vec<_>>();
+        if words.len() == 1 && is_section_name(words[0]) {
             return true;
         }
     }
@@ -486,12 +508,26 @@ fn clean_description(desc: &str) -> String {
         .replace_all(&cleaned, "")
         .to_string();
     cleaned = re_leading_long_sku().replace(&cleaned, "").to_string();
+    cleaned = re_leading_section_item_prefix()
+        .replace(&cleaned, "")
+        .to_string();
     cleaned = re_cahrd().replace_all(&cleaned, "").to_string();
     cleaned = re_hed_word().replace_all(&cleaned, "").to_string();
     cleaned = re_leading_non_alnum().replace(&cleaned, "").to_string();
     cleaned = re_trailing_non_alnum().replace(&cleaned, "").to_string();
     cleaned = re_multi_spaces().replace_all(&cleaned, " ").to_string();
     cleaned.trim().to_string()
+}
+
+fn is_deposit_stub(text: &str) -> bool {
+    let cleaned = clean_description(text);
+    let upper = cleaned.to_ascii_uppercase();
+    upper == "DEPOSIT" || upper.starts_with("DEPOSIT ")
+}
+
+fn lacks_description_context(text: &str) -> bool {
+    let stripped = strip_leading_receipt_codes(text);
+    stripped.is_empty() || alpha_ratio(&stripped) < 0.5
 }
 
 fn is_price_word(text: &str) -> Option<i64> {
@@ -501,7 +537,13 @@ fn is_price_word(text: &str) -> Option<i64> {
         .map(str::trim_start)
         .or_else(|| normalized.strip_prefix('w').map(str::trim_start))
         .unwrap_or(normalized.as_str());
-    let captures = re_price_word().captures(stripped)?;
+    if let Some(captures) = re_price_word().captures(stripped) {
+        return parse_scaled_decimal(captures.get(1)?.as_str());
+    }
+    if stripped.contains('@') || stripped.contains('/') {
+        return None;
+    }
+    let captures = re_embedded_trailing_price_word().captures(stripped)?;
     parse_scaled_decimal(captures.get(1)?.as_str())
 }
 
@@ -590,6 +632,45 @@ fn is_valid_item_line(line: &ParsedLine, total_line_y: Option<f64>) -> bool {
         return false;
     }
     true
+}
+
+fn has_nearby_quantity_expression_above(all_lines: &[ParsedLine], line_index: usize) -> bool {
+    let anchor_y = all_lines[line_index].line_y;
+    all_lines
+        .iter()
+        .enumerate()
+        .filter(|(index, candidate)| {
+            *index != line_index
+                && candidate.line_y < anchor_y
+                && anchor_y - candidate.line_y <= MAX_ITEM_DISTANCE
+        })
+        .max_by(|(_, left), (_, right)| left.line_y.partial_cmp(&right.line_y).unwrap())
+        .is_some_and(|(_, candidate)| looks_like_quantity_expression(&candidate.left_text))
+}
+
+fn nearest_unpriced_deposit_stub_below(
+    all_lines: &[ParsedLine],
+    line_index: usize,
+    used_line_indices: &[bool],
+) -> Option<(usize, f64)> {
+    let anchor_y = all_lines[line_index].line_y;
+    let nearest_below = all_lines
+        .iter()
+        .enumerate()
+        .filter(|(index, candidate)| {
+            *index != line_index
+                && candidate.line_y > anchor_y
+                && candidate.line_y - anchor_y <= MAX_ITEM_DISTANCE
+        })
+        .min_by(|(_, left), (_, right)| left.line_y.partial_cmp(&right.line_y).unwrap())?;
+    let (index, candidate) = nearest_below;
+    if used_line_indices[index]
+        || !is_deposit_stub(&candidate.left_text)
+        || line_has_trailing_price(&candidate.full_text)
+    {
+        return None;
+    }
+    Some((index, candidate.line_y - anchor_y))
 }
 
 fn y_center(word: &WordInput) -> f64 {
@@ -729,6 +810,9 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
                     if (candidate.line_y - price_y).abs() > Y_TOLERANCE {
                         continue;
                     }
+                    if candidate.line_y > price_y + SPATIAL_FLOAT_EPSILON {
+                        continue;
+                    }
                     if is_summary_line(&candidate.left_text)
                         || is_summary_line(&candidate.full_text)
                     {
@@ -842,25 +926,81 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
         let mut found_item = false;
         let mut chosen_line_index = None;
         let mut chosen_distance = f64::INFINITY;
+        let mut suppress_fallback_for_ambiguous_code_only_source = false;
         let selection_anchor_y = source_line.line_y;
         let source_line_is_quantity_expression =
             looks_like_quantity_expression(&source_line.left_text);
+        let source_line_needs_item_context = lacks_description_context(&source_line.left_text);
+        let source_line_repeats_previous_priced_item = source_line_needs_item_context
+            && all_lines
+                .iter()
+                .enumerate()
+                .filter(|(_, candidate)| {
+                    candidate.line_y < selection_anchor_y
+                        && selection_anchor_y - candidate.line_y <= MAX_ITEM_DISTANCE
+                        && is_valid_item_line(candidate, total_line_y)
+                        && line_has_trailing_price(&candidate.full_text)
+                        && trailing_price_scaled(&candidate.full_text)
+                            == Some(price_candidate.price_scaled)
+                })
+                .max_by(|(_, left), (_, right)| left.line_y.partial_cmp(&right.line_y).unwrap())
+                .is_some();
 
         if source_line_is_quantity_expression {
             let source_modifier = parse_quantity_modifier(&source_line.left_text);
             let mut nearest_unpriced_above = None;
             let mut nearest_unpriced_below = None;
+            let mut nearest_priced_below_with_deposit_stub = None;
+            // Deposit stubs (e.g. "DEPOSIT 1") are normally skipped so a regular
+            // quantity expression like "3@$3.49" doesn't pair with a deposit label
+            // above it.  But when a quantity expression IS for a deposit (e.g.
+            // "2@$0.10 0.20"), the deposit stub immediately above IS the correct
+            // target.  Track the closest unused deposit stub within Y_TOLERANCE so
+            // we can fall back to it when no regular item is found above.
+            let mut nearest_deposit_stub_above_within_tolerance: Option<(usize, f64)> = None;
 
             for (index, candidate) in all_lines.iter().enumerate() {
-                if used_line_indices[index]
-                    || !is_valid_item_line(candidate, total_line_y)
-                    || line_has_trailing_price(&candidate.full_text)
-                {
+                if used_line_indices[index] || !is_valid_item_line(candidate, total_line_y) {
                     continue;
                 }
 
                 let distance = (candidate.line_y - selection_anchor_y).abs();
                 if distance > MAX_ITEM_DISTANCE + SPATIAL_FLOAT_EPSILON {
+                    continue;
+                }
+
+                let candidate_has_trailing_price = line_has_trailing_price(&candidate.full_text);
+                if candidate_has_trailing_price {
+                    if candidate.line_y > selection_anchor_y
+                        && nearest_unpriced_deposit_stub_below(
+                            &all_lines,
+                            index,
+                            &used_line_indices,
+                        )
+                        .is_some()
+                    {
+                        match nearest_priced_below_with_deposit_stub {
+                            Some((_, current_distance)) if distance >= current_distance => {}
+                            _ => nearest_priced_below_with_deposit_stub = Some((index, distance)),
+                        }
+                    }
+                    continue;
+                }
+
+                if is_deposit_stub(&candidate.left_text) {
+                    // Track closest deposit stub above within Y_TOLERANCE as a
+                    // fallback for deposit-quantity expressions.
+                    if candidate.line_y < selection_anchor_y
+                        && distance <= Y_TOLERANCE + SPATIAL_FLOAT_EPSILON
+                    {
+                        match nearest_deposit_stub_above_within_tolerance {
+                            Some((_, current_distance)) if distance >= current_distance => {}
+                            _ => {
+                                nearest_deposit_stub_above_within_tolerance =
+                                    Some((index, distance))
+                            }
+                        }
+                    }
                     continue;
                 }
 
@@ -899,11 +1039,30 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
                         Some(below_index)
                     }
                 }
-                (Some((index, distance)), None, _) | (None, Some((index, distance)), _) => {
+                (Some((index, distance)), None, _) => {
                     chosen_distance = distance;
                     Some(index)
                 }
-                (None, None, _) => None,
+                // No regular item above: prefer a deposit stub within Y_TOLERANCE
+                // over a non-deposit item below, so "2@$0.10" pairs with "DEPOSIT 1"
+                // rather than the next real item below.
+                (None, Some((below_index, below_distance)), _) => {
+                    if let Some((stub_index, stub_distance)) =
+                        nearest_deposit_stub_above_within_tolerance
+                    {
+                        chosen_distance = stub_distance;
+                        Some(stub_index)
+                    } else {
+                        chosen_distance = below_distance;
+                        Some(below_index)
+                    }
+                }
+                (None, None, _) => nearest_priced_below_with_deposit_stub
+                    .or(nearest_deposit_stub_above_within_tolerance)
+                    .map(|(index, distance)| {
+                        chosen_distance = distance;
+                        index
+                    }),
             };
         }
 
@@ -937,11 +1096,35 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
             }
         }
 
+        let source_distance = (source_line.line_y - price_y).abs();
+        let shifted_deposit_target = if source_distance <= Y_TOLERANCE
+            && is_valid_item_line(source_line, total_line_y)
+            && !looks_like_quantity_expression(&source_line.left_text)
+            && has_nearby_quantity_expression_above(&all_lines, price_candidate.source_line_index)
+        {
+            nearest_unpriced_deposit_stub_below(
+                &all_lines,
+                price_candidate.source_line_index,
+                &used_line_indices,
+            )
+        } else {
+            None
+        };
+
         if onsale_target_line_index.is_none()
             && !used_line_indices[price_candidate.source_line_index]
         {
-            let source_distance = (source_line.line_y - price_y).abs();
-            if source_distance <= Y_TOLERANCE
+            if shifted_deposit_target.is_none()
+                && trailing_price_scaled(&source_line.full_text) == Some(price_candidate.price_scaled)
+                && is_valid_item_line(source_line, total_line_y)
+                && !looks_like_quantity_expression(&source_line.left_text)
+            {
+                chosen_line_index = Some(price_candidate.source_line_index);
+                chosen_distance = source_distance;
+            } else if let Some((index, distance)) = shifted_deposit_target {
+                chosen_line_index = Some(index);
+                chosen_distance = distance;
+            } else if source_distance <= Y_TOLERANCE
                 && is_valid_item_line(source_line, total_line_y)
                 && !looks_like_quantity_expression(&source_line.left_text)
             {
@@ -968,8 +1151,16 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
                 price_line_has_onsale,
                 line_selection_candidates,
             ) {
-                chosen_line_index = Some(index);
-                chosen_distance = distance;
+                let selected_line = &all_lines[index];
+                let selected_line_is_next_priced_row = source_line_needs_item_context
+                    && selected_line.line_y > price_y + SPATIAL_FLOAT_EPSILON
+                    && line_has_trailing_price(&selected_line.full_text);
+                if selected_line_is_next_priced_row {
+                    suppress_fallback_for_ambiguous_code_only_source = true;
+                } else {
+                    chosen_line_index = Some(index);
+                    chosen_distance = distance;
+                }
             }
         }
 
@@ -992,7 +1183,28 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
             }
         }
 
-        if !found_item {
+        if !found_item
+            && shifted_deposit_target.is_none()
+            && !used_line_indices[price_candidate.source_line_index]
+            && trailing_price_scaled(&source_line.full_text) == Some(price_candidate.price_scaled)
+            && is_valid_item_line(source_line, total_line_y)
+            && !looks_like_quantity_expression(&source_line.left_text)
+        {
+            let description = clean_description(&source_line.left_text);
+            if description.len() > 2 {
+                used_line_indices[price_candidate.source_line_index] = true;
+                items.push(SpatialExtractedItem {
+                    description,
+                    price_scaled: price_candidate.price_scaled,
+                });
+                found_item = true;
+            }
+        }
+
+        if !found_item && !suppress_fallback_for_ambiguous_code_only_source {
+            if source_line_repeats_previous_priced_item {
+                continue;
+            }
             let mut lines_above = all_lines
                 .iter()
                 .enumerate()

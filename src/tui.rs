@@ -528,8 +528,11 @@ struct ConfigResponse {
     project_root: String,
     resolved_project_root: String,
     resolved_main_beancount_path: String,
-    scanned_dir: String,
-    approved_dir: String,
+    receipts_dir: String,
+    #[serde(default, rename = "scanned_dir")]
+    _scanned_dir: String,
+    #[serde(default, rename = "approved_dir")]
+    _approved_dir: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2146,8 +2149,9 @@ impl App {
                 project_root: String::new(),
                 resolved_project_root: String::new(),
                 resolved_main_beancount_path: String::new(),
-                scanned_dir: String::new(),
-                approved_dir: String::new(),
+                receipts_dir: String::new(),
+                _scanned_dir: String::new(),
+                _approved_dir: String::new(),
             },
             config_state: None,
             match_state: None,
@@ -4855,10 +4859,9 @@ fn render_config_modal(
     frame.render_widget(resolved, rows[2]);
 
     let saved_in = Paragraph::new(format!(
-        "main.beancount: {}\nscanned: {}\napproved: {}\nconfig: {}",
+        "main.beancount: {}\nreceipts: {}\nconfig: {}",
         config.resolved_main_beancount_path,
-        config.scanned_dir,
-        config.approved_dir,
+        config.receipts_dir,
         config.config_path
     ))
     .block(

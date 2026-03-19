@@ -8,12 +8,10 @@ from typing import Any
 import httpx
 
 from beanbeaver.receipt.ocr_extraction import OCR_IMAGE_PADDING, resize_image_bytes, transform_paddleocr_result
-from beanbeaver.runtime import get_logger, get_paths
+from beanbeaver.runtime import get_logger
+from beanbeaver.runtime.receipt_storage import receipt_ocr_overlay_path, receipt_ocr_raw_path
 
 logger = get_logger(__name__)
-
-_paths = get_paths()
-OCR_JSON_DIR = _paths.receipts_ocr_json
 
 
 class OCRServiceUnavailable(RuntimeError):
@@ -58,20 +56,26 @@ def call_ocr_service(receipt_path: Path, ocr_url: str) -> tuple[dict[str, Any], 
         raise OCRServiceUnavailable(f"Failed to connect to OCR service: {e}") from e
 
 
-def save_ocr_json(ocr_result: dict[str, Any], receipt_path: Path) -> Path:
+def save_ocr_json(ocr_result: dict[str, Any], receipt_path: Path, *, output_path: Path | None = None) -> Path:
     """Save OCR result JSON for debugging."""
-    OCR_JSON_DIR.mkdir(parents=True, exist_ok=True)
-    ocr_json_path = OCR_JSON_DIR / f"{receipt_path.stem}.json"
-    ocr_json_path.write_text(json.dumps(ocr_result, indent=2))
+    if output_path is None:
+        ocr_json_path = receipt_path.with_suffix(".json")
+    else:
+        ocr_json_path = output_path
+        ocr_json_path.parent.mkdir(parents=True, exist_ok=True)
+    ocr_json_path.write_text(json.dumps(ocr_result, indent=2) + "\n", encoding="utf-8")
     logger.debug("OCR JSON saved to: %s", ocr_json_path)
     return ocr_json_path
 
 
-def save_stage1_ocr_json(ocr_result: dict[str, Any], receipt_path: Path) -> Path:
+def save_stage1_ocr_json(ocr_result: dict[str, Any], receipt_path: Path, *, output_path: Path | None = None) -> Path:
     """Save normalized Step 1 OCR output alongside the raw OCR payload."""
-    OCR_JSON_DIR.mkdir(parents=True, exist_ok=True)
-    ocr_json_path = OCR_JSON_DIR / f"{receipt_path.stem}.stage1.json"
-    ocr_json_path.write_text(json.dumps(ocr_result, indent=2))
+    if output_path is None:
+        ocr_json_path = receipt_path.with_name(f"{receipt_path.stem}.stage1.json")
+    else:
+        ocr_json_path = output_path
+        ocr_json_path.parent.mkdir(parents=True, exist_ok=True)
+    ocr_json_path.write_text(json.dumps(ocr_result, indent=2) + "\n", encoding="utf-8")
     logger.debug("Stage 1 OCR JSON saved to: %s", ocr_json_path)
     return ocr_json_path
 
@@ -141,10 +145,17 @@ def create_debug_overlay(
 def create_debug_overlay_from_json(image_path: Path, json_path: Path | None = None) -> Path:
     """Create debug overlay from an OCR JSON file."""
     if json_path is None:
-        json_path = OCR_JSON_DIR / f"{image_path.stem}.json"
+        if image_path.parent.name == "source" and image_path.parent.parent.exists():
+            receipt_dir = image_path.parent.parent
+            json_path = receipt_ocr_raw_path(receipt_dir)
+        else:
+            json_path = image_path.with_suffix(".json")
 
     if not json_path.exists():
         raise FileNotFoundError(f"OCR JSON not found: {json_path}")
 
     raw_ocr_result = json.loads(json_path.read_text())
-    return create_debug_overlay(image_path, raw_ocr_result)
+    output_path = None
+    if image_path.parent.name == "source" and image_path.parent.parent.exists():
+        output_path = receipt_ocr_overlay_path(image_path.parent.parent)
+    return create_debug_overlay(image_path, raw_ocr_result, output_path=output_path)

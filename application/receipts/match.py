@@ -39,7 +39,7 @@ type ResolveEditorCmd = Callable[[], list[str]]
 
 def _receipt_chain_name(stage_path: Path) -> str:
     """Return a stable human-readable name for one receipt chain."""
-    return stage_path.parent.name
+    return stage_path.parent.parent.name if stage_path.parent.name == "stages" else stage_path.parent.name
 
 
 @dataclass(frozen=True)
@@ -620,7 +620,7 @@ def cmd_match(args: argparse.Namespace) -> None:
     scanned = list_scanned_receipts()
     if scanned:
         print(
-            f"Warning: {len(scanned)} receipt(s) still in receipts/json/scanned/. "
+            f"Warning: {len(scanned)} receipt(s) still in scanned receipt stages. "
             "Review with `bb edit` to move them to approved."
         )
 

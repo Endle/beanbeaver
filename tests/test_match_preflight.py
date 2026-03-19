@@ -137,8 +137,8 @@ def test_prompt_failed_match_recovery_defaults_to_skip(monkeypatch: MonkeyPatch)
 
 
 def test_re_edit_receipt_after_failed_match_returns_updated_path(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
-    target = tmp_path / "receipts" / "json" / "approved" / "r1" / "parsed.receipt.json"
-    updated = target.parent / "review_stage_1.receipt.json"
+    target = tmp_path / "receipts" / "r1" / "stages" / "010_review.receipt.json"
+    updated = target.parent / "020_review.receipt.json"
 
     def _fake_run(request: object) -> ReEditApprovedReceiptResult:
         return ReEditApprovedReceiptResult(status="updated", updated_path=updated)
@@ -152,7 +152,7 @@ def test_re_edit_receipt_after_failed_match_returns_updated_path(monkeypatch: Mo
 
 
 def test_format_receipt_inspection_includes_items_and_warnings(tmp_path: Path) -> None:
-    path = tmp_path / "receipts" / "json" / "approved" / "r1" / "parsed.receipt.json"
+    path = tmp_path / "receipts" / "r1" / "stages" / "010_review.receipt.json"
     receipt = Receipt(
         merchant="T&T SUPERMARKET",
         date=date(2026, 1, 23),
@@ -249,7 +249,7 @@ def test_prompt_match_choice_views_details_then_returns_selection(monkeypatch: M
 
     choice = _prompt_match_choice(
         receipt=receipt,
-        path=tmp_path / "receipts" / "json" / "approved" / "r1" / "parsed.receipt.json",
+        path=tmp_path / "receipts" / "r1" / "stages" / "010_review.receipt.json",
         display_matches=[match],
     )
 

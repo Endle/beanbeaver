@@ -61,9 +61,17 @@ def _write(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def _canonical_stage_path(paths: ProjectPaths, *, receipt_dir: str, filename: str) -> Path:
+    return paths.receipts / receipt_dir / "stages" / filename
+
+
 def test_api_list_scanned_returns_json(tmp_path: Path, monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]) -> None:
     paths = _configure_temp_root(tmp_path, monkeypatch)
-    stage_path = paths.receipts_json_scanned / "2026-03-01_store_12_34_abcd" / "parsed.receipt.json"
+    stage_path = _canonical_stage_path(
+        paths,
+        receipt_dir="2026-03-01_store_12_34_abcd",
+        filename="000_parsed.receipt.json",
+    )
     save_stage_document(
         stage_path,
         _stage_document(
@@ -79,18 +87,14 @@ def test_api_list_scanned_returns_json(tmp_path: Path, monkeypatch: MonkeyPatch,
 
     captured = json.loads(capsys.readouterr().out)
     assert exit_code == 0
-    assert captured == {
-        "receipts": [
-            {
-                "date": "2026-03-01",
-                "merchant": "Store",
-                "path": str(stage_path),
-                "receipt_dir": "2026-03-01_store_12_34_abcd",
-                "stage_file": "parsed.receipt.json",
-                "total": "12.34",
-            }
-        ]
-    }
+    assert len(captured["receipts"]) == 1
+    receipt = captured["receipts"][0]
+    assert receipt["date"] == "2026-03-01"
+    assert receipt["merchant"] == "Store"
+    assert receipt["stage_file"] == "000_parsed.receipt.json"
+    assert receipt["total"] == "12.34"
+    assert receipt["receipt_dir"] == "2026-03-01_store_12_34_abcd"
+    assert receipt["path"] == str(stage_path)
 
 
 def test_api_list_scanned_uses_configured_project_root(
@@ -111,7 +115,11 @@ def test_api_list_scanned_uses_configured_project_root(
     runtime_paths.reset_paths()
     importlib.reload(receipt_storage)
 
-    stage_path = paths.receipts_json_scanned / "2026-03-01_store_12_34_abcd" / "parsed.receipt.json"
+    stage_path = _canonical_stage_path(
+        paths,
+        receipt_dir="2026-03-01_store_12_34_abcd",
+        filename="000_parsed.receipt.json",
+    )
     save_stage_document(
         stage_path,
         _stage_document(
@@ -134,7 +142,11 @@ def test_api_show_receipt_returns_document(
     tmp_path: Path, monkeypatch: MonkeyPatch, capsys: CaptureFixture[str]
 ) -> None:
     paths = _configure_temp_root(tmp_path, monkeypatch)
-    stage_path = paths.receipts_json_approved / "2026-03-02_shop_30_00_beef" / "review_stage_1.receipt.json"
+    stage_path = _canonical_stage_path(
+        paths,
+        receipt_dir="2026-03-02_shop_30_00_beef",
+        filename="010_review.receipt.json",
+    )
     document = _stage_document(
         merchant="Shop",
         receipt_date="2026-03-02",
@@ -154,7 +166,7 @@ def test_api_show_receipt_returns_document(
         "merchant": "Shop",
         "path": str(stage_path),
         "receipt_dir": "2026-03-02_shop_30_00_beef",
-        "stage_file": "review_stage_1.receipt.json",
+        "stage_file": "010_review.receipt.json",
         "total": "30.00",
     }
     assert captured["document"] == document
@@ -186,8 +198,11 @@ def test_api_approve_scanned_moves_receipt_and_creates_review_stage(
     capsys: CaptureFixture[str],
 ) -> None:
     paths = _configure_temp_root(tmp_path, monkeypatch)
-    scanned_dir = paths.receipts_json_scanned / "2026-03-03_market_8_50_cafe"
-    stage_path = scanned_dir / "parsed.receipt.json"
+    stage_path = _canonical_stage_path(
+        paths,
+        receipt_dir="2026-03-03_market_8_50_cafe",
+        filename="000_parsed.receipt.json",
+    )
     save_stage_document(
         stage_path,
         _stage_document(
@@ -208,8 +223,9 @@ def test_api_approve_scanned_moves_receipt_and_creates_review_stage(
     assert captured["status"] == "approved"
     assert captured["source_path"] == str(stage_path)
     assert approved_path.exists()
-    assert not stage_path.exists()
-    assert approved_path.parent.parent == paths.receipts_json_approved
+    assert approved_path.parent.name == "stages"
+    assert approved_path.parent.parent.parent == paths.receipts
+    assert approved_path.name == "010_review.receipt.json"
     assert approved_document["meta"]["stage_index"] == 1
     assert approved_document["meta"]["created_by"] == "tui_review"
     assert approved_document["meta"]["pass_name"] == "tui_approve"
@@ -221,8 +237,11 @@ def test_api_approve_scanned_with_review_applies_receipt_overrides(
     capsys: CaptureFixture[str],
 ) -> None:
     paths = _configure_temp_root(tmp_path, monkeypatch)
-    scanned_dir = paths.receipts_json_scanned / "2026-03-04_market_10_00_feed"
-    stage_path = scanned_dir / "parsed.receipt.json"
+    stage_path = _canonical_stage_path(
+        paths,
+        receipt_dir="2026-03-04_market_10_00_feed",
+        filename="000_parsed.receipt.json",
+    )
     save_stage_document(
         stage_path,
         _stage_document(
@@ -257,8 +276,11 @@ def test_api_approve_scanned_with_review_applies_item_overrides(
     capsys: CaptureFixture[str],
 ) -> None:
     paths = _configure_temp_root(tmp_path, monkeypatch)
-    scanned_dir = paths.receipts_json_scanned / "2026-03-04_costco_221_97_feed"
-    stage_path = scanned_dir / "parsed.receipt.json"
+    stage_path = _canonical_stage_path(
+        paths,
+        receipt_dir="2026-03-04_costco_221_97_feed",
+        filename="000_parsed.receipt.json",
+    )
     save_stage_document(
         stage_path,
         {
@@ -343,8 +365,11 @@ def test_api_re_edit_approved_with_review_applies_receipt_overrides(
     capsys: CaptureFixture[str],
 ) -> None:
     paths = _configure_temp_root(tmp_path, monkeypatch)
-    approved_dir = paths.receipts_json_approved / "2026-03-04_market_10_00_feed"
-    stage_path = approved_dir / "review_stage_1.receipt.json"
+    stage_path = _canonical_stage_path(
+        paths,
+        receipt_dir="2026-03-04_market_10_00_feed",
+        filename="010_review.receipt.json",
+    )
     save_stage_document(
         stage_path,
         _stage_document(
@@ -380,8 +405,11 @@ def test_api_re_edit_approved_with_review_appends_new_item(
     capsys: CaptureFixture[str],
 ) -> None:
     paths = _configure_temp_root(tmp_path, monkeypatch)
-    approved_dir = paths.receipts_json_approved / "2026-03-04_market_10_00_feed"
-    stage_path = approved_dir / "review_stage_1.receipt.json"
+    stage_path = _canonical_stage_path(
+        paths,
+        receipt_dir="2026-03-04_market_10_00_feed",
+        filename="010_review.receipt.json",
+    )
     save_stage_document(
         stage_path,
         {
@@ -470,8 +498,11 @@ include "records/2026/carda_0101_0131.beancount"
   Expenses:Food 10.00 CAD
 """.lstrip(),
     )
-    approved_dir = paths.receipts_json_approved / "2026-03-04_market_10_00_feed"
-    stage_path = approved_dir / "review_stage_1.receipt.json"
+    stage_path = _canonical_stage_path(
+        paths,
+        receipt_dir="2026-03-04_market_10_00_feed",
+        filename="010_review.receipt.json",
+    )
     save_stage_document(
         stage_path,
         _stage_document(
@@ -529,8 +560,11 @@ include "records/2026/carda_0101_0131.beancount"
   Expenses:Food 10.70 CAD
 """.lstrip(),
     )
-    approved_dir = paths.receipts_json_approved / "2026-03-04_market_10_00_feed"
-    stage_path = approved_dir / "review_stage_1.receipt.json"
+    stage_path = _canonical_stage_path(
+        paths,
+        receipt_dir="2026-03-04_market_10_00_feed",
+        filename="010_review.receipt.json",
+    )
     save_stage_document(
         stage_path,
         _stage_document(
@@ -846,8 +880,7 @@ def test_api_get_config_returns_resolved_project_root(
     assert captured["project_root"] == "../project"
     assert captured["resolved_project_root"] == str(project_root.resolve())
     assert captured["resolved_main_beancount_path"] == str((project_root / "main.beancount").resolve())
-    assert captured["scanned_dir"] == str((project_root / "receipts" / "json" / "scanned").resolve())
-    assert captured["approved_dir"] == str((project_root / "receipts" / "json" / "approved").resolve())
+    assert captured["receipts_dir"] == str((project_root / "receipts").resolve())
 
 
 def test_api_set_config_persists_project_root(
@@ -875,6 +908,7 @@ def test_api_set_config_persists_project_root(
     assert captured["project_root"] == "../project"
     assert captured["resolved_project_root"] == str(project_root.resolve())
     assert captured["resolved_main_beancount_path"] == str((project_root / "main.beancount").resolve())
+    assert captured["receipts_dir"] == str((project_root / "receipts").resolve())
     assert json.loads((package_root / "config" / "tui.json").read_text(encoding="utf-8")) == {
         "project_root": "../project"
     }

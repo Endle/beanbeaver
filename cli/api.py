@@ -36,9 +36,10 @@ def _resolve_stage_path(raw_path: str) -> Path:
 
 
 def _receipt_summary_payload(path: Path, merchant: str | None, receipt_date: object, total: object) -> dict[str, Any]:
+    receipt_dir = path.parent.parent.name if path.parent.name == "stages" else path.parent.name
     return {
         "path": str(path),
-        "receipt_dir": path.parent.name,
+        "receipt_dir": receipt_dir,
         "stage_file": path.name,
         "merchant": merchant,
         "date": _json_default(receipt_date) if receipt_date is not None else None,
@@ -492,8 +493,7 @@ def cmd_api_get_config(args: argparse.Namespace) -> None:
             "project_root": config.get("project_root", ""),
             "resolved_project_root": str(paths.root),
             "resolved_main_beancount_path": str(paths.main_beancount),
-            "scanned_dir": str(paths.receipts_json_scanned),
-            "approved_dir": str(paths.receipts_json_approved),
+            "receipts_dir": str(paths.receipts),
         }
     )
 
@@ -521,7 +521,6 @@ def cmd_api_set_config(args: argparse.Namespace) -> None:
             "project_root": project_root.strip(),
             "resolved_project_root": str(paths.root),
             "resolved_main_beancount_path": str(paths.main_beancount),
-            "scanned_dir": str(paths.receipts_json_scanned),
-            "approved_dir": str(paths.receipts_json_approved),
+            "receipts_dir": str(paths.receipts),
         }
     )

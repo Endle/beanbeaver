@@ -53,6 +53,10 @@ def _write(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def _canonical_stage_path(paths: ProjectPaths, *, receipt_dir: str, filename: str) -> Path:
+    return paths.receipts / receipt_dir / "stages" / filename
+
+
 def test_plan_receipt_matches_returns_typed_plans(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     paths = _configure_temp_root(tmp_path, monkeypatch)
     _write(
@@ -74,8 +78,16 @@ include "records/2026/carda_0101_0131.beancount"
 """.lstrip(),
     )
 
-    matchable_path = paths.receipts_json_approved / "2026-03-04_market_10_00_feed" / "review_stage_1.receipt.json"
-    unmatched_path = paths.receipts_json_approved / "2026-03-05_other_25_00_feed" / "review_stage_1.receipt.json"
+    matchable_path = _canonical_stage_path(
+        paths,
+        receipt_dir="2026-03-04_market_10_00_feed",
+        filename="010_review.receipt.json",
+    )
+    unmatched_path = _canonical_stage_path(
+        paths,
+        receipt_dir="2026-03-05_other_25_00_feed",
+        filename="010_review.receipt.json",
+    )
     save_stage_document(
         matchable_path,
         _stage_document(
@@ -108,4 +120,3 @@ include "records/2026/carda_0101_0131.beancount"
     assert plans[1].errors == []
     assert plans[1].candidates == []
     assert plans[1].warning == "No reliable matches found, and no weaker fallback candidates were found."
-
