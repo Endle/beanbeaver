@@ -1790,6 +1790,79 @@ impl ReviewState {
         })
     }
 
+    fn preview_receipt_field_value(&self, index: usize) -> &str {
+        if let Some(input) = &self.text_input {
+            if let ReviewEditTarget::ReceiptField(target_index) = input.target {
+                if target_index == index {
+                    return input.value.as_str();
+                }
+            }
+        }
+        self.fields
+            .get(index)
+            .map(|field| field.value.as_str())
+            .unwrap_or("")
+    }
+
+    fn preview_item_description(&self, index: usize) -> &str {
+        if let Some(input) = &self.text_input {
+            if let ReviewEditTarget::ItemDescription(target_index) = input.target {
+                if target_index == index {
+                    return input.value.as_str();
+                }
+            }
+        }
+        self.items
+            .get(index)
+            .map(|item| item.description.as_str())
+            .unwrap_or("")
+    }
+
+    fn preview_item_price(&self, index: usize) -> &str {
+        if let Some(input) = &self.text_input {
+            if let ReviewEditTarget::ItemPrice(target_index) = input.target {
+                if target_index == index {
+                    return input.value.as_str();
+                }
+            }
+        }
+        self.items
+            .get(index)
+            .map(|item| item.price.as_str())
+            .unwrap_or("")
+    }
+
+    fn preview_item_notes(&self, index: usize) -> &str {
+        if let Some(input) = &self.text_input {
+            if let ReviewEditTarget::ItemNotes(target_index) = input.target {
+                if target_index == index {
+                    return input.value.as_str();
+                }
+            }
+        }
+        self.items
+            .get(index)
+            .map(|item| item.notes.as_str())
+            .unwrap_or("")
+    }
+
+    fn itemized_total_scaled(&self) -> i64 {
+        let item_total: i64 = self
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| !item.removed)
+            .map(|(index, _)| review_decimal_to_scaled(self.preview_item_price(index)))
+            .sum();
+        let tax = self
+            .fields
+            .iter()
+            .position(|field| field.field == ReceiptReviewField::Tax)
+            .map(|index| review_decimal_to_scaled(self.preview_receipt_field_value(index)))
+            .unwrap_or(0);
+        item_total + tax
+    }
+
     fn effective_preview_lines(&self) -> Vec<String> {
         let mut lines = vec![
             format!("Receipt Dir: {}", self.receipt_dir),
@@ -1797,20 +1870,31 @@ impl ReviewState {
             String::new(),
             "Receipt".to_string(),
         ];
-        for field in &self.fields {
-            let value = if field.value.trim().is_empty() {
+        for (index, field) in self.fields.iter().enumerate() {
+            let value = self.preview_receipt_field_value(index);
+            let value = if value.trim().is_empty() {
                 "<empty>"
             } else {
-                field.value.as_str()
+                value
             };
             lines.push(format!("{:>8}: {}", field.field.label(), value));
         }
+        lines.push(format!(
+            "Itemized Total: ${}",
+            review_scaled_to_currency(self.itemized_total_scaled())
+        ));
         lines.push(String::new());
         lines.push(format!(
             "Items ({})",
             self.items.iter().filter(|item| !item.removed).count()
         ));
-        for (index, item) in self.items.iter().filter(|item| !item.removed).enumerate() {
+        for (index, (item_index, item)) in self
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| !item.removed)
+            .enumerate()
+        {
             let category = if item.category.trim().is_empty() {
                 "<uncategorized>"
             } else {
@@ -1825,18 +1909,18 @@ impl ReviewState {
             lines.push(format!(
                 "{:>2}. {}{}  x{}  ${}  [{}]",
                 index + 1,
-                item.description,
+                self.preview_item_description(item_index),
                 new_item,
                 quantity,
-                if item.price.is_empty() {
+                if self.preview_item_price(item_index).is_empty() {
                     "0.00"
                 } else {
-                    item.price.as_str()
+                    self.preview_item_price(item_index)
                 },
                 category,
             ));
-            if !item.notes.trim().is_empty() {
-                lines.push(format!("     notes: {}", item.notes));
+            if !self.preview_item_notes(item_index).trim().is_empty() {
+                lines.push(format!("     notes: {}", self.preview_item_notes(item_index)));
             }
         }
         let removed = self.items.iter().filter(|item| item.removed).count();
@@ -1978,6 +2062,30 @@ impl ReviewState {
             ReviewTab::Raw => self.raw_json_lines(),
         }
     }
+}
+
+fn review_decimal_to_scaled(value: &str) -> i64 {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return 0;
+    }
+
+    let negative = trimmed.starts_with('-');
+    let unsigned = trimmed.trim_start_matches('-');
+    let mut parts = unsigned.splitn(2, '.');
+    let whole = parts.next().unwrap_or("0").parse::<i64>().unwrap_or(0);
+    let frac_raw = parts.next().unwrap_or("0");
+    let mut frac = frac_raw.chars().take(4).collect::<String>();
+    while frac.len() < 4 {
+        frac.push('0');
+    }
+    let frac_value = frac.parse::<i64>().unwrap_or(0);
+    let value = whole * 10_000 + frac_value;
+    if negative { -value } else { value }
+}
+
+fn review_scaled_to_currency(value: i64) -> String {
+    format!("{:.2}", (value as f64) / 10_000.0)
 }
 
 struct App {
@@ -5799,6 +5907,49 @@ mod tests {
                 "items": []
             })
         );
+    }
+
+    #[test]
+    fn effective_preview_includes_itemized_total() {
+        let detail = sample_review_detail();
+        let mut review_state = ReviewState::from_detail(Queue::Approved, &detail, Vec::new());
+
+        let tax_field = review_state
+            .fields
+            .iter_mut()
+            .find(|field| field.field == ReceiptReviewField::Tax)
+            .expect("tax field");
+        tax_field.value = "0.31".to_string();
+        review_state.add_item();
+        let item = review_state.items.get_mut(0).expect("new item");
+        item.description = "BANANAS".to_string();
+        item.price = "3.99".to_string();
+
+        let rendered = review_state.effective_preview_lines().join("\n");
+
+        assert!(rendered.contains("Itemized Total: $4.30"));
+    }
+
+    #[test]
+    fn effective_preview_itemized_total_updates_from_pending_text_input() {
+        let detail = sample_review_detail();
+        let mut review_state = ReviewState::from_detail(Queue::Approved, &detail, Vec::new());
+
+        review_state.add_item();
+        let item = review_state.items.get_mut(0).expect("new item");
+        item.description = "BANANAS".to_string();
+        item.price = "3.99".to_string();
+
+        review_state.text_input = Some(TextInputState::with_value(
+            ReviewEditTarget::ItemPrice(0),
+            "Item Price".to_string(),
+            "4.25".to_string(),
+        ));
+
+        let rendered = review_state.effective_preview_lines().join("\n");
+
+        assert!(rendered.contains("Itemized Total: $4.25"));
+        assert!(rendered.contains(" 1. BANANAS [new]  x1  $4.25  [<uncategorized>]"));
     }
 
     #[test]

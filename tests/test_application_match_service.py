@@ -108,3 +108,4 @@ include "records/2026/carda_0101_0131.beancount"
     assert plans[1].errors == []
     assert plans[1].candidates == []
     assert plans[1].warning == "No reliable matches found, and no weaker fallback candidates were found."
+

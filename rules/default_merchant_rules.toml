@@ -7,6 +7,14 @@ keywords = ["COSTCO", "COSICO"]
 category = "Expenses:Food:Grocery"
 
 [[rules]]
+keywords = ["FOODY MART"]
+category = "Expenses:Food:Grocery"
+
+[[rules]]
+keywords = ["TREDISH GROCERIES"]
+category = "Expenses:Food:Grocery"
+
+[[rules]]
 keywords = ["SHELL", "ESSO CIRCLE K", "PETRO CANADA"]
 category = "Expenses:Driving:Gas"
 
@@ -17,6 +25,14 @@ category = "Expenses:Travel:Taxi"
 [[rules]]
 keywords = ["LYFT"]
 category = "Expenses:Travel:Taxi"
+
+[[rules]]
+keywords = ["ONE S BETTER LIVING"]
+category = "Expenses:Home"
+
+[[rules]]
+keywords = ["MINISO CANADA"]
+category = "Expenses:Home"
 
 [[rules]]
 keywords = ["IKEA", "STRUC-TUBE", "STRUC TUBE"]

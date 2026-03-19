@@ -64,6 +64,14 @@ struct ResolvedCandidate {
     strength: &'static str,
 }
 
+fn fixed_mul(a: i64, b: i64) -> i64 {
+    (((a as i128) * (b as i128)) / 10_000_i128) as i64
+}
+
+fn max_i64(a: i64, b: i64) -> i64 {
+    if a >= b { a } else { b }
+}
+
 fn resolve_ledger_path(py: Python<'_>, ledger_path: Option<&str>) -> PyResult<String> {
     if let Some(path) = ledger_path {
         return Ok(path.to_string());
@@ -188,6 +196,10 @@ fn relaxed_config() -> matcher::MatchConfig {
     matcher::MatchConfig::new(7, 20_000, 800, 1_500)
 }
 
+fn relaxed_amount_tolerance_scaled(receipt_total_scaled: i64) -> i64 {
+    max_i64(20_000, fixed_mul(receipt_total_scaled, 800))
+}
+
 fn matcher_transactions(snapshot: &NativeLedgerSnapshot) -> Vec<matcher::TransactionInput> {
     snapshot
         .transactions
@@ -244,6 +256,95 @@ fn itemized_receipt_total_scaled(receipt: &NativeReceipt) -> i64 {
     item_total + tax
 }
 
+fn format_amount_details(delta_scaled: i64) -> String {
+    if delta_scaled == 0 {
+        "amount: exact match".to_string()
+    } else {
+        format!("amount: ${} off", scaled_to_currency(delta_scaled.abs()))
+    }
+}
+
+fn format_merchant_fallback_details(similarity: f64) -> String {
+    if similarity <= 0.0 {
+        "merchant: no match".to_string()
+    } else {
+        format!("merchant: weak match ({similarity:.2})")
+    }
+}
+
+fn manual_review_fallback_candidates(
+    receipt: &NativeReceipt,
+    snapshot: &NativeLedgerSnapshot,
+    merchant_families: &[NativeMerchantFamily],
+) -> Vec<ResolvedCandidate> {
+    let matcher_families = matcher_families(merchant_families);
+    let amount_tolerance = relaxed_amount_tolerance_scaled(decimal_to_scaled(&receipt.total));
+    let date_tolerance_days = 7_i32;
+    let mut candidates = snapshot
+        .transactions
+        .iter()
+        .enumerate()
+        .filter_map(|(index, txn)| {
+            let amount = transaction_charge_amount_scaled(txn)?;
+            let amount_delta = (amount - decimal_to_scaled(&receipt.total)).abs();
+            if amount_delta > amount_tolerance {
+                return None;
+            }
+
+            let date_delta = (txn.date_ordinal - receipt.date_ordinal).abs();
+            if !receipt.date_is_placeholder && date_delta > date_tolerance_days {
+                return None;
+            }
+
+            let similarity = txn
+                .payee
+                .as_deref()
+                .map(|payee| {
+                    matcher::merchant_similarity(&receipt.merchant, payee, matcher_families.clone())
+                })
+                .unwrap_or(0.0);
+
+            let amount_component = if amount_delta == 0 {
+                1.0
+            } else {
+                1.0 - ((amount_delta as f64) / (amount_tolerance as f64))
+            }
+            .clamp(0.0, 1.0);
+            let date_component = if receipt.date_is_placeholder {
+                0.5
+            } else {
+                1.0 - ((date_delta as f64) / (date_tolerance_days as f64))
+            }
+            .clamp(0.0, 1.0);
+            let confidence =
+                (0.45 * amount_component + 0.35 * date_component + 0.20 * similarity).clamp(0.0, 0.75);
+
+            let details = format!(
+                "date: {} day(s) off, {}, {}",
+                date_delta,
+                format_amount_details(amount_delta),
+                format_merchant_fallback_details(similarity),
+            );
+
+            Some(ResolvedCandidate {
+                index,
+                confidence,
+                details,
+                strength: "fallback",
+            })
+        })
+        .collect::<Vec<_>>();
+
+    candidates.sort_by(|left, right| {
+        right
+            .confidence
+            .partial_cmp(&left.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(left.index.cmp(&right.index))
+    });
+    candidates
+}
+
 fn format_candidate_display(
     txn: &NativeLedgerTransaction,
     confidence: f64,
@@ -288,14 +389,26 @@ fn resolve_candidates(
             matcher_families,
         );
         if relaxed.is_empty() {
-            (
-                Vec::new(),
-                false,
-                Some(
-                    "No reliable matches found, and no weaker fallback candidates were found."
-                        .to_string(),
-                ),
-            )
+            let fallback = manual_review_fallback_candidates(receipt, snapshot, merchant_families);
+            if fallback.is_empty() {
+                (
+                    Vec::new(),
+                    false,
+                    Some(
+                        "No reliable matches found, and no weaker fallback candidates were found."
+                            .to_string(),
+                    ),
+                )
+            } else {
+                (
+                    fallback,
+                    true,
+                    Some(
+                        "No reliable or relaxed merchant matches found. Showing amount/date-only candidates for manual review."
+                            .to_string(),
+                    ),
+                )
+            }
         } else {
             (
                 relaxed
@@ -637,4 +750,57 @@ pub(crate) fn apply_receipt_match_service(
             enriched_path.to_string_lossy()
         )),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::python_ledger_access::{NativeLedgerPosting, NativeLedgerSnapshot, NativeLedgerTransaction};
+
+    #[test]
+    fn resolve_candidates_surfaces_amount_date_only_fallback_when_merchant_match_is_zero() {
+        let receipt = NativeReceipt {
+            merchant: "FRESH".to_string(),
+            date_iso: "2026-03-03".to_string(),
+            date_ordinal: 739313,
+            total: "91.22".to_string(),
+            date_is_placeholder: false,
+            items: Vec::new(),
+            tax: Some("0.00".to_string()),
+            raw_text: String::new(),
+            image_filename: String::new(),
+            warnings: Vec::new(),
+        };
+        let snapshot = NativeLedgerSnapshot {
+            path: "/tmp/main.beancount".to_string(),
+            transactions: vec![NativeLedgerTransaction {
+                date_ordinal: 739314,
+                date_iso: "2026-03-04".to_string(),
+                payee: Some("FOODY MART MARKHAM ON".to_string()),
+                narration: Some(String::new()),
+                postings: vec![NativeLedgerPosting {
+                    account: "Liabilities:CreditCard:CardA".to_string(),
+                    number_str: Some("-91.22".to_string()),
+                    currency: Some("CAD".to_string()),
+                }],
+                file_path: "/tmp/records/2026/carda.beancount".to_string(),
+                line_number: 42,
+            }],
+            errors: Vec::new(),
+            options: std::collections::HashMap::new(),
+        };
+
+        let resolved = resolve_candidates(&receipt, &snapshot, &[]);
+
+        assert!(resolved.used_relaxed_threshold);
+        assert_eq!(
+            resolved.warning.as_deref(),
+            Some(
+                "No reliable or relaxed merchant matches found. Showing amount/date-only candidates for manual review."
+            )
+        );
+        assert_eq!(resolved.candidates.len(), 1);
+        assert_eq!(resolved.candidates[0].strength, "fallback");
+        assert_eq!(resolved.candidates[0].date_iso, "2026-03-04");
+    }
 }
