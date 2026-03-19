@@ -842,9 +842,12 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
         let mut found_item = false;
         let mut chosen_line_index = None;
         let mut chosen_distance = f64::INFINITY;
+        let mut suppress_fallback_for_ambiguous_code_only_source = false;
         let selection_anchor_y = source_line.line_y;
         let source_line_is_quantity_expression =
             looks_like_quantity_expression(&source_line.left_text);
+        let source_line_needs_item_context =
+            strip_leading_receipt_codes(&source_line.left_text).is_empty();
 
         if source_line_is_quantity_expression {
             let source_modifier = parse_quantity_modifier(&source_line.left_text);
@@ -968,8 +971,16 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
                 price_line_has_onsale,
                 line_selection_candidates,
             ) {
-                chosen_line_index = Some(index);
-                chosen_distance = distance;
+                let selected_line = &all_lines[index];
+                let selected_line_is_next_priced_row = source_line_needs_item_context
+                    && selected_line.line_y > price_y + SPATIAL_FLOAT_EPSILON
+                    && line_has_trailing_price(&selected_line.full_text);
+                if selected_line_is_next_priced_row {
+                    suppress_fallback_for_ambiguous_code_only_source = true;
+                } else {
+                    chosen_line_index = Some(index);
+                    chosen_distance = distance;
+                }
             }
         }
 
@@ -992,7 +1003,7 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
             }
         }
 
-        if !found_item {
+        if !found_item && !suppress_fallback_for_ambiguous_code_only_source {
             let mut lines_above = all_lines
                 .iter()
                 .enumerate()
