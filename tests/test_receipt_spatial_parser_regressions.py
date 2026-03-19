@@ -178,3 +178,40 @@ def test_extract_items_with_bbox_skips_duplicate_code_row_price_before_next_item
     pairs = [(item.description, item.price) for item in items]
     assert ("CANTALOUPE", Decimal("1.99")) in pairs
     assert not any("BLACKBERRIES" in description and price == Decimal("1.99") for description, price in pairs)
+
+
+def test_extract_items_with_bbox_accepts_embedded_trailing_price_word() -> None:
+    lines = [
+        {
+            "text": "2146010 SEAFOOD CNTR gnigoQq bn14.99",
+            "words": [
+                _word("2146010", 0.056, 0.568, 0.190, 0.589),
+                _word("SEAFOOD CNTR", 0.320, 0.565, 0.539, 0.585),
+                _word("gnigoQq bn14.99", 0.567, 0.564, 0.899, 0.586),
+            ],
+        },
+        {
+            "text": "2146010b SEAFOOD CNTR noitqQ 14.99",
+            "words": [
+                _word("2146010b", 0.060, 0.586, 0.233, 0.606),
+                _word("SEAFOOD CNTR", 0.320, 0.584, 0.534, 0.606),
+                _word("noitqQ", 0.581, 0.586, 0.706, 0.611),
+                _word("14.99", 0.803, 0.584, 0.898, 0.606),
+            ],
+        },
+        {
+            "text": "TOTAL 29.98",
+            "words": [
+                _word("TOTAL", 0.090, 0.650, 0.180, 0.662),
+                _word("29.98", 0.880, 0.650, 0.950, 0.662),
+            ],
+        },
+    ]
+
+    items = _extract_items_with_bbox(
+        pages=[{"lines": lines}],
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
+    )
+
+    pairs = [(item.description, item.price) for item in items]
+    assert pairs.count(("SEAFOOD CNTR", Decimal("14.99"))) == 2

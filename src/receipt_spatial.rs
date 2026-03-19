@@ -192,6 +192,11 @@ fn re_price_word() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"^\$?(\d+\.\d{2})$").unwrap())
 }
 
+fn re_embedded_trailing_price_word() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)[A-Z]{1,6}\$?(\d+\.\d{2})$").unwrap())
+}
+
 fn re_leading_qty_prefix() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"^\(\d+\)\s*").unwrap())
@@ -512,7 +517,13 @@ fn is_price_word(text: &str) -> Option<i64> {
         .map(str::trim_start)
         .or_else(|| normalized.strip_prefix('w').map(str::trim_start))
         .unwrap_or(normalized.as_str());
-    let captures = re_price_word().captures(stripped)?;
+    if let Some(captures) = re_price_word().captures(stripped) {
+        return parse_scaled_decimal(captures.get(1)?.as_str());
+    }
+    if stripped.contains('@') || stripped.contains('/') {
+        return None;
+    }
+    let captures = re_embedded_trailing_price_word().captures(stripped)?;
     parse_scaled_decimal(captures.get(1)?.as_str())
 }
 
