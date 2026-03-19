@@ -951,6 +951,13 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
             let mut nearest_unpriced_above = None;
             let mut nearest_unpriced_below = None;
             let mut nearest_priced_below_with_deposit_stub = None;
+            // Deposit stubs (e.g. "DEPOSIT 1") are normally skipped so a regular
+            // quantity expression like "3@$3.49" doesn't pair with a deposit label
+            // above it.  But when a quantity expression IS for a deposit (e.g.
+            // "2@$0.10 0.20"), the deposit stub immediately above IS the correct
+            // target.  Track the closest unused deposit stub within Y_TOLERANCE so
+            // we can fall back to it when no regular item is found above.
+            let mut nearest_deposit_stub_above_within_tolerance: Option<(usize, f64)> = None;
 
             for (index, candidate) in all_lines.iter().enumerate() {
                 if used_line_indices[index] || !is_valid_item_line(candidate, total_line_y) {
@@ -981,6 +988,19 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
                 }
 
                 if is_deposit_stub(&candidate.left_text) {
+                    // Track closest deposit stub above within Y_TOLERANCE as a
+                    // fallback for deposit-quantity expressions.
+                    if candidate.line_y < selection_anchor_y
+                        && distance <= Y_TOLERANCE + SPATIAL_FLOAT_EPSILON
+                    {
+                        match nearest_deposit_stub_above_within_tolerance {
+                            Some((_, current_distance)) if distance >= current_distance => {}
+                            _ => {
+                                nearest_deposit_stub_above_within_tolerance =
+                                    Some((index, distance))
+                            }
+                        }
+                    }
                     continue;
                 }
 
@@ -1019,14 +1039,30 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
                         Some(below_index)
                     }
                 }
-                (Some((index, distance)), None, _) | (None, Some((index, distance)), _) => {
+                (Some((index, distance)), None, _) => {
                     chosen_distance = distance;
                     Some(index)
                 }
-                (None, None, _) => nearest_priced_below_with_deposit_stub.map(|(index, distance)| {
-                    chosen_distance = distance;
-                    index
-                }),
+                // No regular item above: prefer a deposit stub within Y_TOLERANCE
+                // over a non-deposit item below, so "2@$0.10" pairs with "DEPOSIT 1"
+                // rather than the next real item below.
+                (None, Some((below_index, below_distance)), _) => {
+                    if let Some((stub_index, stub_distance)) =
+                        nearest_deposit_stub_above_within_tolerance
+                    {
+                        chosen_distance = stub_distance;
+                        Some(stub_index)
+                    } else {
+                        chosen_distance = below_distance;
+                        Some(below_index)
+                    }
+                }
+                (None, None, _) => nearest_priced_below_with_deposit_stub
+                    .or(nearest_deposit_stub_above_within_tolerance)
+                    .map(|(index, distance)| {
+                        chosen_distance = distance;
+                        index
+                    }),
             };
         }
 
