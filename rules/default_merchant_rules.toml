@@ -11,6 +11,18 @@ keywords = ["T&T SUPERMARKET", "T&T Supermarket"]
 category = "Expenses:Food:Grocery"
 
 [[rules]]
+keywords = ["NO FRILLS", "NOFRILLS"]
+category = "Expenses:Food:Grocery"
+
+[[rules]]
+keywords = ["REAL CANADIAN SUPERSTORE"]
+category = "Expenses:Food:Grocery"
+
+[[rules]]
+keywords = ["Bestco Fresh", "BESTCO FRESH"]
+category = "Expenses:Food:Grocery"
+
+[[rules]]
 keywords = ["FOODY MART"]
 category = "Expenses:Food:Grocery"
 
