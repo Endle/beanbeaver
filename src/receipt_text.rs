@@ -868,7 +868,7 @@ pub(crate) fn extract_text_items(
                         .unwrap()
                         .replace(&marker, "")
                         .to_string();
-                    if matches!(marker.as_str(), "REG" | "0REG" | "OREG" | "IREG") {
+                    if marker.ends_with("REG") {
                         continue;
                     }
                 }
@@ -1295,6 +1295,47 @@ mod tests {
         assert!(warnings[1]
             .message
             .contains("auto-corrected malformed OCR price \"9.651\" -> \"9.69\""));
+    }
+
+    #[test]
+    fn skips_reg_marker_lines_with_ocr_noise_prefix() {
+        let lines = vec![
+            "BESTCO FRESH".to_string(),
+            "*Frosh Sunkist Orange".to_string(),
+            "(W)@REG$1.69".to_string(),
+            "2.96 1b @ $0.99/16 2.93".to_string(),
+            "TOTAL 2.93".to_string(),
+        ];
+        let summary_amounts = HashSet::from([293]);
+
+        let (items, _warnings) = extract_text_items(&lines, &summary_amounts);
+
+        // Should produce only one item at $2.93, not a ghost at $1.69
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].price_cents, 293);
+        assert!(items[0].description.contains("Sunkist Orange"));
+    }
+
+    #[test]
+    fn skips_reg_marker_lines_with_garbled_ocr_prefix() {
+        let lines = vec![
+            "BESTCO FRESH".to_string(),
+            "4KSf Big Instant Noodles ( 6.99".to_string(),
+            "(K4AM0REG$7.99".to_string(),
+            "Fish Spape Cracker (Tomat 1.99".to_string(),
+            "TOTAL 8.98".to_string(),
+        ];
+        let summary_amounts = HashSet::from([898]);
+
+        let (items, _warnings) = extract_text_items(&lines, &summary_amounts);
+
+        // Should NOT create a ghost item at $7.99 from the REG marker line
+        let prices: Vec<i64> = items.iter().map(|i| i.price_cents).collect();
+        assert!(
+            !prices.contains(&799),
+            "REG marker line should not produce a ghost item at $7.99, got items: {:?}",
+            items.iter().map(|i| (&i.description, i.price_cents)).collect::<Vec<_>>()
+        );
     }
 
     #[test]

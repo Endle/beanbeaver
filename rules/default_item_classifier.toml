@@ -11,7 +11,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0001"
-keywords = ["CHICKEN", "BEEF", "PORK", "BACON", "SAUSAGE", "HAM", "TURKEY", "LAMB", "STEAK", "GROUND MEAT", "MEATBALL", "SALAMI", "PEPPERONI", "PROSCIUTTO", "ROTISSERIE", "DRUMSTICK", "MEAT", "BEEF BELLY", "BEEF BELLY ROLL"]
+keywords = ["CHICKEN", "BEEF", "BEAF", "PORK", "BACON", "SAUSAGE", "HAM", "TURKEY", "LAMB", "STEAK", "GROUND MEAT", "MEATBALL", "SALAMI", "PEPPERONI", "PROSCIUTTO", "ROTISSERIE", "DRUMSTICK", "MEAT", "BEEF BELLY", "BEEF BELLY ROLL", "ANGUS"]
 category = "grocery_meat"
 tags = ["grocery", "meat"]
 priority = 0
@@ -34,7 +34,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0003"
-keywords = ["SHRIMP", "PRAWN", "LOBSTER", "CRAB", "SCALLOP", "MUSSEL", "CLAM", "OYSTER", "SQUID", "OCTOPUS", "CALAMARI"]
+keywords = ["SHRIMP", "PRAWN", "LOBSTER", "CRAB", "SCALLOP", "MUSSEL", "CLAM", "OYSTER", "SQUID", "OCTOPUS", "CALAMARI", "VANNAMEI"]
 category = "grocery_seafood_shrimp"
 tags = ["grocery", "seafood", "shrimp"]
 priority = 0
@@ -114,7 +114,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0015"
-keywords = ["BREAD", "BAGEL", "CROISSANT", "MUFFIN", "DONUT", "DOUGHNUT", "PASTRY", "CAKE", "PIE", "COOKIE", "COOKIES", "BAGUETTE", "BUN", "BUNS", "TOAST", "ENGLISH MUFFIN", "TORTILLA", "PITA", "NAAN", "FLATBREAD", "CRACKER", "CRACKERS", "WAFFLE", "PANCAKE"]
+keywords = ["BREAD", "BAGEL", "CROISSANT", "MUFFIN", "DONUT", "DOUGHNUT", "PASTRY", "CAKE", "PIE", "COOKIE", "COOKIES", "BAGUETTE", "BUN", "BUNS", "TOAST", "ENGLISH MUFFIN", "TORTILLA", "PITA", "NAAN", "FLATBREAD", "WAFFLE", "PANCAKE"]
 category = "grocery_bakery"
 tags = ["grocery", "bakery"]
 priority = 0
@@ -146,7 +146,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0019"
-keywords = ["CORN OIL", "GARLIC", "GINGER", "GREEN ONION", "GREEN ONIONS", "CHILI PEPPER", "RED CHILI PEPPER", "SPICE", "SEASONING", "PAPRIKA", "CUMIN", "CORIANDER", "TURMERIC", "CINNAMON", "NUTMEG", "OREGANO", "THYME", "ROSEMARY", "BAY LEAF", "CURRY", "CHILI POWDER", "CAYENNE", "SOY SAUCE", "FISH SAUCE", "OYSTER SAUCE", "HOISIN", "WASABI", "SRIRACHA", "HOT SAUCE", "KETCHUP", "MUSTARD", "MAYONNAISE", "MAYO", "RELISH", "BBQ SAUCE", "TERIYAKI", "WORCESTERSHIRE", "PERICARPIUM ZANTHOXYLI", "PERICARPIURN ZANTHOXYLI", "SALSA", "HUMMUS", "GUACAMOLE", "PESTO", "CHINA TIME HONORED BRAND", "YUQUAN FRESH PRESERVED"]
+keywords = ["CORN OIL", "SESAME OIL", "SESAMEOIL", "GARLIC", "GINGER", "GREEN ONION", "GREEN ONIONS", "CHILI PEPPER", "RED CHILI PEPPER", "CHILLI", "DRIED CHILLI", "CRUSHED CHILLI", "SPICE", "SEASONING", "PAPRIKA", "CUMIN", "CORIANDER", "TURMERIC", "CINNAMON", "NUTMEG", "OREGANO", "THYME", "ROSEMARY", "BAY LEAF", "CURRY", "CHILI POWDER", "CAYENNE", "SOY SAUCE", "FISH SAUCE", "OYSTER SAUCE", "HOISIN", "WASABI", "SRIRACHA", "HOT SAUCE", "KETCHUP", "MUSTARD", "MAYONNAISE", "MAYO", "RELISH", "BBQ SAUCE", "TERIYAKI", "WORCESTERSHIRE", "PERICARPIUM ZANTHOXYLI", "PERICARPIURN ZANTHOXYLI", "SALSA", "HUMMUS", "GUACAMOLE", "PESTO", "CHINA TIME HONORED BRAND", "YUQUAN FRESH PRESERVED", "SOYBEAN PASTE"]
 category = "grocery_seasoning"
 tags = ["grocery", "seasoning"]
 priority = 0
@@ -154,7 +154,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0021"
-keywords = ["POTATO CHIPS", "CHIP", "CHIPS", "POPCORN", "PRETZEL", "NUTS", "ALMONDS", "CASHEWS", "PEANUTS", "WALNUTS", "PISTACHIOS", "TRAIL MIX", "GRANOLA BAR", "PROTEIN BAR", "ENERGY BAR", "CANDY", "CHOCOLATE", "GUMMY", "GUMMIES", "SKITTLES", "M&M", "SNICKERS", "TWIX", "KITKAT", "REESE", "OREO", "GOLDFISH", "CHEETOS", "DORITOS", "PRINGLES", "LAYS", "RUFFLES", "TOSTITOS", "CHEEZ-IT", "RITZ", "FISH SHAPE CRACKER"]
+keywords = ["POTATO CHIPS", "CHIP", "CHIPS", "POPCORN", "PRETZEL", "NUTS", "ALMONDS", "CASHEWS", "PEANUTS", "WALNUTS", "PISTACHIOS", "TRAIL MIX", "GRANOLA BAR", "PROTEIN BAR", "ENERGY BAR", "CANDY", "CHOCOLATE", "GUMMY", "GUMMIES", "SKITTLES", "M&M", "SNICKERS", "TWIX", "KITKAT", "REESE", "OREO", "GOLDFISH", "CHEETOS", "DORITOS", "PRINGLES", "LAYS", "RUFFLES", "TOSTITOS", "CHEEZ-IT", "RITZ"]
 category = "grocery_snacks"
 tags = ["grocery", "snacks"]
 priority = 0
@@ -298,7 +298,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0042"
-keywords = ["FISH CRACKER SEAWEE"]
+keywords = ["FISH CRACKER SEAWEE", "FISH SHAPE CRACKER"]
 category = "grocery_snacks"
 tags = ["grocery", "snacks"]
 priority = 80
@@ -564,4 +564,59 @@ id = "semantic_tag_0103"
 keywords = ["MONSTER"]
 tags = ["energy_drink"]
 priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0074"
+keywords = ["PIXIAN"]
+category = "grocery_seasoning"
+tags = ["grocery", "seasoning"]
+priority = 110
+exact_only = false
+
+[[rules]]
+id = "legacy_0075"
+keywords = ["SOUP NDL"]
+category = "grocery_staple"
+tags = ["grocery", "staple"]
+priority = 80
+exact_only = false
+
+[[rules]]
+id = "semantic_tag_0104"
+keywords = ["SOY BEVERAGE"]
+tags = ["soy"]
+priority = 0
+exact_only = false
+
+[[rules]]
+id = "legacy_0076"
+keywords = ["OYSTER MEAT", "OYSTER"]
+category = "grocery_seafood"
+tags = ["grocery", "seafood"]
+priority = 40
+exact_only = false
+
+[[rules]]
+id = "legacy_0077"
+keywords = ["NOODLE SNACK", "NOODLS SNACK"]
+category = "grocery_snacks"
+tags = ["grocery", "snacks"]
+priority = 80
+exact_only = false
+
+[[rules]]
+id = "legacy_0078"
+keywords = ["CRISPY SANDWICH"]
+category = "grocery_snacks"
+tags = ["grocery", "snacks"]
+priority = 80
+exact_only = false
+
+[[rules]]
+id = "legacy_0079"
+keywords = ["TWINE"]
+category = "home_household_supply"
+tags = ["home", "household", "supply"]
+priority = 40
 exact_only = false
