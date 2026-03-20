@@ -7,6 +7,10 @@ keywords = ["COSTCO", "COSICO"]
 category = "Expenses:Food:Grocery"
 
 [[rules]]
+keywords = ["T&T SUPERMARKET", "T&T Supermarket"]
+category = "Expenses:Food:Grocery"
+
+[[rules]]
 keywords = ["FOODY MART"]
 category = "Expenses:Food:Grocery"
 
