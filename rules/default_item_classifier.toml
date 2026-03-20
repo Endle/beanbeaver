@@ -571,7 +571,7 @@ id = "legacy_0074"
 keywords = ["PIXIAN"]
 category = "grocery_seasoning"
 tags = ["grocery", "seasoning"]
-priority = 80
+priority = 110
 exact_only = false
 
 [[rules]]
