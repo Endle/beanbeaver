@@ -377,7 +377,7 @@ fn is_priced_generic_item_label(left_text: &str, full_text: &str) -> bool {
         && line_has_trailing_price(full_text)
         && matches!(
             left_text.trim().to_ascii_uppercase().as_str(),
-            "MEAT" | "SEAFOOD" | "PRODUCE" | "DELI" | "GROCERY" | "BAKERY" | "FROZEN"
+            "MEAT" | "BAKERY"
         )
 }
 

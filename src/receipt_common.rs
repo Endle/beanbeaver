@@ -1,6 +1,7 @@
 use regex::Regex;
 use std::sync::OnceLock;
 
+const GENERIC_PRICED_ITEM_LABELS: &[&str] = &["MEAT", "BAKERY"];
 const SECTION_HEADERS: &[&str] = &[
     "MEAT", "SEAFOOD", "PRODUCE", "DELI", "GROCERY", "BAKERY", "FROZEN",
 ];
@@ -330,18 +331,11 @@ pub(crate) fn looks_like_onsale_marker(text: &str) -> bool {
     re_onsale_marker().is_match(&compact)
 }
 
-/// Returns true when `left_text` is a bare section-header word (e.g. "MEAT",
-/// "BAKERY", "SEAFOOD" …) AND the full line carries a trailing price.
-/// In that context the word is an item description, not a section header.
 pub(crate) fn is_priced_generic_item_label(left_text: &str, full_text: &str) -> bool {
-    if left_text.trim().is_empty() {
-        return false;
-    }
-    let normalized = left_text.trim().to_ascii_uppercase();
     line_has_trailing_price(full_text)
-        && SECTION_HEADERS
+        && GENERIC_PRICED_ITEM_LABELS
             .iter()
-            .any(|header| *header == normalized)
+            .any(|label| *label == left_text.trim().to_ascii_uppercase())
 }
 
 pub(crate) fn parse_quantity_modifier(line: &str) -> Option<QuantityModifier> {
