@@ -437,11 +437,7 @@ fn is_priced_generic_item_label(left_text: &str, full_text: &str) -> bool {
     if left_text.trim().is_empty() {
         return false;
     }
-    line_has_trailing_price(full_text)
-        && matches!(
-            left_text.trim().to_ascii_uppercase().as_str(),
-            "MEAT" | "BAKERY"
-        )
+    line_has_trailing_price(full_text) && is_section_name(left_text.trim().to_ascii_uppercase().as_str())
 }
 
 fn parse_quantity_modifier(text: &str) -> bool {
