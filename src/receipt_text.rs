@@ -881,7 +881,12 @@ pub(crate) fn extract_text_items(
                 }
             }
 
+            // Skip ghost promo artifacts like "EG2.99" where letters and price
+            // run together.  Only fire when the *original* (uncompacted) line also
+            // matches — lines with clear whitespace separation (e.g. "Meat 20.53")
+            // are real items, not ghosts.
             if re_compact_promo_ghost().is_match(&compact_line)
+                && re_compact_promo_ghost().is_match(line_upper.trim())
                 && !looks_like_onsale_marker(&desc_part)
             {
                 if i > 0 && line_has_trailing_price(&normalized_lines[i - 1]) {
