@@ -64,8 +64,6 @@ pub(crate) fn select_spatial_item_line(
     }
 
     if prefer_below {
-        // Skip lines that already carry their own trailing price — those items
-        // will be paired by their own price word later.
         for (index, candidate) in candidates.iter().enumerate() {
             if candidate.is_used || !candidate.is_valid_item_line {
                 continue;
@@ -73,9 +71,6 @@ pub(crate) fn select_spatial_item_line(
             if candidate.line_y < price_y
                 || candidate.line_y - price_y > max_item_distance + SPATIAL_FLOAT_EPSILON
             {
-                continue;
-            }
-            if candidate.has_trailing_price {
                 continue;
             }
             let distance = (candidate.line_y - price_y).abs();
@@ -166,19 +161,21 @@ mod tests {
     }
 
     #[test]
-    fn prefer_below_skips_lines_with_own_trailing_price() {
+    fn prefer_below_picks_nearest_valid_item() {
         // Simulates T&T layout: FOOD (header) has price $3.80, next line
-        // SALTED EGG YOLK has its own price, BLUSH BERRY has no price.
-        // prefer_below should skip the priced line and pick the unpriced one.
+        // SALTED EGG YOLK has its own price $6.27, BLUSH BERRY has no price.
+        // prefer_below should pick the nearest valid item (SALTED EGG YOLK).
+        // When $6.27 processes later, SALTED EGG YOLK is already used so
+        // it falls through to BLUSH BERRY.
         let candidates = vec![
             SpatialLineCandidate::new(0.192, false, false, true, false), // FOOD header (invalid)
-            SpatialLineCandidate::new(0.210, false, true, true, false),  // SALTED EGG YOLK (has own price)
-            SpatialLineCandidate::new(0.224, false, true, false, false), // BLUSH BERRY (no price)
+            SpatialLineCandidate::new(0.210, false, true, true, false),  // SALTED EGG YOLK
+            SpatialLineCandidate::new(0.224, false, true, false, false), // BLUSH BERRY
         ];
 
         let selected = select_spatial_item_line(0.203, 0.02, 0.08, true, false, candidates).unwrap();
 
-        assert_eq!(selected.0, 2); // Should pick BLUSH BERRY, not SALTED EGG YOLK
+        assert_eq!(selected.0, 1); // Nearest valid item below: SALTED EGG YOLK
     }
 
     #[test]
