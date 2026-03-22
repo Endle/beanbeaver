@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 
 const GENERIC_PRICED_ITEM_LABELS: &[&str] = &["MEAT", "BAKERY"];
 const SECTION_HEADERS: &[&str] = &[
-    "MEAT", "SEAFOOD", "PRODUCE", "DELI", "GROCERY", "BAKERY", "FROZEN",
+    "MEAT", "SEAFOOD", "PRODUCE", "DELI", "GROCERY", "BAKERY", "FROZEN", "FOOD",
 ];
 
 #[derive(Clone, Debug)]
