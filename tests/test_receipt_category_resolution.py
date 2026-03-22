@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from beanbeaver.receipt.receipt_structuring.parsers.items_text_parser import _extract_items
+from beanbeaver.receipt.ocr_parser.items_text_parser import _extract_items
 from beanbeaver.runtime.item_category_rules import load_receipt_structuring_rule_layers
 
 

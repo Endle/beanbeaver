@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from beanbeaver.receipt.receipt_structuring.parsers.items_spatial_parser import _extract_items_with_bbox
+from beanbeaver.receipt.ocr_parser.items_spatial_parser import _extract_items_with_bbox
 from beanbeaver.runtime.item_category_rules import load_receipt_structuring_rule_layers
 
 

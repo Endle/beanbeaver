@@ -1,9 +1,9 @@
 from collections import Counter
 from decimal import Decimal
 
-from beanbeaver.receipt.receipt_structuring.parsers.common import _is_section_header_text
-from beanbeaver.receipt.receipt_structuring.parsers.fields_parser import _extract_price_from_line
-from beanbeaver.receipt.receipt_structuring.parsers.items_text_parser import _extract_items
+from beanbeaver.receipt.ocr_parser.common import _is_section_header_text
+from beanbeaver.receipt.ocr_parser.fields_parser import _extract_price_from_line
+from beanbeaver.receipt.ocr_parser.items_text_parser import _extract_items
 from beanbeaver.runtime.item_category_rules import load_receipt_structuring_rule_layers
 
 

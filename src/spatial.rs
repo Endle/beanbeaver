@@ -161,6 +161,24 @@ mod tests {
     }
 
     #[test]
+    fn prefer_below_picks_nearest_valid_item() {
+        // Simulates T&T layout: FOOD (header) has price $3.80, next line
+        // SALTED EGG YOLK has its own price $6.27, BLUSH BERRY has no price.
+        // prefer_below should pick the nearest valid item (SALTED EGG YOLK).
+        // When $6.27 processes later, SALTED EGG YOLK is already used so
+        // it falls through to BLUSH BERRY.
+        let candidates = vec![
+            SpatialLineCandidate::new(0.192, false, false, true, false), // FOOD header (invalid)
+            SpatialLineCandidate::new(0.210, false, true, true, false),  // SALTED EGG YOLK
+            SpatialLineCandidate::new(0.224, false, true, false, false), // BLUSH BERRY
+        ];
+
+        let selected = select_spatial_item_line(0.203, 0.02, 0.08, true, false, candidates).unwrap();
+
+        assert_eq!(selected.0, 1); // Nearest valid item below: SALTED EGG YOLK
+    }
+
+    #[test]
     fn source_line_anchor_allows_unpriced_neighbor_to_beat_next_priced_row() {
         let candidates = vec![
             SpatialLineCandidate::new(0.165, true, true, false, false),

@@ -1,9 +1,10 @@
 """Composable OCR receipt parser components."""
 
-from .common import _has_useful_bbox_data, _is_spatial_layout_receipt
+from .common import _has_useful_bbox_data, _is_section_header_text, _is_spatial_layout_receipt
 from .fields_parser import (
     _extract_date,
     _extract_merchant,
+    _extract_price_from_line,
     _extract_subtotal,
     _extract_tax,
     _extract_total,
@@ -16,9 +17,11 @@ __all__ = [
     "_extract_items",
     "_extract_items_with_bbox",
     "_extract_merchant",
+    "_extract_price_from_line",
     "_extract_subtotal",
     "_extract_tax",
     "_extract_total",
     "_has_useful_bbox_data",
+    "_is_section_header_text",
     "_is_spatial_layout_receipt",
 ]
