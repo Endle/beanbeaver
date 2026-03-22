@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from beanbeaver.receipt.receipt_structuring.parsers.fields_parser import (
+from beanbeaver.receipt.ocr_parser.fields_parser import (
     _extract_date,
     _extract_subtotal,
     _extract_tax,
