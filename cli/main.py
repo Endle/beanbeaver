@@ -109,6 +109,10 @@ Notes:
     api_subparsers.add_parser("resolve-import-accounts", help="List candidate import accounts from stdin JSON")
     api_subparsers.add_parser("apply-import", help="Apply one statement import from stdin JSON")
     api_subparsers.add_parser("import-apply", help="Apply one statement import with a JSON-only response")
+    api_subparsers.add_parser(
+        "preflight-chequing-import",
+        help="Preflight a chequing CSV and surface ambiguous account decisions as JSON",
+    )
 
     show_receipt_parser = api_subparsers.add_parser("show-receipt", help="Show one staged receipt document as JSON")
     show_receipt_parser.add_argument("path", help="Path to a staged receipt JSON file")
@@ -248,6 +252,8 @@ Notes:
             return _run_legacy_command(cli_api.cmd_api_apply_import, args)
         if args.api_command == "import-apply":
             return _run_legacy_command(cli_api.cmd_api_import_apply, args)
+        if args.api_command == "preflight-chequing-import":
+            return _run_legacy_command(cli_api.cmd_api_preflight_chequing_import, args)
         if args.api_command == "get-config":
             return _run_legacy_command(cli_api.cmd_api_get_config, args)
         if args.api_command == "set-config":
