@@ -671,19 +671,6 @@ impl ImportDecisionView {
             .map(String::as_str)
     }
 
-    fn cycle_selection(&mut self) {
-        let len = self.candidates.len();
-        if len == 0 {
-            self.selected_candidate = None;
-            return;
-        }
-        self.selected_candidate = match self.selected_candidate {
-            None => Some(0),
-            Some(index) if index + 1 < len => Some(index + 1),
-            Some(_) => None,
-        };
-    }
-
     fn display_label(&self) -> String {
         let kind_label = match self.kind.as_str() {
             "cc_payment" => "CC payment",
@@ -1047,6 +1034,33 @@ impl TextInputState {
 }
 
 #[derive(Clone, Debug)]
+struct DecisionPickerState {
+    decision_index: usize,
+    list_state: ListState,
+}
+
+impl DecisionPickerState {
+    fn new(decision_index: usize, initial_selection: Option<usize>) -> Self {
+        let mut list_state = ListState::default();
+        list_state.select(initial_selection.or(Some(0)));
+        Self {
+            decision_index,
+            list_state,
+        }
+    }
+
+    fn move_selection(&mut self, delta: isize, len: usize) {
+        if len == 0 {
+            self.list_state.select(None);
+            return;
+        }
+        let current = self.list_state.selected().unwrap_or(0) as isize;
+        let next = (current + delta).clamp(0, (len - 1) as isize) as usize;
+        self.list_state.select(Some(next));
+    }
+}
+
+#[derive(Clone, Debug)]
 struct ImportPageState {
     routes: Vec<ImportRouteOption>,
     route_state: ListState,
@@ -1064,6 +1078,7 @@ struct ImportPageState {
     decisions_state: ListState,
     decisions_error: Option<String>,
     decisions_loaded_for: Option<(String, String)>,
+    decision_picker: Option<DecisionPickerState>,
     last_result: Option<ApplyImportResponse>,
 }
 
@@ -1092,7 +1107,48 @@ impl ImportPageState {
             decisions_state,
             decisions_error: None,
             decisions_loaded_for: None,
+            decision_picker: None,
             last_result: None,
+        }
+    }
+
+    fn open_decision_picker(&mut self) {
+        let Some(index) = self.decisions_state.selected() else {
+            return;
+        };
+        let Some(decision) = self.decisions.get(index) else {
+            return;
+        };
+        if decision.candidates.is_empty() {
+            return;
+        }
+        self.decision_picker = Some(DecisionPickerState::new(index, decision.selected_candidate));
+    }
+
+    fn close_decision_picker(&mut self) {
+        self.decision_picker = None;
+    }
+
+    fn confirm_decision_picker(&mut self) {
+        let Some(picker) = self.decision_picker.take() else {
+            return;
+        };
+        let Some(selection) = picker.list_state.selected() else {
+            return;
+        };
+        if let Some(decision) = self.decisions.get_mut(picker.decision_index) {
+            if selection < decision.candidates.len() {
+                decision.selected_candidate = Some(selection);
+            }
+        }
+    }
+
+    fn clear_decision_picker_selection(&mut self) {
+        let Some(picker) = self.decision_picker.take() else {
+            return;
+        };
+        if let Some(decision) = self.decisions.get_mut(picker.decision_index) {
+            decision.selected_candidate = None;
         }
     }
 
@@ -1112,6 +1168,7 @@ impl ImportPageState {
         self.decisions_loaded_for = None;
         self.decisions_error = None;
         self.decisions_state.select(None);
+        self.decision_picker = None;
     }
 
     fn move_decisions_selection(&mut self, delta: isize) {
@@ -1123,14 +1180,6 @@ impl ImportPageState {
         let current = self.decisions_state.selected().unwrap_or(0) as isize;
         let next = (current + delta).clamp(0, (len - 1) as isize) as usize;
         self.decisions_state.select(Some(next));
-    }
-
-    fn cycle_focused_decision(&mut self) {
-        if let Some(index) = self.decisions_state.selected() {
-            if let Some(decision) = self.decisions.get_mut(index) {
-                decision.cycle_selection();
-            }
-        }
     }
 
     fn unresolved_decisions(&self) -> usize {
@@ -2323,7 +2372,7 @@ impl App {
                 "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | s start/create container | x stop container | R restart container | r refresh container status/logs | q quit"
             }
             Page::Imports => {
-                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | r load routes | h/l or Tab cycle Routes/Accounts/Decisions | j/k move | Enter cycles decision pick (or reload) | v view csv | x trash csv | a apply import | u toggle allow-uncommitted | q quit"
+                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | r load routes | h/l or Tab cycle Routes/Accounts/Decisions | j/k move | Enter opens picker (Routes: reload accounts) | v view csv | x trash csv | a apply import | u toggle allow-uncommitted | q quit"
             }
         }
     }
@@ -4355,6 +4404,9 @@ fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
     if let Some(match_state) = &mut app.match_state {
         render_match_modal(frame, match_state);
     }
+    if app.imports_state.decision_picker.is_some() {
+        render_decision_picker_modal(frame, &mut app.imports_state);
+    }
 }
 
 fn render_receipts_page(
@@ -4689,7 +4741,7 @@ fn render_imports_page(frame: &mut ratatui::Frame<'_>, app: &mut App, area: rata
     } else if total == 0 {
         "Decisions (none)".to_string()
     } else {
-        format!("Decisions ({total} total · {unresolved} unresolved · Enter cycles)")
+        format!("Decisions ({total} total · {unresolved} unresolved · Enter to pick)")
     };
     let decision_items: Vec<ListItem> = app
         .imports_state
@@ -5247,6 +5299,69 @@ fn render_match_modal(frame: &mut ratatui::Frame<'_>, match_state: &mut MatchSta
     frame.render_widget(help, rows[3]);
 }
 
+fn render_decision_picker_modal(
+    frame: &mut ratatui::Frame<'_>,
+    imports_state: &mut ImportPageState,
+) {
+    let Some(picker) = imports_state.decision_picker.as_mut() else {
+        return;
+    };
+    let Some(decision) = imports_state.decisions.get(picker.decision_index) else {
+        return;
+    };
+
+    let popup = centered_rect(72, 16, frame.area());
+    frame.render_widget(Clear, popup);
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Pick account for ambiguous transaction")
+            .style(popup_style()),
+        popup,
+    );
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5),
+            Constraint::Min(4),
+            Constraint::Length(2),
+        ])
+        .split(popup);
+
+    let kind_label = match decision.kind.as_str() {
+        "cc_payment" => "CC payment",
+        "bank_transfer" => "Bank transfer",
+        other => other,
+    };
+    let summary = Paragraph::new(format!(
+        "Kind: {kind_label}\nPattern: {}\nDate: {}    Amount: {}\nDescription: {}",
+        decision.pattern, decision.txn_date, decision.txn_amount, decision.txn_description,
+    ))
+    .style(Style::default().fg(Color::Gray))
+    .wrap(Wrap { trim: true });
+    frame.render_widget(summary, rows[0]);
+
+    let items: Vec<ListItem> = decision
+        .candidates
+        .iter()
+        .map(|account| ListItem::new(Line::from(account.clone())))
+        .collect();
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!("Candidates ({})", decision.candidates.len())),
+        )
+        .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+        .highlight_symbol(">> ");
+    frame.render_stateful_widget(list, rows[1], &mut picker.list_state);
+
+    let help =
+        Paragraph::new("Enter pick  |  c clear selection  |  Esc cancel  |  j/k move").wrap(Wrap { trim: true });
+    frame.render_widget(help, rows[2]);
+}
+
 fn centered_rect(
     width_percent: u16,
     height: u16,
@@ -5587,6 +5702,41 @@ fn run_app(
             continue;
         }
 
+        if app.imports_state.decision_picker.is_some() {
+            let candidates_len = app
+                .imports_state
+                .decision_picker
+                .as_ref()
+                .and_then(|picker| app.imports_state.decisions.get(picker.decision_index))
+                .map(|decision| decision.candidates.len())
+                .unwrap_or(0);
+            match key.code {
+                KeyCode::Esc => {
+                    app.imports_state.close_decision_picker();
+                    app.set_status("Decision picker cancelled");
+                }
+                KeyCode::Enter => {
+                    app.imports_state.confirm_decision_picker();
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if let Some(picker) = app.imports_state.decision_picker.as_mut() {
+                        picker.move_selection(1, candidates_len);
+                    }
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if let Some(picker) = app.imports_state.decision_picker.as_mut() {
+                        picker.move_selection(-1, candidates_len);
+                    }
+                }
+                KeyCode::Char('c') => {
+                    app.imports_state.clear_decision_picker_selection();
+                    app.set_status("Cleared selection for this decision");
+                }
+                _ => {}
+            }
+            continue;
+        }
+
         if app.match_state.is_some() {
             match key.code {
                 KeyCode::Esc => {
@@ -5861,7 +6011,7 @@ fn run_app(
                     }
                     (KeyCode::Enter, _) => match app.imports_state.focus {
                         ImportPaneFocus::Decisions => {
-                            app.imports_state.cycle_focused_decision();
+                            app.imports_state.open_decision_picker();
                         }
                         ImportPaneFocus::Accounts => {
                             app.imports_state.clear_decisions();
