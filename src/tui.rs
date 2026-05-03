@@ -2868,10 +2868,12 @@ impl App {
         };
         if route.import_type != "chequing" {
             self.imports_state.clear_decisions();
+            self.set_status("Preflight skipped: only chequing imports support per-row decisions");
             return Ok(());
         }
         let Some(account) = self.imports_state.selected_account().map(str::to_string) else {
             self.imports_state.clear_decisions();
+            self.set_status("Preflight skipped: no chequing account selected yet");
             return Ok(());
         };
         let key = (route.source_path.clone(), account.clone());
@@ -2884,6 +2886,10 @@ impl App {
             self.imports_state.decisions_state.select(None);
             self.imports_state.decisions_error = response.error.clone();
             self.imports_state.decisions_loaded_for = Some(key);
+            self.set_status(format!(
+                "Preflight failed: {}",
+                response.error.as_deref().unwrap_or("unknown error")
+            ));
             return Ok(());
         }
         let decisions: Vec<ImportDecisionView> = response
@@ -2891,7 +2897,15 @@ impl App {
             .into_iter()
             .map(ImportDecisionView::from_payload)
             .collect();
+        let count = decisions.len();
         self.imports_state.set_decisions(decisions, Some(key));
+        if count == 0 {
+            self.set_status("Preflight ok: no ambiguous decisions to resolve");
+        } else {
+            self.set_status(format!(
+                "Preflight ok: {count} ambiguous decision(s) — focus Decisions pane (Tab) and press Enter to pick"
+            ));
+        }
         Ok(())
     }
 
