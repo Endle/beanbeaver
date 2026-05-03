@@ -1125,6 +1125,22 @@ impl ImportPageState {
         self.decision_picker = Some(DecisionPickerState::new(index, decision.selected_candidate));
     }
 
+    fn first_unresolved_index(&self) -> Option<usize> {
+        self.decisions
+            .iter()
+            .position(|decision| decision.selected_account().is_none())
+    }
+
+    fn jump_to_first_unresolved_and_open(&mut self) -> bool {
+        let Some(index) = self.first_unresolved_index() else {
+            return false;
+        };
+        self.focus = ImportPaneFocus::Decisions;
+        self.decisions_state.select(Some(index));
+        self.open_decision_picker();
+        true
+    }
+
     fn close_decision_picker(&mut self) {
         self.decision_picker = None;
     }
@@ -2868,12 +2884,10 @@ impl App {
         };
         if route.import_type != "chequing" {
             self.imports_state.clear_decisions();
-            self.set_status("Preflight skipped: only chequing imports support per-row decisions");
             return Ok(());
         }
         let Some(account) = self.imports_state.selected_account().map(str::to_string) else {
             self.imports_state.clear_decisions();
-            self.set_status("Preflight skipped: no chequing account selected yet");
             return Ok(());
         };
         let key = (route.source_path.clone(), account.clone());
@@ -6023,26 +6037,32 @@ fn run_app(
                             }
                         }
                     }
-                    (KeyCode::Enter, _) => match app.imports_state.focus {
-                        ImportPaneFocus::Decisions => {
+                    (KeyCode::Enter, _) => {
+                        if app.imports_state.focus == ImportPaneFocus::Decisions {
                             app.imports_state.open_decision_picker();
-                        }
-                        ImportPaneFocus::Accounts => {
-                            app.imports_state.clear_decisions();
-                            if let Err(error) = app.refresh_import_decisions() {
-                                app.set_error(error.to_string());
-                            } else {
-                                app.set_status("Reloaded import decisions for selected account");
+                        } else if app.imports_state.jump_to_first_unresolved_and_open() {
+                            app.set_status("Pick an account for this ambiguous transaction (Esc to cancel)");
+                        } else {
+                            match app.imports_state.focus {
+                                ImportPaneFocus::Accounts => {
+                                    app.imports_state.clear_decisions();
+                                    if let Err(error) = app.refresh_import_decisions() {
+                                        app.set_error(error.to_string());
+                                    } else {
+                                        app.set_status("Reloaded import decisions for selected account");
+                                    }
+                                }
+                                ImportPaneFocus::Routes => {
+                                    if let Err(error) = app.resolve_selected_import_accounts() {
+                                        app.set_error(error.to_string());
+                                    } else {
+                                        app.set_status("Reloaded account choices for selected statement");
+                                    }
+                                }
+                                ImportPaneFocus::Decisions => unreachable!(),
                             }
                         }
-                        ImportPaneFocus::Routes => {
-                            if let Err(error) = app.resolve_selected_import_accounts() {
-                                app.set_error(error.to_string());
-                            } else {
-                                app.set_status("Reloaded account choices for selected statement");
-                            }
-                        }
-                    },
+                    }
                     (KeyCode::Char('u'), KeyModifiers::NONE) => {
                         app.imports_state.allow_uncommitted = !app.imports_state.allow_uncommitted;
                         app.set_status(format!(
