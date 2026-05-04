@@ -1145,18 +1145,15 @@ impl ImportPageState {
         self.decision_picker = None;
     }
 
-    fn confirm_decision_picker(&mut self) {
-        let Some(picker) = self.decision_picker.take() else {
-            return;
-        };
-        let Some(selection) = picker.list_state.selected() else {
-            return;
-        };
-        if let Some(decision) = self.decisions.get_mut(picker.decision_index) {
-            if selection < decision.candidates.len() {
-                decision.selected_candidate = Some(selection);
-            }
+    fn confirm_decision_picker(&mut self) -> Option<String> {
+        let picker = self.decision_picker.take()?;
+        let selection = picker.list_state.selected()?;
+        let decision = self.decisions.get_mut(picker.decision_index)?;
+        if selection >= decision.candidates.len() {
+            return None;
         }
+        decision.selected_candidate = Some(selection);
+        decision.candidates.get(selection).cloned()
     }
 
     fn clear_decision_picker_selection(&mut self) {
@@ -5366,27 +5363,30 @@ fn render_decision_picker_modal(
         "Kind: {kind_label}\nPattern: {}\nDate: {}    Amount: {}\nDescription: {}",
         decision.pattern, decision.txn_date, decision.txn_amount, decision.txn_description,
     ))
-    .style(Style::default().fg(Color::Gray))
+    .style(popup_style())
     .wrap(Wrap { trim: true });
     frame.render_widget(summary, rows[0]);
 
     let items: Vec<ListItem> = decision
         .candidates
         .iter()
-        .map(|account| ListItem::new(Line::from(account.clone())))
+        .map(|account| ListItem::new(Line::from(account.clone())).style(popup_style()))
         .collect();
     let list = List::new(items)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(format!("Candidates ({})", decision.candidates.len())),
+                .title(format!("Candidates ({})", decision.candidates.len()))
+                .style(popup_style()),
         )
+        .style(popup_style())
         .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
         .highlight_symbol(">> ");
     frame.render_stateful_widget(list, rows[1], &mut picker.list_state);
 
-    let help =
-        Paragraph::new("Enter pick  |  c clear selection  |  Esc cancel  |  j/k move").wrap(Wrap { trim: true });
+    let help = Paragraph::new("Enter pick  |  c clear selection  |  Esc cancel  |  j/k move")
+        .style(popup_style())
+        .wrap(Wrap { trim: true });
     frame.render_widget(help, rows[2]);
 }
 
@@ -5744,7 +5744,20 @@ fn run_app(
                     app.set_status("Decision picker cancelled");
                 }
                 KeyCode::Enter => {
-                    app.imports_state.confirm_decision_picker();
+                    let picked = app.imports_state.confirm_decision_picker();
+                    let unresolved = app.imports_state.unresolved_decisions();
+                    if let Some(account) = picked {
+                        let short_account = account.rsplit_once(':').map_or(account.as_str(), |(_, tail)| tail);
+                        if unresolved == 0 {
+                            app.set_status(format!(
+                                "Picked {short_account}. All decisions resolved — press `a` to apply."
+                            ));
+                        } else {
+                            app.set_status(format!(
+                                "Picked {short_account}. {unresolved} decision(s) still unresolved — press Enter again to pick the next one, or `a` to apply once done."
+                            ));
+                        }
+                    }
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     if let Some(picker) = app.imports_state.decision_picker.as_mut() {
