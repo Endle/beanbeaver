@@ -452,6 +452,7 @@ enum RightPane {
 enum ImportPaneFocus {
     Routes,
     Accounts,
+    Decisions,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -573,7 +574,11 @@ struct ImportRouteOption {
     source_path: String,
     import_type: String,
     importer_id: String,
+    #[serde(default)]
+    #[allow(dead_code)]
     rule_id: String,
+    #[serde(default)]
+    #[allow(dead_code)]
     stage: u32,
 }
 
@@ -623,19 +628,74 @@ struct ResolveImportAccountsResponse {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+struct ImportDecisionPayload {
+    kind: String,
+    pattern: String,
+    txn_date: String,
+    txn_description: String,
+    txn_amount: String,
+    candidates: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct PreflightChequingImportResponse {
+    status: String,
+    #[serde(default)]
+    decisions: Vec<ImportDecisionPayload>,
+    error: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct ImportDecisionView {
+    kind: String,
+    pattern: String,
+    txn_date: String,
+    txn_description: String,
+    txn_amount: String,
+    candidates: Vec<String>,
+    selected_candidate: Option<usize>,
+}
+
+impl ImportDecisionView {
+    fn from_payload(payload: ImportDecisionPayload) -> Self {
+        Self {
+            kind: payload.kind,
+            pattern: payload.pattern,
+            txn_date: payload.txn_date,
+            txn_description: payload.txn_description,
+            txn_amount: payload.txn_amount,
+            candidates: payload.candidates,
+            selected_candidate: None,
+        }
+    }
+
+    fn selected_account(&self) -> Option<&str> {
+        self.selected_candidate
+            .and_then(|index| self.candidates.get(index))
+            .map(String::as_str)
+    }
+
+    fn display_label(&self) -> String {
+        let kind_label = match self.kind.as_str() {
+            "cc_payment" => "CC payment",
+            "bank_transfer" => "Bank transfer",
+            other => other,
+        };
+        let chosen = match self.selected_account() {
+            Some(account) => account.to_string(),
+            None => format!("<unresolved · {} candidates>", self.candidates.len()),
+        };
+        format!(
+            "{kind_label} '{}' {} {}  →  {}",
+            self.pattern, self.txn_date, self.txn_amount, chosen
+        )
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
 struct ApplyImportResponse {
     status: String,
-    import_type: String,
-    result_file_path: Option<String>,
-    result_file_name: Option<String>,
-    account: Option<String>,
-    start_date: Option<String>,
-    end_date: Option<String>,
     error: Option<String>,
-    #[serde(default)]
-    warnings: Vec<String>,
-    #[serde(default)]
-    validation_errors: Vec<String>,
     summary: Option<String>,
 }
 
@@ -968,6 +1028,33 @@ impl TextInputState {
 }
 
 #[derive(Clone, Debug)]
+struct DecisionPickerState {
+    decision_index: usize,
+    list_state: ListState,
+}
+
+impl DecisionPickerState {
+    fn new(decision_index: usize, initial_selection: Option<usize>) -> Self {
+        let mut list_state = ListState::default();
+        list_state.select(initial_selection.or(Some(0)));
+        Self {
+            decision_index,
+            list_state,
+        }
+    }
+
+    fn move_selection(&mut self, delta: isize, len: usize) {
+        if len == 0 {
+            self.list_state.select(None);
+            return;
+        }
+        let current = self.list_state.selected().unwrap_or(0) as isize;
+        let next = (current + delta).clamp(0, (len - 1) as isize) as usize;
+        self.list_state.select(Some(next));
+    }
+}
+
+#[derive(Clone, Debug)]
 struct ImportPageState {
     routes: Vec<ImportRouteOption>,
     route_state: ListState,
@@ -981,7 +1068,11 @@ struct ImportPageState {
     account_state: ListState,
     account_as_of: Option<String>,
     account_error: Option<String>,
-    last_result: Option<ApplyImportResponse>,
+    decisions: Vec<ImportDecisionView>,
+    decisions_state: ListState,
+    decisions_error: Option<String>,
+    decisions_loaded_for: Option<(String, String)>,
+    decision_picker: Option<DecisionPickerState>,
 }
 
 impl ImportPageState {
@@ -990,6 +1081,8 @@ impl ImportPageState {
         route_state.select(None);
         let mut account_state = ListState::default();
         account_state.select(None);
+        let mut decisions_state = ListState::default();
+        decisions_state.select(None);
         Self {
             routes: Vec::new(),
             route_state,
@@ -1003,8 +1096,102 @@ impl ImportPageState {
             account_state,
             account_as_of: None,
             account_error: None,
-            last_result: None,
+            decisions: Vec::new(),
+            decisions_state,
+            decisions_error: None,
+            decisions_loaded_for: None,
+            decision_picker: None,
         }
+    }
+
+    fn open_decision_picker(&mut self) {
+        let Some(index) = self.decisions_state.selected() else {
+            return;
+        };
+        let Some(decision) = self.decisions.get(index) else {
+            return;
+        };
+        if decision.candidates.is_empty() {
+            return;
+        }
+        self.decision_picker = Some(DecisionPickerState::new(index, decision.selected_candidate));
+    }
+
+    fn first_unresolved_index(&self) -> Option<usize> {
+        self.decisions
+            .iter()
+            .position(|decision| decision.selected_account().is_none())
+    }
+
+    fn jump_to_first_unresolved_and_open(&mut self) -> bool {
+        let Some(index) = self.first_unresolved_index() else {
+            return false;
+        };
+        self.focus = ImportPaneFocus::Decisions;
+        self.decisions_state.select(Some(index));
+        self.open_decision_picker();
+        true
+    }
+
+    fn close_decision_picker(&mut self) {
+        self.decision_picker = None;
+    }
+
+    fn confirm_decision_picker(&mut self) -> Option<String> {
+        let picker = self.decision_picker.take()?;
+        let selection = picker.list_state.selected()?;
+        let decision = self.decisions.get_mut(picker.decision_index)?;
+        if selection >= decision.candidates.len() {
+            return None;
+        }
+        decision.selected_candidate = Some(selection);
+        decision.candidates.get(selection).cloned()
+    }
+
+    fn clear_decision_picker_selection(&mut self) {
+        let Some(picker) = self.decision_picker.take() else {
+            return;
+        };
+        if let Some(decision) = self.decisions.get_mut(picker.decision_index) {
+            decision.selected_candidate = None;
+        }
+    }
+
+    fn set_decisions(&mut self, decisions: Vec<ImportDecisionView>, key: Option<(String, String)>) {
+        self.decisions = decisions;
+        self.decisions_loaded_for = key;
+        self.decisions_error = None;
+        if self.decisions.is_empty() {
+            self.decisions_state.select(None);
+        } else {
+            self.decisions_state.select(Some(0));
+        }
+    }
+
+    fn clear_decisions(&mut self) {
+        self.decisions.clear();
+        self.decisions_loaded_for = None;
+        self.decisions_error = None;
+        self.decisions_state.select(None);
+        self.decision_picker = None;
+    }
+
+    fn move_decisions_selection(&mut self, delta: isize) {
+        let len = self.decisions.len();
+        if len == 0 {
+            self.decisions_state.select(None);
+            return;
+        }
+        let current = self.decisions_state.selected().unwrap_or(0) as isize;
+        let next = (current + delta).clamp(0, (len - 1) as isize) as usize;
+        self.decisions_state.select(Some(next));
+    }
+
+    fn unresolved_decisions(&self) -> usize {
+        self.decisions
+            .iter()
+            .filter(|decision| decision.selected_account().is_none())
+            .count()
     }
 
     fn selected_route(&self) -> Option<&ImportRouteOption> {
@@ -1065,6 +1252,7 @@ impl ImportPageState {
         self.account_state.select(None);
         self.account_as_of = None;
         self.account_error = None;
+        self.clear_decisions();
     }
 
     fn apply_account_resolution(
@@ -1092,108 +1280,6 @@ impl ImportPageState {
         }
     }
 
-    fn detail_lines(&self) -> Vec<String> {
-        let mut lines = vec![
-            format!(
-                "Planner Status: {}",
-                match self.planner_status.as_str() {
-                    "not_loaded" => "not loaded (press `r` to load routes)",
-                    other => other,
-                }
-            ),
-            format!(
-                "Git Working Tree: {}",
-                if self.has_uncommitted_changes {
-                    "uncommitted changes detected"
-                } else {
-                    "clean"
-                }
-            ),
-            format!(
-                "Allow Import With Uncommitted Changes: {}",
-                if self.allow_uncommitted { "yes" } else { "no" }
-            ),
-        ];
-
-        if let Some(error) = &self.planner_error {
-            lines.push(String::new());
-            lines.push("Planner Error:".to_string());
-            lines.extend(error.lines().map(ToOwned::to_owned));
-        }
-
-        if let Some(route) = self.selected_route() {
-            lines.push(String::new());
-            lines.push("Selected Route".to_string());
-            lines.push(format!("CSV: {}", route.csv_file));
-            lines.push(format!("Source: {}", route.source_path));
-            lines.push(format!("Type: {}", route.import_type_label()));
-            lines.push(format!("Importer: {}", route.importer_id));
-            lines.push(format!("Rule: {}", route.rule_id));
-            lines.push(format!("Stage: {}", route.stage));
-        }
-
-        if self.account_label.is_some() || self.account_error.is_some() {
-            lines.push(String::new());
-            lines.push("Account Resolution".to_string());
-            if let Some(label) = &self.account_label {
-                lines.push(format!("Label: {label}"));
-            }
-            if let Some(as_of) = &self.account_as_of {
-                lines.push(format!("As Of: {as_of}"));
-            }
-            if let Some(account) = self.selected_account() {
-                lines.push(format!("Selected Account: {account}"));
-            }
-            if let Some(error) = &self.account_error {
-                lines.push("Error:".to_string());
-                lines.extend(error.lines().map(ToOwned::to_owned));
-            }
-        }
-
-        if let Some(result) = &self.last_result {
-            lines.push(String::new());
-            lines.push("Last Import Result".to_string());
-            lines.push(format!("Status: {}", result.status));
-            lines.push(format!("Import Type: {}", result.import_type));
-            if let Some(summary) = &result.summary {
-                lines.push(format!("Summary: {summary}"));
-            }
-            if let Some(account) = &result.account {
-                lines.push(format!("Account: {account}"));
-            }
-            if let Some(start_date) = &result.start_date {
-                lines.push(format!("Start Date: {start_date}"));
-            }
-            if let Some(end_date) = &result.end_date {
-                lines.push(format!("End Date: {end_date}"));
-            }
-            if let Some(path) = &result.result_file_path {
-                lines.push(format!("Result File: {path}"));
-            }
-            if let Some(name) = &result.result_file_name {
-                lines.push(format!("Result File Name: {name}"));
-            }
-            if let Some(error) = &result.error {
-                lines.push("Error:".to_string());
-                lines.extend(error.lines().map(ToOwned::to_owned));
-            }
-            if !result.warnings.is_empty() {
-                lines.push("Warnings:".to_string());
-                lines.extend(result.warnings.iter().map(|warning| format!("- {warning}")));
-            }
-            if !result.validation_errors.is_empty() {
-                lines.push("Validation Errors:".to_string());
-                lines.extend(
-                    result
-                        .validation_errors
-                        .iter()
-                        .map(|error| format!("- {error}")),
-                );
-            }
-        }
-
-        lines
-    }
 }
 
 struct ReviewState {
@@ -2189,7 +2275,7 @@ impl App {
                 "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | s start/create container | x stop container | R restart container | r refresh container status/logs | q quit"
             }
             Page::Imports => {
-                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | r load routes | h/l or Tab switch pane | j/k move | Enter reload accounts | v view csv | x trash csv | a apply import | u toggle allow-uncommitted | q quit"
+                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | r load routes | h/l or Tab cycle Routes/Accounts/Decisions | j/k move | Enter opens picker (Routes: reload accounts) | v view csv | x trash csv | a apply import | u toggle allow-uncommitted | q quit"
             }
         }
     }
@@ -2674,6 +2760,53 @@ impl App {
                 .apply_account_resolution(account_resolution, preferred_account.as_deref()),
             None => self.imports_state.clear_account_resolution(),
         }
+        self.refresh_import_decisions()?;
+        Ok(())
+    }
+
+    fn refresh_import_decisions(&mut self) -> AppResult<()> {
+        let Some(route) = self.imports_state.selected_route().cloned() else {
+            self.imports_state.clear_decisions();
+            return Ok(());
+        };
+        if route.import_type != "chequing" {
+            self.imports_state.clear_decisions();
+            return Ok(());
+        }
+        let Some(account) = self.imports_state.selected_account().map(str::to_string) else {
+            self.imports_state.clear_decisions();
+            return Ok(());
+        };
+        let key = (route.source_path.clone(), account.clone());
+        if self.imports_state.decisions_loaded_for.as_ref() == Some(&key) {
+            return Ok(());
+        }
+        let response = backend_preflight_chequing_import(&route.csv_file, Some(&account))?;
+        if response.status != "ok" {
+            self.imports_state.decisions.clear();
+            self.imports_state.decisions_state.select(None);
+            self.imports_state.decisions_error = response.error.clone();
+            self.imports_state.decisions_loaded_for = Some(key);
+            self.set_status(format!(
+                "Preflight failed: {}",
+                response.error.as_deref().unwrap_or("unknown error")
+            ));
+            return Ok(());
+        }
+        let decisions: Vec<ImportDecisionView> = response
+            .decisions
+            .into_iter()
+            .map(ImportDecisionView::from_payload)
+            .collect();
+        let count = decisions.len();
+        self.imports_state.set_decisions(decisions, Some(key));
+        if count == 0 {
+            self.set_status("Preflight ok: no ambiguous decisions to resolve");
+        } else {
+            self.set_status(format!(
+                "Preflight ok: {count} ambiguous decision(s) — focus Decisions pane (Tab) and press Enter to pick"
+            ));
+        }
         Ok(())
     }
 
@@ -2717,12 +2850,41 @@ impl App {
             return Ok(());
         };
         let selected_account = self.imports_state.selected_account().map(ToOwned::to_owned);
+        let unresolved = self.imports_state.unresolved_decisions();
+        if unresolved > 0 {
+            self.set_status(format!(
+                "Apply blocked: {} unresolved account decision(s). Focus Decisions pane (Tab) and press Enter to pick.",
+                unresolved
+            ));
+            return Ok(());
+        }
+        let mut cc_overrides: Vec<ImportOverridePayload> = Vec::new();
+        let mut bank_overrides: Vec<ImportOverridePayload> = Vec::new();
+        for decision in &self.imports_state.decisions {
+            let account = match decision.selected_account() {
+                Some(a) => a.to_string(),
+                None => continue,
+            };
+            let payload = ImportOverridePayload {
+                date: decision.txn_date.clone(),
+                description: decision.txn_description.clone(),
+                amount: decision.txn_amount.clone(),
+                account,
+            };
+            match decision.kind.as_str() {
+                "cc_payment" => cc_overrides.push(payload),
+                "bank_transfer" => bank_overrides.push(payload),
+                _ => {}
+            }
+        }
         let response = backend_apply_import(
             &route.import_type,
             &route.csv_file,
             &route.importer_id,
             selected_account.as_deref(),
             self.imports_state.allow_uncommitted,
+            &cc_overrides,
+            &bank_overrides,
         )?;
         let status = match response.status.as_str() {
             "ok" => response
@@ -2738,7 +2900,7 @@ impl App {
                 .clone()
                 .unwrap_or_else(|| format!("Import failed: {}", response.status)),
         };
-        self.imports_state.last_result = Some(response);
+        let _ = response;
         self.refresh_imports_page()?;
         self.set_status(status);
         Ok(())
@@ -3308,6 +3470,8 @@ fn backend_apply_import(
     importer_id: &str,
     selected_account: Option<&str>,
     allow_uncommitted: bool,
+    cc_payment_overrides: &[ImportOverridePayload],
+    bank_transfer_overrides: &[ImportOverridePayload],
 ) -> AppResult<ApplyImportResponse> {
     let payload = serde_json::json!({
         "import_type": import_type,
@@ -3315,12 +3479,37 @@ fn backend_apply_import(
         "importer_id": importer_id,
         "selected_account": selected_account,
         "allow_uncommitted": allow_uncommitted,
+        "cc_payment_overrides": cc_payment_overrides,
+        "bank_transfer_overrides": bank_transfer_overrides,
     });
     let stdout = run_backend_with_input(
         &["api", "import-apply"],
         Some(&serde_json::to_string(&payload)?),
     )?;
     Ok(serde_json::from_str(&stdout)?)
+}
+
+fn backend_preflight_chequing_import(
+    csv_file: &str,
+    selected_account: Option<&str>,
+) -> AppResult<PreflightChequingImportResponse> {
+    let payload = serde_json::json!({
+        "csv_file": csv_file,
+        "selected_account": selected_account,
+    });
+    let stdout = run_backend_with_input(
+        &["api", "preflight-chequing-import"],
+        Some(&serde_json::to_string(&payload)?),
+    )?;
+    Ok(serde_json::from_str(&stdout)?)
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+struct ImportOverridePayload {
+    date: String,
+    description: String,
+    amount: String,
+    account: String,
 }
 
 fn backend_set_config(project_root: &str) -> AppResult<ConfigResponse> {
@@ -4130,6 +4319,9 @@ fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
     if let Some(match_state) = &mut app.match_state {
         render_match_modal(frame, match_state);
     }
+    if app.imports_state.decision_picker.is_some() {
+        render_decision_picker_modal(frame, &mut app.imports_state);
+    }
 }
 
 fn render_receipts_page(
@@ -4360,11 +4552,18 @@ fn render_ocr_page(frame: &mut ratatui::Frame<'_>, app: &App, area: ratatui::lay
 fn render_imports_page(frame: &mut ratatui::Frame<'_>, app: &mut App, area: ratatui::layout::Rect) {
     let sections = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(6), Constraint::Min(10)])
+        .constraints([Constraint::Length(7), Constraint::Min(10)])
         .split(area);
 
+    let total_decisions = app.imports_state.decisions.len();
+    let unresolved_decisions = app.imports_state.unresolved_decisions();
+    let decisions_summary = if total_decisions == 0 {
+        "none".to_string()
+    } else {
+        format!("{total_decisions} total, {unresolved_decisions} unresolved")
+    };
     let summary = Paragraph::new(format!(
-        "Detected routes: {}\nWorking tree: {}\nAllow import with uncommitted changes: {}\nSelected route: {}",
+        "Detected routes: {}\nWorking tree: {}\nAllow import with uncommitted changes: {}\nSelected route: {}\nDecisions: {}",
         app.imports_state.routes.len(),
         if app.imports_state.has_uncommitted_changes {
             "uncommitted changes detected"
@@ -4379,7 +4578,8 @@ fn render_imports_page(frame: &mut ratatui::Frame<'_>, app: &mut App, area: rata
         app.imports_state
             .selected_route()
             .map(|route| route.csv_file.as_str())
-            .unwrap_or("<none>")
+            .unwrap_or("<none>"),
+        decisions_summary,
     ))
     .block(
         Block::default()
@@ -4390,13 +4590,13 @@ fn render_imports_page(frame: &mut ratatui::Frame<'_>, app: &mut App, area: rata
     frame.render_widget(summary, sections[0]);
 
     let body = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
-        .split(sections[1]);
-    let right = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(10), Constraint::Min(8)])
-        .split(body[1]);
+        .constraints([Constraint::Length(8), Constraint::Min(6)])
+        .split(sections[1]);
+    let top_row = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
+        .split(body[0]);
 
     let route_items: Vec<ListItem> = app
         .imports_state
@@ -4417,7 +4617,7 @@ fn render_imports_page(frame: &mut ratatui::Frame<'_>, app: &mut App, area: rata
         )
         .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
         .highlight_symbol(">> ");
-    frame.render_stateful_widget(routes, body[0], &mut app.imports_state.route_state);
+    frame.render_stateful_widget(routes, top_row[0], &mut app.imports_state.route_state);
 
     let account_items: Vec<ListItem> = app
         .imports_state
@@ -4443,22 +4643,52 @@ fn render_imports_page(frame: &mut ratatui::Frame<'_>, app: &mut App, area: rata
         )
         .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
         .highlight_symbol(">> ");
-    frame.render_stateful_widget(accounts, right[0], &mut app.imports_state.account_state);
+    frame.render_stateful_widget(accounts, top_row[1], &mut app.imports_state.account_state);
 
-    let details = Paragraph::new(Text::from(
-        app.imports_state
-            .detail_lines()
-            .into_iter()
-            .map(Line::from)
-            .collect::<Vec<_>>(),
-    ))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Import Details"),
-    )
-    .wrap(Wrap { trim: false });
-    frame.render_widget(details, right[1]);
+    let unresolved = app.imports_state.unresolved_decisions();
+    let total = app.imports_state.decisions.len();
+    let decisions_title = if let Some(error) = app.imports_state.decisions_error.as_ref() {
+        format!("Decisions (error: {})", truncate_for_title(error, 60))
+    } else if total == 0 {
+        "Decisions (none)".to_string()
+    } else {
+        format!("Decisions ({total} total · {unresolved} unresolved · Enter to pick)")
+    };
+    let decision_items: Vec<ListItem> = app
+        .imports_state
+        .decisions
+        .iter()
+        .map(|decision| ListItem::new(Line::from(decision.display_label())))
+        .collect();
+    let decisions_widget = List::new(decision_items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(decisions_title)
+                .border_style(if app.imports_state.focus == ImportPaneFocus::Decisions {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default()
+                }),
+        )
+        .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+        .highlight_symbol(">> ");
+    frame.render_stateful_widget(
+        decisions_widget,
+        body[1],
+        &mut app.imports_state.decisions_state,
+    );
+}
+
+fn truncate_for_title(text: &str, max_len: usize) -> String {
+    let cleaned = text.replace('\n', " ");
+    if cleaned.chars().count() <= max_len {
+        cleaned
+    } else {
+        let mut truncated: String = cleaned.chars().take(max_len.saturating_sub(1)).collect();
+        truncated.push('…');
+        truncated
+    }
 }
 
 fn render_review_screen(
@@ -4965,6 +5195,72 @@ fn render_match_modal(frame: &mut ratatui::Frame<'_>, match_state: &mut MatchSta
     frame.render_widget(help, rows[3]);
 }
 
+fn render_decision_picker_modal(
+    frame: &mut ratatui::Frame<'_>,
+    imports_state: &mut ImportPageState,
+) {
+    let Some(picker) = imports_state.decision_picker.as_mut() else {
+        return;
+    };
+    let Some(decision) = imports_state.decisions.get(picker.decision_index) else {
+        return;
+    };
+
+    let popup = centered_rect(72, 16, frame.area());
+    frame.render_widget(Clear, popup);
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Pick account for ambiguous transaction")
+            .style(popup_style()),
+        popup,
+    );
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5),
+            Constraint::Min(4),
+            Constraint::Length(2),
+        ])
+        .split(popup);
+
+    let kind_label = match decision.kind.as_str() {
+        "cc_payment" => "CC payment",
+        "bank_transfer" => "Bank transfer",
+        other => other,
+    };
+    let summary = Paragraph::new(format!(
+        "Kind: {kind_label}\nPattern: {}\nDate: {}    Amount: {}\nDescription: {}",
+        decision.pattern, decision.txn_date, decision.txn_amount, decision.txn_description,
+    ))
+    .style(popup_style())
+    .wrap(Wrap { trim: true });
+    frame.render_widget(summary, rows[0]);
+
+    let items: Vec<ListItem> = decision
+        .candidates
+        .iter()
+        .map(|account| ListItem::new(Line::from(account.clone())).style(popup_style()))
+        .collect();
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!("Candidates ({})", decision.candidates.len()))
+                .style(popup_style()),
+        )
+        .style(popup_style())
+        .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+        .highlight_symbol(">> ");
+    frame.render_stateful_widget(list, rows[1], &mut picker.list_state);
+
+    let help = Paragraph::new("Enter pick  |  c clear selection  |  Esc cancel  |  j/k move")
+        .style(popup_style())
+        .wrap(Wrap { trim: true });
+    frame.render_widget(help, rows[2]);
+}
+
 fn centered_rect(
     width_percent: u16,
     height: u16,
@@ -5305,6 +5601,54 @@ fn run_app(
             continue;
         }
 
+        if app.imports_state.decision_picker.is_some() {
+            let candidates_len = app
+                .imports_state
+                .decision_picker
+                .as_ref()
+                .and_then(|picker| app.imports_state.decisions.get(picker.decision_index))
+                .map(|decision| decision.candidates.len())
+                .unwrap_or(0);
+            match key.code {
+                KeyCode::Esc => {
+                    app.imports_state.close_decision_picker();
+                    app.set_status("Decision picker cancelled");
+                }
+                KeyCode::Enter => {
+                    let picked = app.imports_state.confirm_decision_picker();
+                    let unresolved = app.imports_state.unresolved_decisions();
+                    if let Some(account) = picked {
+                        let short_account = account.rsplit_once(':').map_or(account.as_str(), |(_, tail)| tail);
+                        if unresolved == 0 {
+                            app.set_status(format!(
+                                "Picked {short_account}. All decisions resolved — press `a` to apply."
+                            ));
+                        } else {
+                            app.set_status(format!(
+                                "Picked {short_account}. {unresolved} decision(s) still unresolved — press Enter again to pick the next one, or `a` to apply once done."
+                            ));
+                        }
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if let Some(picker) = app.imports_state.decision_picker.as_mut() {
+                        picker.move_selection(1, candidates_len);
+                    }
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if let Some(picker) = app.imports_state.decision_picker.as_mut() {
+                        picker.move_selection(-1, candidates_len);
+                    }
+                }
+                KeyCode::Char('c') => {
+                    app.imports_state.clear_decision_picker_selection();
+                    app.set_status("Cleared selection for this decision");
+                }
+                _ => {}
+            }
+            continue;
+        }
+
         if app.match_state.is_some() {
             match key.code {
                 KeyCode::Esc => {
@@ -5532,36 +5876,75 @@ fn run_app(
                     (KeyCode::Tab, _)
                     | (KeyCode::Char('l'), KeyModifiers::NONE)
                     | (KeyCode::Right, _) => {
-                        app.imports_state.focus = ImportPaneFocus::Accounts;
+                        app.imports_state.focus = match app.imports_state.focus {
+                            ImportPaneFocus::Routes => ImportPaneFocus::Accounts,
+                            ImportPaneFocus::Accounts => ImportPaneFocus::Decisions,
+                            ImportPaneFocus::Decisions => ImportPaneFocus::Routes,
+                        };
                     }
                     (KeyCode::BackTab, _)
                     | (KeyCode::Char('h'), KeyModifiers::NONE)
                     | (KeyCode::Left, _) => {
-                        app.imports_state.focus = ImportPaneFocus::Routes;
+                        app.imports_state.focus = match app.imports_state.focus {
+                            ImportPaneFocus::Routes => ImportPaneFocus::Decisions,
+                            ImportPaneFocus::Accounts => ImportPaneFocus::Routes,
+                            ImportPaneFocus::Decisions => ImportPaneFocus::Accounts,
+                        };
                     }
                     (KeyCode::Down, _) | (KeyCode::Char('j'), KeyModifiers::NONE) => {
-                        if app.imports_state.focus == ImportPaneFocus::Routes {
-                            if let Err(error) = app.move_import_route_selection(1) {
-                                app.set_error(error.to_string());
+                        match app.imports_state.focus {
+                            ImportPaneFocus::Routes => {
+                                if let Err(error) = app.move_import_route_selection(1) {
+                                    app.set_error(error.to_string());
+                                }
                             }
-                        } else {
-                            app.imports_state.move_account_selection(1);
+                            ImportPaneFocus::Accounts => {
+                                app.imports_state.move_account_selection(1);
+                            }
+                            ImportPaneFocus::Decisions => {
+                                app.imports_state.move_decisions_selection(1);
+                            }
                         }
                     }
                     (KeyCode::Up, _) | (KeyCode::Char('k'), KeyModifiers::NONE) => {
-                        if app.imports_state.focus == ImportPaneFocus::Routes {
-                            if let Err(error) = app.move_import_route_selection(-1) {
-                                app.set_error(error.to_string());
+                        match app.imports_state.focus {
+                            ImportPaneFocus::Routes => {
+                                if let Err(error) = app.move_import_route_selection(-1) {
+                                    app.set_error(error.to_string());
+                                }
                             }
-                        } else {
-                            app.imports_state.move_account_selection(-1);
+                            ImportPaneFocus::Accounts => {
+                                app.imports_state.move_account_selection(-1);
+                            }
+                            ImportPaneFocus::Decisions => {
+                                app.imports_state.move_decisions_selection(-1);
+                            }
                         }
                     }
                     (KeyCode::Enter, _) => {
-                        if let Err(error) = app.resolve_selected_import_accounts() {
-                            app.set_error(error.to_string());
+                        if app.imports_state.focus == ImportPaneFocus::Decisions {
+                            app.imports_state.open_decision_picker();
+                        } else if app.imports_state.jump_to_first_unresolved_and_open() {
+                            app.set_status("Pick an account for this ambiguous transaction (Esc to cancel)");
                         } else {
-                            app.set_status("Reloaded account choices for selected statement");
+                            match app.imports_state.focus {
+                                ImportPaneFocus::Accounts => {
+                                    app.imports_state.clear_decisions();
+                                    if let Err(error) = app.refresh_import_decisions() {
+                                        app.set_error(error.to_string());
+                                    } else {
+                                        app.set_status("Reloaded import decisions for selected account");
+                                    }
+                                }
+                                ImportPaneFocus::Routes => {
+                                    if let Err(error) = app.resolve_selected_import_accounts() {
+                                        app.set_error(error.to_string());
+                                    } else {
+                                        app.set_status("Reloaded account choices for selected statement");
+                                    }
+                                }
+                                ImportPaneFocus::Decisions => unreachable!(),
+                            }
                         }
                     }
                     (KeyCode::Char('u'), KeyModifiers::NONE) => {
@@ -6073,58 +6456,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn import_page_detail_lines_include_last_result_and_warnings() {
-        let mut state = ImportPageState::new();
-        state.planner_status = "ready".to_string();
-        state.has_uncommitted_changes = true;
-        state.allow_uncommitted = true;
-        state.set_routes(
-            vec![ImportRouteOption {
-                csv_file: "statement.csv".to_string(),
-                source_path: "/tmp/statement.csv".to_string(),
-                import_type: "cc".to_string(),
-                importer_id: "bmo".to_string(),
-                rule_id: "cc-bmo-statement".to_string(),
-                stage: 1,
-            }],
-            None,
-        );
-        state.apply_account_resolution(
-            ResolveImportAccountsResponse {
-                status: "ready".to_string(),
-                _import_type: "cc".to_string(),
-                _csv_file: "statement.csv".to_string(),
-                _importer_id: "bmo".to_string(),
-                account_label: Some("BMO credit card".to_string()),
-                account_options: Some(vec!["Liabilities:CreditCard:Primary:BMO:CardA".to_string()]),
-                as_of: Some("2026-03-04".to_string()),
-                error: None,
-            },
-            None,
-        );
-        state.last_result = Some(ApplyImportResponse {
-            status: "ok".to_string(),
-            import_type: "cc".to_string(),
-            result_file_path: Some("/tmp/carda_0304_0304.beancount".to_string()),
-            result_file_name: Some("carda_0304_0304.beancount".to_string()),
-            account: Some("Liabilities:CreditCard:Primary:BMO:CardA".to_string()),
-            start_date: Some("0304".to_string()),
-            end_date: Some("0304".to_string()),
-            error: None,
-            warnings: vec!["Ledger validation found errors after import.".to_string()],
-            validation_errors: vec!["Validation error 1".to_string()],
-            summary: Some("Import complete: /tmp/carda_0304_0304.beancount".to_string()),
-        });
-
-        let rendered = state.detail_lines().join("\n");
-
-        assert!(rendered.contains("Planner Status: ready"));
-        assert!(rendered.contains("Git Working Tree: uncommitted changes detected"));
-        assert!(rendered.contains("Selected Route"));
-        assert!(rendered.contains("Selected Account: Liabilities:CreditCard:Primary:BMO:CardA"));
-        assert!(rendered.contains("Last Import Result"));
-        assert!(rendered.contains("Warnings:"));
-        assert!(rendered.contains("Validation Errors:"));
-    }
 }
