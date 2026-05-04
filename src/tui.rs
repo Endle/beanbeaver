@@ -574,7 +574,11 @@ struct ImportRouteOption {
     source_path: String,
     import_type: String,
     importer_id: String,
+    #[serde(default)]
+    #[allow(dead_code)]
     rule_id: String,
+    #[serde(default)]
+    #[allow(dead_code)]
     stage: u32,
 }
 
@@ -691,17 +695,7 @@ impl ImportDecisionView {
 #[derive(Clone, Debug, Deserialize)]
 struct ApplyImportResponse {
     status: String,
-    import_type: String,
-    result_file_path: Option<String>,
-    result_file_name: Option<String>,
-    account: Option<String>,
-    start_date: Option<String>,
-    end_date: Option<String>,
     error: Option<String>,
-    #[serde(default)]
-    warnings: Vec<String>,
-    #[serde(default)]
-    validation_errors: Vec<String>,
     summary: Option<String>,
 }
 
@@ -1079,7 +1073,6 @@ struct ImportPageState {
     decisions_error: Option<String>,
     decisions_loaded_for: Option<(String, String)>,
     decision_picker: Option<DecisionPickerState>,
-    last_result: Option<ApplyImportResponse>,
 }
 
 impl ImportPageState {
@@ -1108,7 +1101,6 @@ impl ImportPageState {
             decisions_error: None,
             decisions_loaded_for: None,
             decision_picker: None,
-            last_result: None,
         }
     }
 
@@ -1288,108 +1280,6 @@ impl ImportPageState {
         }
     }
 
-    fn detail_lines(&self) -> Vec<String> {
-        let mut lines = vec![
-            format!(
-                "Planner Status: {}",
-                match self.planner_status.as_str() {
-                    "not_loaded" => "not loaded (press `r` to load routes)",
-                    other => other,
-                }
-            ),
-            format!(
-                "Git Working Tree: {}",
-                if self.has_uncommitted_changes {
-                    "uncommitted changes detected"
-                } else {
-                    "clean"
-                }
-            ),
-            format!(
-                "Allow Import With Uncommitted Changes: {}",
-                if self.allow_uncommitted { "yes" } else { "no" }
-            ),
-        ];
-
-        if let Some(error) = &self.planner_error {
-            lines.push(String::new());
-            lines.push("Planner Error:".to_string());
-            lines.extend(error.lines().map(ToOwned::to_owned));
-        }
-
-        if let Some(route) = self.selected_route() {
-            lines.push(String::new());
-            lines.push("Selected Route".to_string());
-            lines.push(format!("CSV: {}", route.csv_file));
-            lines.push(format!("Source: {}", route.source_path));
-            lines.push(format!("Type: {}", route.import_type_label()));
-            lines.push(format!("Importer: {}", route.importer_id));
-            lines.push(format!("Rule: {}", route.rule_id));
-            lines.push(format!("Stage: {}", route.stage));
-        }
-
-        if self.account_label.is_some() || self.account_error.is_some() {
-            lines.push(String::new());
-            lines.push("Account Resolution".to_string());
-            if let Some(label) = &self.account_label {
-                lines.push(format!("Label: {label}"));
-            }
-            if let Some(as_of) = &self.account_as_of {
-                lines.push(format!("As Of: {as_of}"));
-            }
-            if let Some(account) = self.selected_account() {
-                lines.push(format!("Selected Account: {account}"));
-            }
-            if let Some(error) = &self.account_error {
-                lines.push("Error:".to_string());
-                lines.extend(error.lines().map(ToOwned::to_owned));
-            }
-        }
-
-        if let Some(result) = &self.last_result {
-            lines.push(String::new());
-            lines.push("Last Import Result".to_string());
-            lines.push(format!("Status: {}", result.status));
-            lines.push(format!("Import Type: {}", result.import_type));
-            if let Some(summary) = &result.summary {
-                lines.push(format!("Summary: {summary}"));
-            }
-            if let Some(account) = &result.account {
-                lines.push(format!("Account: {account}"));
-            }
-            if let Some(start_date) = &result.start_date {
-                lines.push(format!("Start Date: {start_date}"));
-            }
-            if let Some(end_date) = &result.end_date {
-                lines.push(format!("End Date: {end_date}"));
-            }
-            if let Some(path) = &result.result_file_path {
-                lines.push(format!("Result File: {path}"));
-            }
-            if let Some(name) = &result.result_file_name {
-                lines.push(format!("Result File Name: {name}"));
-            }
-            if let Some(error) = &result.error {
-                lines.push("Error:".to_string());
-                lines.extend(error.lines().map(ToOwned::to_owned));
-            }
-            if !result.warnings.is_empty() {
-                lines.push("Warnings:".to_string());
-                lines.extend(result.warnings.iter().map(|warning| format!("- {warning}")));
-            }
-            if !result.validation_errors.is_empty() {
-                lines.push("Validation Errors:".to_string());
-                lines.extend(
-                    result
-                        .validation_errors
-                        .iter()
-                        .map(|error| format!("- {error}")),
-                );
-            }
-        }
-
-        lines
-    }
 }
 
 struct ReviewState {
@@ -3010,7 +2900,7 @@ impl App {
                 .clone()
                 .unwrap_or_else(|| format!("Import failed: {}", response.status)),
         };
-        self.imports_state.last_result = Some(response);
+        let _ = response;
         self.refresh_imports_page()?;
         self.set_status(status);
         Ok(())
@@ -4700,17 +4590,13 @@ fn render_imports_page(frame: &mut ratatui::Frame<'_>, app: &mut App, area: rata
     frame.render_widget(summary, sections[0]);
 
     let body = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
-        .split(sections[1]);
-    let right = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(7),
-            Constraint::Min(6),
-            Constraint::Length(10),
-        ])
-        .split(body[1]);
+        .constraints([Constraint::Length(8), Constraint::Min(6)])
+        .split(sections[1]);
+    let top_row = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
+        .split(body[0]);
 
     let route_items: Vec<ListItem> = app
         .imports_state
@@ -4731,7 +4617,7 @@ fn render_imports_page(frame: &mut ratatui::Frame<'_>, app: &mut App, area: rata
         )
         .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
         .highlight_symbol(">> ");
-    frame.render_stateful_widget(routes, body[0], &mut app.imports_state.route_state);
+    frame.render_stateful_widget(routes, top_row[0], &mut app.imports_state.route_state);
 
     let account_items: Vec<ListItem> = app
         .imports_state
@@ -4757,7 +4643,7 @@ fn render_imports_page(frame: &mut ratatui::Frame<'_>, app: &mut App, area: rata
         )
         .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
         .highlight_symbol(">> ");
-    frame.render_stateful_widget(accounts, right[0], &mut app.imports_state.account_state);
+    frame.render_stateful_widget(accounts, top_row[1], &mut app.imports_state.account_state);
 
     let unresolved = app.imports_state.unresolved_decisions();
     let total = app.imports_state.decisions.len();
@@ -4789,24 +4675,9 @@ fn render_imports_page(frame: &mut ratatui::Frame<'_>, app: &mut App, area: rata
         .highlight_symbol(">> ");
     frame.render_stateful_widget(
         decisions_widget,
-        right[1],
+        body[1],
         &mut app.imports_state.decisions_state,
     );
-
-    let details = Paragraph::new(Text::from(
-        app.imports_state
-            .detail_lines()
-            .into_iter()
-            .map(Line::from)
-            .collect::<Vec<_>>(),
-    ))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Import Details"),
-    )
-    .wrap(Wrap { trim: false });
-    frame.render_widget(details, right[2]);
 }
 
 fn truncate_for_title(text: &str, max_len: usize) -> String {
@@ -6585,58 +6456,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn import_page_detail_lines_include_last_result_and_warnings() {
-        let mut state = ImportPageState::new();
-        state.planner_status = "ready".to_string();
-        state.has_uncommitted_changes = true;
-        state.allow_uncommitted = true;
-        state.set_routes(
-            vec![ImportRouteOption {
-                csv_file: "statement.csv".to_string(),
-                source_path: "/tmp/statement.csv".to_string(),
-                import_type: "cc".to_string(),
-                importer_id: "bmo".to_string(),
-                rule_id: "cc-bmo-statement".to_string(),
-                stage: 1,
-            }],
-            None,
-        );
-        state.apply_account_resolution(
-            ResolveImportAccountsResponse {
-                status: "ready".to_string(),
-                _import_type: "cc".to_string(),
-                _csv_file: "statement.csv".to_string(),
-                _importer_id: "bmo".to_string(),
-                account_label: Some("BMO credit card".to_string()),
-                account_options: Some(vec!["Liabilities:CreditCard:Primary:BMO:CardA".to_string()]),
-                as_of: Some("2026-03-04".to_string()),
-                error: None,
-            },
-            None,
-        );
-        state.last_result = Some(ApplyImportResponse {
-            status: "ok".to_string(),
-            import_type: "cc".to_string(),
-            result_file_path: Some("/tmp/carda_0304_0304.beancount".to_string()),
-            result_file_name: Some("carda_0304_0304.beancount".to_string()),
-            account: Some("Liabilities:CreditCard:Primary:BMO:CardA".to_string()),
-            start_date: Some("0304".to_string()),
-            end_date: Some("0304".to_string()),
-            error: None,
-            warnings: vec!["Ledger validation found errors after import.".to_string()],
-            validation_errors: vec!["Validation error 1".to_string()],
-            summary: Some("Import complete: /tmp/carda_0304_0304.beancount".to_string()),
-        });
-
-        let rendered = state.detail_lines().join("\n");
-
-        assert!(rendered.contains("Planner Status: ready"));
-        assert!(rendered.contains("Git Working Tree: uncommitted changes detected"));
-        assert!(rendered.contains("Selected Route"));
-        assert!(rendered.contains("Selected Account: Liabilities:CreditCard:Primary:BMO:CardA"));
-        assert!(rendered.contains("Last Import Result"));
-        assert!(rendered.contains("Warnings:"));
-        assert!(rendered.contains("Validation Errors:"));
-    }
 }
