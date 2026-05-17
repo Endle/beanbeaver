@@ -327,7 +327,14 @@ fn is_section_header_text(text: &str) -> bool {
         if tokens.iter().any(|token| {
             matches!(
                 token.as_str(),
-                "MEAT" | "SEAFOOD" | "PRODUCE" | "DELI" | "GROCERY" | "BAKERY" | "FROZEN"
+                "MEAT"
+                    | "SEAFOOD"
+                    | "PRODUCE"
+                    | "DELI"
+                    | "GROCERY"
+                    | "BAKERY"
+                    | "FROZEN"
+                    | "FOOD"
             )
         }) {
             return true;

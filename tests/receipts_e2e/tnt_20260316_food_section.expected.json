@@ -1,0 +1,31 @@
+{
+  "merchant": "T&T SUPERMARKET",
+  "date": "2026-03-16",
+  "total": "32.31",
+  "critical_items": [
+    {
+      "description": "T&T CALROSE RICE 15LB",
+      "price": "12.97",
+      "category": "Expenses:Food:Grocery:Staple"
+    },
+    {
+      "description": "SALTED EGG YOLK PUFF BREAD",
+      "price": "3.80",
+      "category": "Expenses:Food:Grocery:Bakery"
+    },
+    {
+      "description": "BLUSH BERRY DUAL-SWIRL ROLL",
+      "price": "6.27"
+    },
+    {
+      "description": "SUNKIST ORANGES",
+      "price": "4.08",
+      "category": "Expenses:Food:Grocery:Fruit"
+    },
+    {
+      "description": "NEILSON JOYYA CHOCOLATE MILK",
+      "price": "5.19",
+      "category": "Expenses:Food:Grocery:Dairy"
+    }
+  ]
+}

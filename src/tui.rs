@@ -95,6 +95,36 @@ mod process_util {
         run_program_status("less", ["-N", "-S", path])
     }
 
+    pub(super) fn find_original_image(receipt_dir: &Path) -> io::Result<std::path::PathBuf> {
+        let source_dir = receipt_dir.join("source");
+        let entries = std::fs::read_dir(&source_dir).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("{}: {}", source_dir.display(), error),
+            )
+        })?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.file_stem().and_then(|stem| stem.to_str()) == Some("original") {
+                return Ok(path);
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("no original.* file under {}", source_dir.display()),
+        ))
+    }
+
+    pub(super) fn xdg_open_detached(path: &Path) -> io::Result<()> {
+        Command::new("xdg-open")
+            .arg(path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map(|_| ())
+    }
+
     pub(super) fn trash_file(path: &str) -> io::Result<Output> {
         run_program_output("trash", [path])
     }
@@ -2154,6 +2184,15 @@ impl ReviewState {
     }
 }
 
+fn receipt_dir_from_stage_path(stage_path: &Path) -> Option<&Path> {
+    let parent = stage_path.parent()?;
+    if parent.file_name().and_then(|name| name.to_str()) == Some("stages") {
+        parent.parent()
+    } else {
+        Some(parent)
+    }
+}
+
 fn review_decimal_to_scaled(value: &str) -> i64 {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -2264,7 +2303,7 @@ impl App {
     fn page_help(page: Page) -> &'static str {
         match page {
             Page::Receipts => {
-                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | Tab switch queues | h/l pane focus | s toggle details/status | j/k move or scroll | e edit | m TUI match | M CLI match | arrows pan | r reload | a approve | c config | q quit"
+                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | Tab switch queues | h/l pane focus | s toggle details/status | j/k move or scroll | e edit | o open image | m TUI match | M CLI match | arrows pan | r reload | a approve | c config | q quit"
             }
             Page::Serve => {
                 "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | s start `bb serve` | x stop `bb serve` | R restart | r refresh health | q quit"
@@ -2577,6 +2616,30 @@ impl App {
             result.source_path, result.approved_path
         ));
         Ok(())
+    }
+
+    fn open_selected_original_image(&mut self) {
+        let Some(stage_path) = self.selected_receipt().map(|receipt| receipt.path.clone()) else {
+            self.set_status("No receipt selected");
+            return;
+        };
+        let Some(receipt_dir) = receipt_dir_from_stage_path(Path::new(&stage_path)) else {
+            self.set_error(format!("Cannot derive receipt dir from {stage_path}"));
+            return;
+        };
+        let image_path = match process_util::find_original_image(receipt_dir) {
+            Ok(path) => path,
+            Err(error) => {
+                self.set_error(format!("Cannot find original image: {error}"));
+                return;
+            }
+        };
+        match process_util::xdg_open_detached(&image_path) {
+            Ok(()) => self.set_status(format!("Opened {} via xdg-open", image_path.display())),
+            Err(error) => {
+                self.set_error(format!("xdg-open {} failed: {error}", image_path.display()))
+            }
+        }
     }
 
     fn begin_edit_selected(&mut self) {
@@ -5796,6 +5859,9 @@ fn run_app(
                     }
                     (KeyCode::Char('e'), _) => {
                         app.begin_edit_selected();
+                    }
+                    (KeyCode::Char('o'), KeyModifiers::NONE) => {
+                        app.open_selected_original_image();
                     }
                     (KeyCode::Char('m'), KeyModifiers::NONE) => {
                         if let Err(error) = app.begin_match_selected_approved() {
