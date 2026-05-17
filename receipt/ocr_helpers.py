@@ -2,62 +2,49 @@
 
 import io
 import re
+from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
 from .detection_normalization import normalize_detections
+from .image_pipeline import (
+    MAX_IMAGE_DIMENSION,
+    OCR_IMAGE_PADDING,
+    ImagePipelineContext,
+    default_image_pipeline,
+    run_image_pipeline,
+)
 from .ocr_schema import OCR_ENGINE_NAME_PADDLE, OCR_SCHEMA_VERSION, OcrBBox, OcrDocument
 
-MAX_IMAGE_DIMENSION = 3000  # Resize if either dimension exceeds this
-OCR_IMAGE_PADDING = 50  # White padding around image to prevent edge truncation
+__all__ = [
+    "MAX_IMAGE_DIMENSION",
+    "OCR_IMAGE_PADDING",
+    "resize_image_bytes",
+    "transform_paddleocr_result",
+]
 
 
 def resize_image_bytes(
-    image_bytes: bytes, max_dimension: int = MAX_IMAGE_DIMENSION, padding: int = OCR_IMAGE_PADDING
+    image_bytes: bytes,
+    max_dimension: int = MAX_IMAGE_DIMENSION,
+    padding: int = OCR_IMAGE_PADDING,
+    *,
+    debug_dir: Path | None = None,
 ) -> bytes:
+    """Run the pre-OCR image pipeline on ``image_bytes`` and return JPEG bytes.
+
+    Thin shim over ``run_image_pipeline``: decode bytes, run the default
+    pass list (EXIF -> deskew -> resize -> pad), encode back to JPEG. The
+    PIL.Image IR stays in memory between passes; JPEG only at boundaries.
     """
-    Resize image bytes if it exceeds max_dimension on either side.
-
-    Also adds white padding around the image to prevent OCR edge truncation.
-
-    Args:
-        image_bytes: Image data as bytes
-        max_dimension: Maximum allowed dimension (width or height)
-        padding: White padding to add around image (pixels)
-
-    Returns:
-        Image bytes (JPEG format), resized if necessary, with padding added
-    """
-    from PIL import Image, ImageOps
-
     img = Image.open(io.BytesIO(image_bytes))
+    ctx = ImagePipelineContext(debug_dir=debug_dir)
+    ops = default_image_pipeline(max_dimension=max_dimension, padding=padding)
+    final, _ = run_image_pipeline(img, ops, ctx)
 
-    # Apply EXIF orientation to normalize the image
-    # This ensures OCR and debug overlay see the same orientation
-    img = ImageOps.exif_transpose(img)
-
-    width, height = img.size
-
-    # Check if resizing is needed
-    if width <= max_dimension and height <= max_dimension:
-        img_final = img
-    else:
-        # Calculate new dimensions while maintaining aspect ratio
-        if width > height:
-            new_width = max_dimension
-            new_height = int(height * (max_dimension / width))
-        else:
-            new_height = max_dimension
-            new_width = int(width * (max_dimension / height))
-
-        img_final = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-
-    # Add white padding around the image to prevent OCR edge truncation
-    if padding > 0:
-        img_final = ImageOps.expand(img_final, border=padding, fill="white")
-
-    # Convert to JPEG bytes
     buffer = io.BytesIO()
-    img_final.convert("RGB").save(buffer, format="JPEG", quality=95)
+    final.convert("RGB").save(buffer, format="JPEG", quality=95)
     return buffer.getvalue()
 
 
