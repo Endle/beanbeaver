@@ -347,6 +347,7 @@ const FAVA_HOST: &str = "127.0.0.1";
 const FAVA_PORT: u16 = 5000;
 const OCR_CONTAINER_NAME: &str = "beanbeaver-ocr";
 const OCR_IMAGE: &str = "ghcr.io/endle/beanbeaver-ocr:latest";
+const AUTOSTART_DISABLE_ENV: &str = "BB_TUI_DISABLE_AUTOSTART";
 const MAX_RUNTIME_LOG_LINES: usize = 400;
 const RECEIPTS_REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 const SERVE_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
@@ -3343,6 +3344,27 @@ impl App {
         }
         Ok(())
     }
+
+    /// Boot the long-lived services the Receipts pane depends on. Errors are
+    /// demoted to the status log so a missing OCR runtime or a busy port does
+    /// not abort the TUI; the user can recover from the OCR/serve/fava panes.
+    fn autostart_services(&mut self) {
+        self.set_status("Auto-starting `bb serve`, OCR container, and Fava…");
+        if let Err(error) = self.start_serve_process() {
+            self.set_error(format!("Auto-start `bb serve` failed: {error}"));
+        }
+        if let Err(error) = self.start_ocr_container() {
+            self.set_error(format!("Auto-start OCR container failed: {error}"));
+        }
+        // Fava needs a configured ledger path; skip silently when the project
+        // root isn't set yet rather than dumping a predictable error.
+        if self.config.resolved_main_beancount_path.is_empty() {
+            return;
+        }
+        if let Err(error) = self.start_fava_process() {
+            self.set_error(format!("Auto-start Fava failed: {error}"));
+        }
+    }
 }
 
 fn run_backend(args: &[&str]) -> AppResult<String> {
@@ -6004,12 +6026,29 @@ fn run_app(
     }
 }
 
+fn autostart_disabled_from_env(raw: Option<&str>) -> bool {
+    match raw {
+        None => false,
+        Some(value) => matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+    }
+}
+
+fn autostart_disabled() -> bool {
+    autostart_disabled_from_env(std::env::var(AUTOSTART_DISABLE_ENV).ok().as_deref())
+}
+
 pub fn run(quit_after_launch: bool) -> AppResult<()> {
     let mut terminal = setup_terminal()?;
     let result = (|| -> AppResult<()> {
         let mut app = App::new();
         app.refresh()?;
         app.refresh_runtime_pages(true)?;
+        if !quit_after_launch && !autostart_disabled() {
+            app.autostart_services();
+        }
         let run_result = run_app(&mut terminal, &mut app, quit_after_launch);
         let shutdown_result = app.shutdown();
         run_result.and(shutdown_result)
@@ -6045,6 +6084,21 @@ mod tests {
                 }
             }),
         }
+    }
+
+    #[test]
+    fn autostart_disabled_from_env_recognises_truthy_values() {
+        assert!(!autostart_disabled_from_env(None));
+        assert!(!autostart_disabled_from_env(Some("")));
+        assert!(!autostart_disabled_from_env(Some("0")));
+        assert!(!autostart_disabled_from_env(Some("no")));
+        assert!(!autostart_disabled_from_env(Some("false")));
+
+        assert!(autostart_disabled_from_env(Some("1")));
+        assert!(autostart_disabled_from_env(Some("true")));
+        assert!(autostart_disabled_from_env(Some("TRUE")));
+        assert!(autostart_disabled_from_env(Some("yes")));
+        assert!(autostart_disabled_from_env(Some(" on ")));
     }
 
     #[test]
