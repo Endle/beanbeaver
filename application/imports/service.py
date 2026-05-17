@@ -59,6 +59,16 @@ class RefreshImportPageResult:
 
 
 @dataclass(frozen=True)
+class TransactionOverridePayload:
+    """Plain-data override sent from TUI to the apply endpoint."""
+
+    date: str
+    description: str
+    amount: str
+    account: str
+
+
+@dataclass(frozen=True)
 class ApplyImportRequest:
     import_type: ImportType
     csv_file: str
@@ -67,6 +77,29 @@ class ApplyImportRequest:
     start_date: str | None = None
     end_date: str | None = None
     allow_uncommitted: bool | None = None
+    cc_payment_overrides: tuple[TransactionOverridePayload, ...] = ()
+    bank_transfer_overrides: tuple[TransactionOverridePayload, ...] = ()
+
+
+@dataclass(frozen=True)
+class ImportDecisionPayload:
+    """Plain-data ambiguous-decision returned by preflight to the TUI."""
+
+    kind: Literal["cc_payment", "bank_transfer"]
+    pattern: str
+    txn_date: str
+    txn_description: str
+    txn_amount: str
+    candidates: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PreflightChequingImportResult:
+    status: Literal["ok", "error"]
+    chequing_type: str | None = None
+    account: str | None = None
+    decisions: tuple[ImportDecisionPayload, ...] = ()
+    error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -292,6 +325,49 @@ def apply_import(request: ApplyImportRequest) -> ApplyImportResult:
     )
 
 
+def _convert_overrides(
+    overrides: tuple[TransactionOverridePayload, ...],
+) -> tuple[chequing_import.TransactionOverride, ...]:
+    from beanbeaver.application.imports.account_discovery import TransactionKey
+
+    return tuple(
+        chequing_import.TransactionOverride(
+            transaction=TransactionKey(date=item.date, description=item.description, amount=item.amount),
+            account=item.account,
+        )
+        for item in overrides
+    )
+
+
+def preflight_chequing_import(
+    *,
+    csv_file: str,
+    selected_account: str | None = None,
+) -> PreflightChequingImportResult:
+    result = chequing_import.preflight_chequing_import(
+        csv_file=csv_file,
+        selected_account=selected_account,
+    )
+    decisions = tuple(
+        ImportDecisionPayload(
+            kind=decision.kind,
+            pattern=decision.pattern,
+            txn_date=decision.transaction.date,
+            txn_description=decision.transaction.description,
+            txn_amount=decision.transaction.amount,
+            candidates=decision.candidates,
+        )
+        for decision in result.decisions
+    )
+    return PreflightChequingImportResult(
+        status=result.status,
+        chequing_type=result.chequing_type,
+        account=result.account,
+        decisions=decisions,
+        error=result.error,
+    )
+
+
 def apply_import_machine_readable(request: ApplyImportRequest) -> ApplyImportResult:
     if request.import_type == "cc":
         result = credit_card_import.run_credit_card_import(
@@ -324,6 +400,9 @@ def apply_import_machine_readable(request: ApplyImportRequest) -> ApplyImportRes
             csv_file=request.csv_file,
             selected_account=request.selected_account,
             allow_uncommitted=request.allow_uncommitted,
+            cc_payment_overrides=_convert_overrides(request.cc_payment_overrides),
+            bank_transfer_overrides=_convert_overrides(request.bank_transfer_overrides),
+            interactive=False,
         ),
         emit_console_output=False,
     )

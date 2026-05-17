@@ -424,6 +424,70 @@ def cmd_api_apply_import(args: argparse.Namespace) -> None:
     )
 
 
+def _parse_override_payload(raw: object, *, field: str) -> tuple[Any, ...]:
+    from beanbeaver.application.imports.service import TransactionOverridePayload
+
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ValueError(f"Import payload field '{field}' must be a JSON array")
+    parsed: list[TransactionOverridePayload] = []
+    for index, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise ValueError(f"Import payload field '{field}[{index}]' must be a JSON object")
+        date = entry.get("date")
+        description = entry.get("description")
+        amount = entry.get("amount")
+        account = entry.get("account")
+        if not isinstance(date, str) or not isinstance(description, str):
+            raise ValueError(f"Import payload field '{field}[{index}]' requires string date/description")
+        if not isinstance(amount, str) or not isinstance(account, str):
+            raise ValueError(f"Import payload field '{field}[{index}]' requires string amount/account")
+        parsed.append(
+            TransactionOverridePayload(
+                date=date,
+                description=description,
+                amount=amount,
+                account=account,
+            )
+        )
+    return tuple(parsed)
+
+
+def cmd_api_preflight_chequing_import(args: argparse.Namespace) -> None:
+    """Run preflight on a chequing CSV and surface ambiguous decisions as JSON."""
+    from beanbeaver.application.imports.service import preflight_chequing_import
+
+    payload = _load_optional_stdin_json()
+    csv_file = payload.get("csv_file")
+    selected_account = payload.get("selected_account")
+    if not isinstance(csv_file, str):
+        raise ValueError("Preflight payload field 'csv_file' must be a string")
+    if selected_account is not None and not isinstance(selected_account, str):
+        raise ValueError("Preflight payload field 'selected_account' must be a string")
+
+    result = preflight_chequing_import(csv_file=csv_file, selected_account=selected_account)
+    _print_json(
+        {
+            "status": result.status,
+            "chequing_type": result.chequing_type,
+            "account": result.account,
+            "error": result.error,
+            "decisions": [
+                {
+                    "kind": decision.kind,
+                    "pattern": decision.pattern,
+                    "txn_date": decision.txn_date,
+                    "txn_description": decision.txn_description,
+                    "txn_amount": decision.txn_amount,
+                    "candidates": list(decision.candidates),
+                }
+                for decision in result.decisions
+            ],
+        }
+    )
+
+
 def cmd_api_import_apply(args: argparse.Namespace) -> None:
     """Apply one statement import with a JSON-only response."""
     from beanbeaver.application.imports.service import ApplyImportRequest, apply_import_machine_readable
@@ -436,6 +500,14 @@ def cmd_api_import_apply(args: argparse.Namespace) -> None:
     start_date = payload.get("start_date")
     end_date = payload.get("end_date")
     allow_uncommitted = payload.get("allow_uncommitted")
+    cc_payment_overrides = _parse_override_payload(
+        payload.get("cc_payment_overrides"),
+        field="cc_payment_overrides",
+    )
+    bank_transfer_overrides = _parse_override_payload(
+        payload.get("bank_transfer_overrides"),
+        field="bank_transfer_overrides",
+    )
 
     if import_type not in {"cc", "chequing"}:
         raise ValueError("Import payload field 'import_type' must be 'cc' or 'chequing'")
@@ -461,6 +533,8 @@ def cmd_api_import_apply(args: argparse.Namespace) -> None:
             start_date=start_date,
             end_date=end_date,
             allow_uncommitted=allow_uncommitted,
+            cc_payment_overrides=cc_payment_overrides,
+            bank_transfer_overrides=bank_transfer_overrides,
         )
     )
     _print_json(

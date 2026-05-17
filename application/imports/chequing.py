@@ -13,9 +13,12 @@ from pathlib import Path
 from typing import Literal
 
 from beanbeaver.application.imports.account_discovery import (
+    AccountResolution,
+    TransactionKey,
     find_open_accounts,
-    resolve_bank_transfer_account,
+    resolve_bank_transfer_account_strict,
     resolve_cc_payment_account,
+    resolve_cc_payment_account_strict,
 )
 from beanbeaver.application.imports.csv_routing import detect_chequing_csv as detect_chequing_csv_by_rules
 from beanbeaver.application.imports.shared import (
@@ -61,12 +64,47 @@ ChequingImportStatus = Literal["ok", "aborted", "error"]
 
 
 @dataclass(frozen=True)
+class TransactionOverride:
+    """User-provided override that pins a specific transaction row to a chosen account."""
+
+    transaction: TransactionKey
+    account: str
+
+
+@dataclass(frozen=True)
 class ChequingImportRequest:
     """Inputs for chequing statement import workflow."""
 
     csv_file: str | None = None
     selected_account: str | None = None
     allow_uncommitted: bool | None = None
+    cc_payment_overrides: tuple[TransactionOverride, ...] = ()
+    bank_transfer_overrides: tuple[TransactionOverride, ...] = ()
+    interactive: bool = True
+
+
+DecisionKind = Literal["cc_payment", "bank_transfer"]
+
+
+@dataclass(frozen=True)
+class ImportDecision:
+    """One ambiguous resolution that the caller must pick before apply succeeds."""
+
+    kind: DecisionKind
+    pattern: str
+    transaction: TransactionKey
+    candidates: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PreflightChequingResult:
+    """Preflight outcome: a list of decisions and any preflight-time error."""
+
+    status: Literal["ok", "error"]
+    chequing_type: str | None = None
+    account: str | None = None
+    decisions: tuple[ImportDecision, ...] = ()
+    error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -157,6 +195,186 @@ def parse_chequing_request(argv: Sequence[str] | None = None) -> ChequingImportR
     parser.add_argument("csv_file", nargs="?", help="CSV file to import (auto-detect if omitted)")
     args = parser.parse_args(argv)
     return ChequingImportRequest(csv_file=args.csv_file)
+
+
+def _overrides_map(overrides: tuple["TransactionOverride", ...]) -> dict[TransactionKey, str]:
+    return {override.transaction: override.account for override in overrides}
+
+
+def _resolve_cc_for_row(
+    *,
+    description: str,
+    date: datetime.date,
+    amount_val: Decimal,
+    as_of: datetime.date | None,
+    interactive: bool,
+    cache: dict[str, str | None],
+    pending: list[ImportDecision],
+    txn_key: TransactionKey,
+) -> "str | None | ChequingImportResult":
+    """Resolve a CC payment account for one row, queuing decisions or prompting per mode."""
+    if interactive:
+        try:
+            return resolve_cc_payment_account(
+                description,
+                as_of=as_of,
+                cache=cache,
+                txn_date=date,
+                amount=f"{amount_val} CAD",
+            )
+        except RuntimeError as exc:
+            return ChequingImportResult(status="error", error=str(exc))
+
+    resolution = resolve_cc_payment_account_strict(description, as_of=as_of)
+    if resolution.kind == "resolved":
+        return resolution.account
+    if resolution.kind == "no_match":
+        return None
+    assert resolution.kind == "ambiguous" and resolution.pattern is not None
+    pending.append(
+        ImportDecision(
+            kind="cc_payment",
+            pattern=resolution.pattern,
+            transaction=txn_key,
+            candidates=resolution.candidates,
+        )
+    )
+    return None
+
+
+def _resolve_transfer_for_row(
+    *,
+    description: str,
+    as_of: datetime.date | None,
+    source_account: str,
+    cache: dict[str, str | None],
+    pending: list[ImportDecision],
+    txn_key: TransactionKey,
+) -> str | None:
+    """Resolve a bank-transfer account for one row, queuing decisions when ambiguous."""
+    resolution = resolve_bank_transfer_account_strict(
+        description,
+        as_of=as_of,
+        source_account=source_account,
+    )
+    if resolution.kind == "resolved":
+        if resolution.pattern is not None:
+            cache[f"bank-transfer:{resolution.pattern}:{source_account or ''}"] = resolution.account
+        return resolution.account
+    if resolution.kind == "ambiguous" and resolution.pattern is not None:
+        pending.append(
+            ImportDecision(
+                kind="bank_transfer",
+                pattern=resolution.pattern,
+                transaction=txn_key,
+                candidates=resolution.candidates,
+            )
+        )
+    # ambiguous bank transfers: do not legacy-fallback; let the caller treat as None and categorize.
+    return None
+
+
+def _read_chequing_csv_rows(csv_file: str) -> tuple[Path, str, list[tuple[datetime.date, str, Decimal, Decimal]]]:
+    """Copy CSV to TMP, detect type, parse rows. Returns (target_path, chequing_type, parsed_rows)."""
+    target_file_name = TMPDIR / "chequing.csv"
+    copy_statement_csv(
+        csv_file=csv_file,
+        target_path=target_file_name,
+        downloads_dir=DOWNLOADED_CSV_BASE_PATH,
+        allow_absolute=True,
+    )
+    chequing_type = detect_chequing_type(target_file_name)
+
+    import csv
+
+    with open(target_file_name, encoding="utf-8-sig") as csvfile:
+        reader = csv.DictReader(csvfile)
+        rows = list(reader)
+
+    if chequing_type == "eqbank":
+        parsed_rows = parse_eqbank_rows(rows)
+    else:
+        parsed_rows = parse_scotia_rows(rows)
+    return target_file_name, chequing_type, parsed_rows
+
+
+def preflight_chequing_import(
+    *,
+    csv_file: str,
+    selected_account: str | None = None,
+) -> PreflightChequingResult:
+    """Walk a chequing CSV and surface ambiguous CC-payment / bank-transfer decisions."""
+    try:
+        _, chequing_type, parsed_rows = _read_chequing_csv_rows(csv_file)
+    except FileNotFoundError:
+        return PreflightChequingResult(status="error", error=f"File not found: {csv_file}")
+    except ValueError as exc:
+        return PreflightChequingResult(status="error", error=str(exc))
+
+    as_of = latest_date(parsed_rows)
+    patterns = EQBANK_ACCOUNT_PATTERNS if chequing_type == "eqbank" else SCOTIA_ACCOUNT_PATTERNS
+    label = "EQ Bank chequing" if chequing_type == "eqbank" else "Scotia chequing"
+    try:
+        account = _select_chequing_account(
+            patterns,
+            label=label,
+            as_of=as_of,
+            selected_account=selected_account,
+        )
+    except RuntimeError as exc:
+        return PreflightChequingResult(status="error", chequing_type=chequing_type, error=str(exc))
+
+    decisions: list[ImportDecision] = []
+    cc_resolution_cache: dict[str, AccountResolution] = {}
+    seen_keys: set[tuple[str, str, str, str, str]] = set()
+    for date, description, amount_val, _balance_val in parsed_rows:
+        txn_key = TransactionKey.from_parsed(date, description, amount_val)
+        cc_resolution = resolve_cc_payment_account_strict(
+            description,
+            as_of=as_of,
+            cache=cc_resolution_cache,
+        )
+        if cc_resolution.kind == "ambiguous" and cc_resolution.pattern is not None:
+            dedup = ("cc_payment", cc_resolution.pattern, txn_key.date, txn_key.description, txn_key.amount)
+            if dedup not in seen_keys:
+                seen_keys.add(dedup)
+                decisions.append(
+                    ImportDecision(
+                        kind="cc_payment",
+                        pattern=cc_resolution.pattern,
+                        transaction=txn_key,
+                        candidates=cc_resolution.candidates,
+                    )
+                )
+            continue
+
+        if cc_resolution.kind == "resolved":
+            continue
+
+        bank_resolution = resolve_bank_transfer_account_strict(
+            description,
+            as_of=as_of,
+            source_account=account,
+        )
+        if bank_resolution.kind == "ambiguous" and bank_resolution.pattern is not None:
+            dedup = ("bank_transfer", bank_resolution.pattern, txn_key.date, txn_key.description, txn_key.amount)
+            if dedup not in seen_keys:
+                seen_keys.add(dedup)
+                decisions.append(
+                    ImportDecision(
+                        kind="bank_transfer",
+                        pattern=bank_resolution.pattern,
+                        transaction=txn_key,
+                        candidates=bank_resolution.candidates,
+                    )
+                )
+
+    return PreflightChequingResult(
+        status="ok",
+        chequing_type=chequing_type,
+        account=account,
+        decisions=tuple(decisions),
+    )
 
 
 def run_chequing_import(request: ChequingImportRequest, *, emit_console_output: bool = True) -> ChequingImportResult:
@@ -268,39 +486,65 @@ def run_chequing_import(request: ChequingImportRequest, *, emit_console_output: 
 
     # Process transactions - sorted by date
     entries: list[tuple[datetime.date, str]] = []
+    cc_overrides_map = _overrides_map(request.cc_payment_overrides)
+    bank_overrides_map = _overrides_map(request.bank_transfer_overrides)
+    pending_decisions: list[ImportDecision] = []
     cc_cache: dict[str, str | None] = {}
     transfer_cache: dict[str, str | None] = {}
     for date, description, amount_val, _balance_val in parsed_rows:
-        try:
-            cc_account = resolve_cc_payment_account(
-                description,
-                as_of=as_of,
-                cache=cc_cache,
-                txn_date=date,
-                amount=f"{amount_val} CAD",
-            )
-        except RuntimeError as exc:
-            return ChequingImportResult(status="error", error=str(exc))
-        if cc_account:
-            expense_account = cc_account
+        txn_key = TransactionKey.from_parsed(date, description, amount_val)
+        cc_override = cc_overrides_map.get(txn_key)
+        if cc_override is not None:
+            expense_account = cc_override
         else:
-            try:
-                transfer_account = resolve_bank_transfer_account(
-                    description,
-                    as_of=as_of,
-                    source_account=account,
-                    cache=transfer_cache,
-                )
-            except RuntimeError as exc:
-                return ChequingImportResult(status="error", error=str(exc))
-            if transfer_account:
-                expense_account = transfer_account
+            cc_account = _resolve_cc_for_row(
+                description=description,
+                date=date,
+                amount_val=amount_val,
+                as_of=as_of,
+                interactive=request.interactive,
+                cache=cc_cache,
+                pending=pending_decisions,
+                txn_key=txn_key,
+            )
+            if isinstance(cc_account, ChequingImportResult):
+                return cc_account
+            if cc_account is not None:
+                expense_account = cc_account
             else:
-                category = categorize_chequing_transaction(description, patterns=categorization_patterns)
-                expense_account = category if category else "Expenses:Uncategorized"
+                bank_override = bank_overrides_map.get(txn_key)
+                if bank_override is not None:
+                    expense_account = bank_override
+                else:
+                    transfer_account = _resolve_transfer_for_row(
+                        description=description,
+                        as_of=as_of,
+                        source_account=account,
+                        cache=transfer_cache,
+                        pending=pending_decisions,
+                        txn_key=txn_key,
+                    )
+                    if transfer_account is not None:
+                        expense_account = transfer_account
+                    else:
+                        category = categorize_chequing_transaction(description, patterns=categorization_patterns)
+                        expense_account = category if category else "Expenses:Uncategorized"
 
         txn_text = format_transaction(date, description, amount_val, account, expense_account)
         entries.append((date, txn_text))
+
+    if pending_decisions:
+        rendered = "; ".join(
+            f"{decision.kind} '{decision.pattern}' for {decision.transaction.date} {decision.transaction.amount}"
+            for decision in pending_decisions
+        )
+        return ChequingImportResult(
+            status="error",
+            error=(
+                f"Apply blocked: {len(pending_decisions)} ambiguous account decision(s) "
+                f"need explicit overrides — {rendered}"
+            ),
+        )
 
     for balance_date, balance_amount in filtered_balances:
         balance_text = format_balance(balance_date, account, balance_amount)
