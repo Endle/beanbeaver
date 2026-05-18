@@ -4,14 +4,13 @@ import hashlib
 import io
 import json
 import os
-import re
 import time
 from pathlib import Path
 from typing import Any
 
 from PIL import Image
 
-from .detection_normalization import normalize_detections
+from .detection_normalization import default_detection_pipeline, normalize_detections
 from .image_pipeline import (
     MAX_IMAGE_DIMENSION,
     OCR_IMAGE_PADDING,
@@ -183,45 +182,6 @@ def _distance_to_line_span(det: dict, line: list[dict]) -> float:
     return center_y - line_max
 
 
-def _is_bob_marker_text(text: str) -> bool:
-    """Return True for Costco Bottom-Of-Basket marker rows."""
-    upper = text.upper()
-    has_bottom_banner = "BOTTOM OF BAS" in upper
-    has_bob_count_marker = "BOB COUNT" in upper and bool(re.search(r"[X*]{4,}", upper))
-    return has_bottom_banner or has_bob_count_marker
-
-
-def _filter_overlapping_bob_markers(detections: list[dict]) -> list[dict]:
-    """
-    Remove BOB marker detections when they overlap real item rows.
-
-    Costco receipts sometimes contain marker text like:
-    - "*xxxxxxxxxxBottom of Baske...*"
-    - "*x*********BOB Count 3"
-    on the same Y band as an item+price pair. Keeping those markers can
-    hijack line grouping and disconnect the real item description from price.
-    """
-    if not detections:
-        return detections
-
-    filtered: list[dict] = []
-    for det in detections:
-        if not _is_bob_marker_text(det["text"]):
-            filtered.append(det)
-            continue
-
-        overlaps_non_marker = any(
-            other is not det
-            and not _is_bob_marker_text(other["text"])
-            and _boxes_overlap_y(det, other, min_overlap_ratio=0.25)
-            for other in detections
-        )
-        if not overlaps_non_marker:
-            filtered.append(det)
-
-    return filtered
-
-
 def _group_detections_by_y_overlap(detections: list[dict], image_width: int = 1000) -> list[list[dict]]:
     """Group detections into lines using item-first matching."""
     if not detections:
@@ -366,34 +326,18 @@ def transform_paddleocr_result(raw_result: dict[str, Any], padding: int = OCR_IM
             ],
         }
 
-    # Filter thresholds
-    min_confidence = 0.7
-    min_text_length = 2
-
-    # Extract all detections with their positions, filtering low quality ones
-    detection_data = []
+    # Parse raw PaddleOCR output into Detection dicts. Filtering, BOB-marker
+    # removal, deskew, and reading-order sort are all post-OCR ops handled by
+    # the detection pipeline below.
+    detection_data: list[dict[str, Any]] = []
     for detection in detections:
         bbox, (text, confidence) = detection
-
-        # Filter out low confidence detections
-        if confidence < min_confidence:
-            continue
-
-        # Filter out very short text (likely noise like single punctuation)
-        if len(text.strip()) < min_text_length:
-            continue
-
-        # bbox is [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
-        # Adjust coordinates to remove padding offset
         adjusted_bbox = [[p[0] - padding, p[1] - padding] for p in bbox]
-
-        # Get y-coordinates for line grouping (both center and range)
         y_coords = [point[1] for point in adjusted_bbox]
         center_y = sum(y_coords) / len(y_coords)
         y_min = min(y_coords)
         y_max = max(y_coords)
         min_x = min(point[0] for point in adjusted_bbox)
-
         detection_data.append(
             {
                 "bbox": adjusted_bbox,
@@ -410,12 +354,8 @@ def transform_paddleocr_result(raw_result: dict[str, Any], padding: int = OCR_IM
         detection_data,
         image_width=image_width,
         image_height=image_height,
+        operations=default_detection_pipeline(),
     )
-
-    detection_data = _filter_overlapping_bob_markers(detection_data)
-
-    # Sort by y-coordinate first, then x-coordinate
-    detection_data.sort(key=lambda d: (d["center_y"], d["min_x"]))
 
     # Group into lines using hybrid Y-grouping
     lines = _group_detections_by_y_overlap(detection_data, image_width)
