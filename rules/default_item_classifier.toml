@@ -3,7 +3,13 @@ exact_only_keywords = []
 
 [[rules]]
 id = "legacy_0000"
-keywords = ["EGG", "EGGS", "STRAWBERRY MILK", "CHOCOLATE MILK", "CHOC MILK", "CHOC MLK", "MILK", "CHEESE", "YOGURT", "YOGOURT", "BUTTER", "CREAM", "SOUR CREAM", "COTTAGE", "MARGARINE", "CHEDDAR", "MOZZARELLA", "PARMESAN", "SWEETENED SOYA"]
+# "MILK CHOCOLATE" (note: the product is chocolate made with milk; distinct from
+# "CHOCOLATE MILK" the beverage) is listed BEFORE "CHOCOLATE MILK" so the
+# per-rule keyword loop in find_all_matches sees it first and breaks on an
+# exact match, beating the snacks rule's fuzzy "CHOCOLATE" hit on the
+# is_exact tiebreaker. Order matters: do not move "MILK CHOCOLATE" below
+# "CHOCOLATE MILK".
+keywords = ["EGG", "EGGS", "MILK CHOCOLATE", "STRAWBERRY MILK", "CHOCOLATE MILK", "CHOC MILK", "CHOC MLK", "MILK", "CHEESE", "YOGURT", "YOGOURT", "BUTTER", "CREAM", "SOUR CREAM", "COTTAGE", "MARGARINE", "CHEDDAR", "MOZZARELLA", "PARMESAN", "SWEETENED SOYA"]
 category = "grocery_dairy"
 tags = ["grocery", "dairy"]
 priority = 0

@@ -7,6 +7,36 @@ from beanbeaver.receipt.ocr_parser.items_text_parser import _extract_items
 from beanbeaver.runtime.item_category_rules import load_receipt_structuring_rule_layers
 
 
+def test_extract_items_does_not_emit_ghost_from_standalone_you_saved_amount() -> None:
+    # On Freshco-style receipts the YOU SAVED amount sometimes lands on its
+    # own line right after a fully-paired item ("Cherries Red $6.69 C" / ...
+    # / "YOU SAVED" / "$8.95"). Previously the standalone "$8.95" was
+    # back-paired with the already-emitted Cherries Red description and
+    # surfaced as a ghost duplicate item at the savings price. Toggling
+    # SKIP_PRICED_LINES_IN_BACKWARD_DESC_SEARCH off in receipt_text.rs
+    # would re-introduce the ghost.
+    lines = [
+        "Cherries Red $6.69 C",
+        "1.015 kg @ $6.59 / kg",
+        "YOU SAVED",
+        "$8.95",
+        "Natrel Milk 2% 4L $11.19 C",
+        "SUBTOTAL $17.88",
+        "TOTAL $17.88",
+    ]
+
+    items = _extract_items(
+        lines,
+        summary_amounts={Decimal("17.88")},
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
+    )
+
+    prices = [item.price for item in items]
+    assert Decimal("8.95") not in prices, items
+    assert Decimal("6.69") in prices
+    assert Decimal("11.19") in prices
+
+
 def test_extract_items_supports_canadian_tax_flag_combinations() -> None:
     # Canadian grocery receipts mark items with H/G/P/C/F/T tax flags right
     # after the price, and often combine them ("HC", "HCF", ...). Previously

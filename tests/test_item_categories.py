@@ -137,6 +137,20 @@ def test_public_default_foodmart_overrides(description: str, expected: str) -> N
     )
 
 
+def test_milk_chocolate_bar_maps_to_dairy() -> None:
+    # "Milk Chocolate" (chocolate made with milk) and "Chocolate Milk" (the
+    # beverage) should both be dairy. The longer-keyword tiebreaker plus
+    # per-rule exact-match preference makes the dairy rule win over the
+    # generic "CHOCOLATE" snacks rule.
+    assert (
+        categorize_item(
+            "Milk Chocolate 1%",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Dairy"
+    )
+
+
 def test_chocolate_milk_with_single_char_noise_maps_to_dairy() -> None:
     assert (
         categorize_item(
