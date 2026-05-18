@@ -20,7 +20,9 @@ import hashlib
 import json
 import math
 import os
+import random
 import re
+import statistics
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -34,10 +36,24 @@ POSTOCR_DUMP_DIR_ENV = "BEANBEAVER_POSTOCR_DUMP_DIR"
 MIN_CONFIDENCE = 0.7
 MIN_TEXT_LENGTH = 2
 
-DESKEW_MIN_CONFIDENCE = 0.9
-DESKEW_MIN_WIDTH_RATIO = 0.05
-DESKEW_MIN_ASPECT_RATIO = 2.0
-DESKEW_MIN_ANGLE_DEG = 0.1
+# Detection-level deskew via RANSAC over same-row item↔price slopes.
+# See docs/detection_deskew_plan.md for derivation.
+DESKEW_MIN_CONFIDENCE = 0.95
+DESKEW_MIN_ITEM_WIDTH = 0.08      # × image_width
+DESKEW_MIN_PRICE_WIDTH = 0.03
+DESKEW_MIN_X_DISTANCE = 0.50
+DESKEW_ITEM_X_MAX_FRAC = 0.40
+DESKEW_PRICE_X_MIN_FRAC = 0.60
+DESKEW_Y_WINDOW_PX = 200
+DESKEW_ANGLE_CAP_DEG = 5.0
+DESKEW_MIN_ANGLE_DEG = 0.3
+DESKEW_INLIER_TOL_DEG = 0.2
+DESKEW_MIN_INLIERS = 5
+DESKEW_MIN_CONSENSUS = 0.60
+DESKEW_RANSAC_ITERS = 50
+DESKEW_RANSAC_SEED = 0
+
+_PRICE_TEXT_RE = re.compile(r"^\s*[-$]?\d+\.\d{2}[A-Z]?\s*$")
 
 
 @dataclass
@@ -127,79 +143,119 @@ def filter_bob_markers_op(
     return filtered
 
 
-def _estimate_page_skew(detections: list[Detection], image_width: int) -> tuple[float, int]:
-    """Width-weighted median angle (degrees) of qualifying bbox centerlines.
+@dataclass(frozen=True)
+class _PairCandidate:
+    """A single (item bbox, price bbox) candidate with its implied tilt angle.
 
-    Uses the centerline (left-edge midpoint -> right-edge midpoint) rather
-    than just the top edge: this cancels out asymmetric ascender/descender
-    contributions and other top/bottom-only biases in PaddleOCR's polygon
-    output.
-
-    Filters: conf >= 0.9, width >= 5% of image_width, aspect ratio >= 2.
-    A horizontal text row has angle 0; clockwise tilt yields positive angle.
+    Same-row item↔price slopes are used (not individual bbox top/centerline
+    angles) because both sides have matched glyph patterns — the asymmetry
+    bias that derailed the prior centerline-median estimator cancels out.
     """
-    samples: list[tuple[float, float]] = []
-    min_width = image_width * DESKEW_MIN_WIDTH_RATIO
+
+    item_center_y: float
+    price_center_y: float
+    item_center_x: float
+    price_center_x: float
+    angle_deg: float
+
+
+def _bbox_x_extent(bbox: list[list[float]]) -> tuple[float, float, float]:
+    xs = [p[0] for p in bbox]
+    return min(xs), max(xs), sum(xs) / len(xs)
+
+
+def _build_pair_candidates(
+    detections: list[Detection], image_width: int
+) -> list[_PairCandidate]:
+    """Cross-product item/price candidates filtered by column/width/proximity.
+
+    Liberally generated; mispairings are expected to fall out as RANSAC
+    outliers rather than being filtered upfront (tightening here would
+    re-introduce a chicken-and-egg dependency on the matcher).
+    """
+    item_x_max_cap = image_width * DESKEW_ITEM_X_MAX_FRAC
+    price_x_min_floor = image_width * DESKEW_PRICE_X_MIN_FRAC
+    min_item_width = image_width * DESKEW_MIN_ITEM_WIDTH
+    min_price_width = image_width * DESKEW_MIN_PRICE_WIDTH
+    min_x_distance = image_width * DESKEW_MIN_X_DISTANCE
+
+    items: list[tuple[float, float, float]] = []   # (cx, cy, x_max)
+    prices: list[tuple[float, float, float]] = []  # (cx, cy, x_min)
+
     for det in detections:
         if float(det.get("confidence", 0.0)) < DESKEW_MIN_CONFIDENCE:
             continue
         bbox = det.get("bbox") or []
         if len(bbox) < 4:
             continue
-        # Centerline: midpoint of left edge (TL,BL) to midpoint of right edge (TR,BR).
-        lx = (bbox[0][0] + bbox[3][0]) / 2
-        ly = (bbox[0][1] + bbox[3][1]) / 2
-        rx = (bbox[1][0] + bbox[2][0]) / 2
-        ry = (bbox[1][1] + bbox[2][1]) / 2
-        dx = rx - lx
-        if dx <= 0:
+        x_min, x_max, x_center = _bbox_x_extent(bbox)
+        width = x_max - x_min
+        if width <= 0:
             continue
-        width = abs(dx)
-        if width < min_width:
-            continue
-        height = abs(det["y_max"] - det["y_min"])
-        if height <= 0 or width / height < DESKEW_MIN_ASPECT_RATIO:
-            continue
-        angle = math.degrees(math.atan2(ry - ly, dx))
-        samples.append((angle, width))
-    if not samples:
-        return 0.0, 0
-    samples.sort(key=lambda s: s[0])
-    total_weight = sum(w for _, w in samples)
-    half = total_weight / 2
-    acc = 0.0
-    for angle, weight in samples:
-        acc += weight
-        if acc >= half:
-            return angle, len(samples)
-    return samples[-1][0], len(samples)
+        cy = float(det["center_y"])
+        text = (det.get("text") or "").strip()
+
+        if x_max < item_x_max_cap and width >= min_item_width:
+            items.append((x_center, cy, x_max))
+        if (
+            x_min > price_x_min_floor
+            and width >= min_price_width
+            and _PRICE_TEXT_RE.match(text)
+        ):
+            prices.append((x_center, cy, x_min))
+
+    candidates: list[_PairCandidate] = []
+    for icx, icy, _ in items:
+        for pcx, pcy, _ in prices:
+            dx = pcx - icx
+            if dx < min_x_distance:
+                continue
+            if abs(pcy - icy) > DESKEW_Y_WINDOW_PX:
+                continue
+            angle = math.degrees(math.atan2(pcy - icy, dx))
+            candidates.append(
+                _PairCandidate(
+                    item_center_y=icy,
+                    price_center_y=pcy,
+                    item_center_x=icx,
+                    price_center_x=pcx,
+                    angle_deg=angle,
+                )
+            )
+    return candidates
 
 
-def deskew_detections_op(
-    detections: list[Detection],
-    ctx: DetectionNormalizationContext,
-) -> list[Detection]:
-    """Vertical shear correction using the bbox-derived page skew angle.
+def _ransac_consensus(candidates: list[_PairCandidate]) -> tuple[float, int]:
+    """Return (best_angle_deg, inlier_count). 0.0/0 when no consensus found.
 
-    Computes a global angle from qualifying bboxes, then shifts each
-    detection's y-coordinates by ``-(x_center - image_width/2) * tan(angle)``.
-    No-op below 0.1 deg or when no qualifying samples exist. Image bytes and
-    glyph recognition are untouched: this only re-aligns y for row grouping.
+    Deterministic via DESKEW_RANSAC_SEED — same input always produces the
+    same output, matching the rest of the pipeline's reproducibility story.
     """
-    angle, sample_count = _estimate_page_skew(detections, ctx.image_width)
-    record: dict[str, Any] = {
-        "op": "deskew_detections",
-        "angle_deg": angle,
-        "sample_count": sample_count,
-        "applied": False,
-    }
-    if abs(angle) < DESKEW_MIN_ANGLE_DEG or sample_count == 0:
-        ctx.trace.append(record)
-        return detections
+    if len(candidates) < 3:
+        return 0.0, 0
+    rng = random.Random(DESKEW_RANSAC_SEED)
+    best_angle = 0.0
+    best_inliers = 0
+    for _ in range(DESKEW_RANSAC_ITERS):
+        sample = rng.sample(candidates, k=3)
+        trial = statistics.median(c.angle_deg for c in sample)
+        if abs(trial) > DESKEW_ANGLE_CAP_DEG:
+            continue
+        inliers = [
+            c for c in candidates
+            if abs(c.angle_deg - trial) <= DESKEW_INLIER_TOL_DEG
+        ]
+        if len(inliers) > best_inliers:
+            best_inliers = len(inliers)
+            best_angle = statistics.fmean(c.angle_deg for c in inliers)
+    return best_angle, best_inliers
 
-    record["applied"] = True
-    tan_angle = math.tan(math.radians(angle))
-    x_ref = ctx.image_width / 2
+
+def _apply_shear(
+    detections: list[Detection], angle_deg: float, image_width: int
+) -> list[Detection]:
+    tan_angle = math.tan(math.radians(angle_deg))
+    x_ref = image_width / 2
     corrected: list[Detection] = []
     for det in detections:
         bbox = det["bbox"]
@@ -210,8 +266,55 @@ def deskew_detections_op(
         new_det["y_min"] = det["y_min"] - delta
         new_det["y_max"] = det["y_max"] - delta
         corrected.append(new_det)
-    ctx.trace.append(record)
     return corrected
+
+
+def deskew_detections_op(
+    detections: list[Detection],
+    ctx: DetectionNormalizationContext,
+) -> list[Detection]:
+    """Vertical shear correction driven by same-row item↔price slopes.
+
+    Builds candidate pairs from high-confidence detections in the left/right
+    columns, runs RANSAC on their implied angles, and shears y-coordinates
+    only when consensus is strong, the angle is in band, and large enough to
+    matter. Bias is "miss safely" — a wrong correction can push borderline
+    rows out of the matcher's y-band, the failure mode that killed the prior
+    centerline-median estimator.
+    """
+    candidates = _build_pair_candidates(detections, ctx.image_width)
+    angle, inliers = _ransac_consensus(candidates)
+    consensus_ratio = inliers / len(candidates) if candidates else 0.0
+    record: dict[str, Any] = {
+        "op": "deskew_detections",
+        "angle_deg": angle,
+        "applied": False,
+        "candidate_count": len(candidates),
+        "inlier_count": inliers,
+        "consensus_ratio": consensus_ratio,
+        "gate_reason": None,
+    }
+
+    gate_reason: str | None = None
+    if not candidates:
+        gate_reason = "no_candidates"
+    elif inliers < DESKEW_MIN_INLIERS:
+        gate_reason = "too_few_inliers"
+    elif abs(angle) > DESKEW_ANGLE_CAP_DEG:
+        gate_reason = "angle_too_large"
+    elif consensus_ratio < DESKEW_MIN_CONSENSUS:
+        gate_reason = "weak_consensus"
+    elif abs(angle) < DESKEW_MIN_ANGLE_DEG:
+        gate_reason = "angle_too_small"
+
+    if gate_reason is not None:
+        record["gate_reason"] = gate_reason
+        ctx.trace.append(record)
+        return detections
+
+    record["applied"] = True
+    ctx.trace.append(record)
+    return _apply_shear(detections, angle, ctx.image_width)
 
 
 def sort_reading_order_op(
@@ -227,23 +330,15 @@ def sort_reading_order_op(
 def default_detection_pipeline() -> list[DetectionNormalizationOp]:
     """Default post-OCR ops in execution order.
 
-    ``deskew_detections_op`` is intentionally NOT included. Validated on the
-    39-case private corpus: it regressed 5 receipts (jinlian, foody mart,
-    bestco x2, fresh) and improved zero. Root cause: estimating page skew
-    from bbox top/centerline angles has more confounding biases than expected
-    -- PaddleOCR's polygon shape is influenced by glyph composition (prices
-    starting with "$" pull the bbox top up; items with descenders pull the
-    bottom down), creating a systematic angle signature that looks like real
-    tilt but isn't. On a jinlian SHRIMP PASTE row, the detector picked +0.31
-    deg clockwise while the actual item-to-price slope was -0.83 deg counter-
-    clockwise -- opposite sign. Reliable bbox-based deskew likely needs pairs
-    of bboxes known to be on the same logical row, which is what the matcher
-    itself produces (chicken-and-egg). The op is preserved for opt-in use and
-    future re-evaluation.
+    ``deskew_detections_op`` runs between marker filtering and the reading-
+    order sort so the sort sees post-shear y-coordinates. Its gating is
+    aggressive: it should no-op on already-straight receipts and only fire
+    on genuinely tilted inputs. See docs/detection_deskew_plan.md.
     """
     return [
         filter_low_quality_op,
         filter_bob_markers_op,
+        deskew_detections_op,
         sort_reading_order_op,
     ]
 
