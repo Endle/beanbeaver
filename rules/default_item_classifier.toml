@@ -534,6 +534,26 @@ tags = ["grocery", "drink"]
 priority = 80
 exact_only = false
 
+# YQSL is a Chinese tea-drink brand. Listed before the generic GRAPEFRUIT
+# (fruit) rule wins on truncated OCR like "YQSL - Grapefruit Tea Dri".
+[[rules]]
+id = "legacy_0070a"
+keywords = ["YQSL - GRAPEFRUIT TEA", "YQSL - JASMINE TEA", "YQSL - "]
+category = "grocery_drink"
+tags = ["grocery", "drink"]
+priority = 80
+exact_only = false
+
+# LZY is a Chinese drink brand. "Original Flavor Dri" alone has no drink
+# indicator after OCR truncation, so we anchor on the brand prefix.
+[[rules]]
+id = "legacy_0070b"
+keywords = ["LZY - ORIGINAL FLAVOR", "LZY - "]
+category = "grocery_drink"
+tags = ["grocery", "drink"]
+priority = 80
+exact_only = false
+
 [[rules]]
 id = "legacy_0071"
 keywords = ["ORION DOUBLE CHOCO PIE", "OR:ION DOUBLE CHOCO PIE", "DOUBLE CHOCO PIE"]

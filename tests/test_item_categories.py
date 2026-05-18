@@ -137,6 +137,30 @@ def test_public_default_foodmart_overrides(description: str, expected: str) -> N
     )
 
 
+def test_yqsl_grapefruit_tea_truncated_maps_to_drink() -> None:
+    # OCR truncates "Drink" to "Dri"; without the brand-prefix rule the
+    # generic GRAPEFRUIT fruit keyword would win over a fuzzy TEA match.
+    assert (
+        categorize_item(
+            "YQSL - Grapefruit Tea Dri",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Drink"
+    )
+
+
+def test_lzy_original_flavor_truncated_maps_to_drink() -> None:
+    # "Original Flavor Dri" has no drink indicator after OCR truncation, so
+    # we anchor on the LZY brand prefix.
+    assert (
+        categorize_item(
+            "LZY - Original Flavor Dri",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Drink"
+    )
+
+
 def test_milk_chocolate_bar_maps_to_dairy() -> None:
     # "Milk Chocolate" (chocolate made with milk) and "Chocolate Milk" (the
     # beverage) should both be dairy. The longer-keyword tiebreaker plus
