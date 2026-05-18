@@ -278,10 +278,18 @@ pub(crate) fn extract_tax(lines: &[String]) -> Option<i64> {
     None
 }
 
+fn re_subtotal_label() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    // The inner 'O' in SUBTOTAL is the most common OCR victim — accept the
+    // usual O-confusables (0/C/Q/D/G). Costco receipts have been observed as
+    // SUBTCTAL.
+    RE.get_or_init(|| Regex::new(r"SUB\s*T[OCQDG0]TAL").unwrap())
+}
+
 pub(crate) fn extract_subtotal(lines: &[String]) -> Option<i64> {
     for (idx, line) in lines.iter().enumerate() {
         let line_upper = line.to_ascii_uppercase();
-        if line_upper.contains("SUBTOTAL") || line_upper.contains("SUB TOTAL") {
+        if re_subtotal_label().is_match(&line_upper) {
             if let Some(amount) = extract_price_from_line(line) {
                 return Some(amount);
             }
@@ -297,7 +305,19 @@ pub(crate) fn extract_subtotal(lines: &[String]) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_total;
+    use super::{extract_subtotal, extract_total};
+
+    #[test]
+    fn subtotal_tolerates_costco_subtctal_ocr_typo() {
+        // Costco "SUBTOTAL" OCR'd as "SUBTCTAL" (inner O → C).
+        let lines = vec![
+            "***END OF PRE-SCANNED ITEMS***".to_string(),
+            "SUBTCTAL 159.08".to_string(),
+            "TAX 14.07".to_string(),
+        ];
+
+        assert_eq!(extract_subtotal(&lines), Some(15_908));
+    }
 
     #[test]
     fn total_picks_max_when_total_and_tax_share_a_line() {

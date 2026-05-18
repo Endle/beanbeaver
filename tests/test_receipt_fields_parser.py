@@ -113,6 +113,18 @@ def test_extract_subtotal_keeps_zero_amount() -> None:
     assert _extract_subtotal(lines) == Decimal("0.00")
 
 
+def test_extract_subtotal_tolerates_costco_subtctal_ocr_typo() -> None:
+    # Costco's "SUBTOTAL" label is regularly OCR'd as "SUBTCTAL" (inner O -> C).
+    lines = [
+        "***END OF PRE-SCANNED ITEMS***",
+        "SUBTCTAL 159.08",
+        "TAX 14.07",
+        "TOTAL 173.15",
+    ]
+
+    assert _extract_subtotal(lines) == Decimal("159.08")
+
+
 def test_extract_date_reference_date_makes_short_year_resolution_deterministic() -> None:
     lines = [
         "DateTime: 30/01/02 08:00:00",
