@@ -212,6 +212,28 @@ pub(crate) fn extract_total(lines: &[String]) -> i64 {
                     }
                 }
             }
+            // Costco-style layout: the TOTAL label sits on its own line
+            // ("TOTAL.") and the value lives further down in the payment
+            // block as a standalone amount (typically a few lines above
+            // an "AMOUNT :" label that OCR linearization reorders).
+            // Scan forward for the first standalone decimal, stopping
+            // at section boundaries that can't be the total.
+            const FORWARD_SCAN_WINDOW: usize = 20;
+            let upper_bound = (idx + 1 + FORWARD_SCAN_WINDOW).min(lines.len());
+            for scan_idx in (idx + 1)..upper_bound {
+                let scan_upper = lines[scan_idx].to_ascii_uppercase();
+                if scan_upper.contains("SUBTOTAL")
+                    || scan_upper.contains("CHANGE")
+                    || scan_upper.contains("BALANCE")
+                {
+                    break;
+                }
+                if re_standalone_amount().is_match(&lines[scan_idx]) {
+                    if let Some(amount) = extract_price_from_line(&lines[scan_idx]) {
+                        return amount;
+                    }
+                }
+            }
         }
     }
     0

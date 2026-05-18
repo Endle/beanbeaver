@@ -113,6 +113,34 @@ def test_extract_subtotal_keeps_zero_amount() -> None:
     assert _extract_subtotal(lines) == Decimal("0.00")
 
 
+def test_extract_total_picks_up_costco_amount_below_bare_total_label() -> None:
+    # Costco lays the total label ("TOTAL.") on its own row and the value
+    # appears as a standalone decimal further down in the payment block,
+    # because OCR linearizes by row and the "AMOUNT : 173.15" cell is
+    # reordered relative to its label.
+    lines = [
+        "SUBTOTAL 159.08",
+        "TAX 14.07",
+        "TOTAL.",
+        "XXXXXXXXXXXX4385",
+        "ACCT: MASTERCARD",
+        "REFERENCE",
+        "AUTH #: 6643J 2026/04/26 09:32:21",
+        "Invoice Number: 203948",
+        "Purchase - RoiGErs MC",
+        "A0000000041010",
+        "0000008000 E800",
+        "APPROVED - THANK YOU 027",
+        "01",
+        "173.15",
+        "AMOUNT :",
+        "MasterCard CUSTOMER COPY 173.15",
+        "CHANGE 0.00",
+    ]
+
+    assert _extract_total(lines) == Decimal("173.15")
+
+
 def test_extract_subtotal_tolerates_costco_subtctal_ocr_typo() -> None:
     # Costco's "SUBTOTAL" label is regularly OCR'd as "SUBTCTAL" (inner O -> C).
     lines = [
