@@ -7,6 +7,31 @@ from beanbeaver.receipt.ocr_parser.items_text_parser import _extract_items
 from beanbeaver.runtime.item_category_rules import load_receipt_structuring_rule_layers
 
 
+def test_extract_items_skips_account_payment_metadata_line() -> None:
+    # On a No Frills receipt with a single watermelon, OCR yields the
+    # payment-method line "Account: MASTERCARD CAD$ 4.99". Previously the
+    # parser back-paired the trailing $4.99 with "Account: MASTERCARD CAD$"
+    # and surfaced it as a duplicate item next to the real watermelon.
+    lines = [
+        "4032 WMELON RED 4.99",
+        "SUBTOTAL 4.99",
+        "TOTAL 4.99",
+        "PURCHASE",
+        "Trans. Type:",
+        "Account: MASTERCARD CAD$ 4.99",
+        "Card Type: CREDIT",
+    ]
+
+    items = _extract_items(
+        lines,
+        summary_amounts={Decimal("4.99")},
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
+    )
+
+    assert len(items) == 1, items
+    assert "WMELON" in items[0].description.upper()
+
+
 def test_extract_items_does_not_emit_ghost_from_standalone_you_saved_amount() -> None:
     # On Freshco-style receipts the YOU SAVED amount sometimes lands on its
     # own line right after a fully-paired item ("Cherries Red $6.69 C" / ...
