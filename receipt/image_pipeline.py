@@ -134,7 +134,7 @@ def deskew_affine_op(img: Image.Image, ctx: ImagePipelineContext) -> Image.Image
 def make_resize_max_dim_op(max_dimension: int = MAX_IMAGE_DIMENSION) -> ImagePipelineOp:
     """Build a resize op that caps the longest side at ``max_dimension``."""
 
-    def op(img: Image.Image, ctx: ImagePipelineContext) -> Image.Image:
+    def resize_max_dim_op(img: Image.Image, ctx: ImagePipelineContext) -> Image.Image:
         width, height = img.size
         if width <= max_dimension and height <= max_dimension:
             ctx.trace.append({"pass": "resize_max_dim", "applied": False, "size": img.size})
@@ -149,13 +149,13 @@ def make_resize_max_dim_op(max_dimension: int = MAX_IMAGE_DIMENSION) -> ImagePip
         ctx.trace.append({"pass": "resize_max_dim", "applied": True, "size": resized.size})
         return resized
 
-    return op
+    return resize_max_dim_op
 
 
 def make_pad_white_op(padding: int = OCR_IMAGE_PADDING) -> ImagePipelineOp:
     """Build a pad op that surrounds the image with ``padding`` px of white."""
 
-    def op(img: Image.Image, ctx: ImagePipelineContext) -> Image.Image:
+    def pad_white_op(img: Image.Image, ctx: ImagePipelineContext) -> Image.Image:
         if padding <= 0:
             ctx.trace.append({"pass": "pad_white", "applied": False, "size": img.size})
             return img
@@ -163,7 +163,7 @@ def make_pad_white_op(padding: int = OCR_IMAGE_PADDING) -> ImagePipelineOp:
         ctx.trace.append({"pass": "pad_white", "applied": True, "size": padded.size, "padding": padding})
         return padded
 
-    return op
+    return pad_white_op
 
 
 def default_image_pipeline(
@@ -171,10 +171,23 @@ def default_image_pipeline(
     max_dimension: int = MAX_IMAGE_DIMENSION,
     padding: int = OCR_IMAGE_PADDING,
 ) -> list[ImagePipelineOp]:
-    """Default pre-OCR ops in execution order."""
+    """Default pre-OCR ops in execution order.
+
+    ``deskew_affine_op`` is intentionally NOT in the default list. Validated on
+    39 real receipts: it regressed 4 of them (price-pairing breakage and OCR
+    character drops) and improved zero. Root cause: the projection-profile
+    metric maximizes row-sum variance, but for tall narrow receipts that metric
+    is dominated by canvas geometry (rotation + expand fills the new corners
+    with white, creating an empty-corners-vs-dense-middle bimodal distribution
+    whose variance grows with rotation angle, unrelated to text alignment). It
+    picked +10deg on a near-straight receipt and corrupted row-grouping for
+    the matcher downstream. Plan: replace with a post-OCR detection-level
+    deskew that operates on bbox slopes instead of pixels (no second OCR pass,
+    no JPEG re-encode artifacts). The op below is preserved for opt-in use and
+    future re-evaluation.
+    """
     return [
         exif_transpose_op,
-        deskew_affine_op,
         make_resize_max_dim_op(max_dimension),
         make_pad_white_op(padding),
     ]

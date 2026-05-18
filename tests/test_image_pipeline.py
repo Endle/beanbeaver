@@ -112,7 +112,7 @@ def test_default_pipeline_trace_records_each_pass() -> None:
     out, returned_ctx = run_image_pipeline(img, ops, ctx)
     assert returned_ctx is ctx
     pass_names = [record["pass"] for record in ctx.trace]
-    assert pass_names == ["exif_transpose", "deskew_affine", "resize_max_dim", "pad_white"]
+    assert pass_names == ["exif_transpose", "resize_max_dim", "pad_white"]
     # Default padding wraps the image regardless of resize.
     assert out.size == (200 + 2 * OCR_IMAGE_PADDING, 300 + 2 * OCR_IMAGE_PADDING)
 
@@ -139,3 +139,39 @@ def test_resize_image_bytes_respects_max_dimension() -> None:
     expected_w = MAX_IMAGE_DIMENSION + 2 * OCR_IMAGE_PADDING
     expected_h = MAX_IMAGE_DIMENSION // 2 + 2 * OCR_IMAGE_PADDING
     assert out_img.size == (expected_w, expected_h)
+
+
+def test_env_var_triggers_per_pass_dump(tmp_path, monkeypatch) -> None:
+    import json
+
+    from beanbeaver.receipt.ocr_helpers import PREOCR_DUMP_DIR_ENV
+
+    img = _striped_text_image(width=400, height=600)
+    buffer = io.BytesIO()
+    img.save(buffer, format="JPEG", quality=95)
+    image_bytes = buffer.getvalue()
+
+    monkeypatch.setenv(PREOCR_DUMP_DIR_ENV, str(tmp_path))
+    resize_image_bytes(image_bytes)
+
+    subdirs = list(tmp_path.iterdir())
+    assert len(subdirs) == 1, f"expected one per-receipt subdir, got: {subdirs}"
+    dump_dir = subdirs[0]
+
+    assert (dump_dir / "input.jpg").exists()
+    assert (dump_dir / "output.jpg").exists()
+    assert (dump_dir / "trace.json").exists()
+
+    pass_files = sorted(p.name for p in dump_dir.glob("pass_*.jpg"))
+    assert pass_files == [
+        "pass_00_exif_transpose_op.jpg",
+        "pass_01_resize_max_dim_op.jpg",
+        "pass_02_pad_white_op.jpg",
+    ]
+
+    trace = json.loads((dump_dir / "trace.json").read_text())
+    assert [r["pass"] for r in trace] == [
+        "exif_transpose",
+        "resize_max_dim",
+        "pad_white",
+    ]
