@@ -121,6 +121,18 @@ pub(crate) fn extract_price_from_line(line: &str) -> Option<i64> {
     None
 }
 
+/// Return the largest price found on the line, or None if no price is present.
+/// Used to disambiguate cases like a single OCR line collapsing two columns
+/// `TOTAL ... TOTAL TAX ... $74.55 $1.82` — the trailing price is the tax, but
+/// the total is by definition the larger of the two.
+fn extract_max_price_from_line(line: &str) -> Option<i64> {
+    let normalized = normalize_decimal_spacing(line);
+    re_price_anywhere()
+        .captures_iter(&normalized)
+        .filter_map(|captures| captures.get(1).and_then(|m| parse_cents(m.as_str())))
+        .max()
+}
+
 pub(crate) fn extract_total(lines: &[String]) -> i64 {
     const EXCLUDED_PHRASES: [&str; 6] = [
         "TOTAL DISCOUNT",
@@ -168,6 +180,18 @@ pub(crate) fn extract_total(lines: &[String]) -> i64 {
                 {
                     if let Some(next_amount) = extract_price_from_line(&lines[idx + 1]) {
                         return next_amount;
+                    }
+                }
+                // Collapsed two-column TOTAL row: when the same line carries
+                // both a TOTAL label and a TAX label (e.g. OCR mashes
+                // "TOTAL | TOTAL TAX | $74.55 | $1.82" into one line), the
+                // trailing price is the tax. Prefer the largest of the two,
+                // which by definition is the total.
+                if re_tax_tokens().is_match(&line_upper) {
+                    if let Some(max_amount) = extract_max_price_from_line(&lines[idx]) {
+                        if max_amount > amount {
+                            return max_amount;
+                        }
                     }
                 }
                 return amount;
@@ -274,6 +298,19 @@ pub(crate) fn extract_subtotal(lines: &[String]) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::extract_total;
+
+    #[test]
+    fn total_picks_max_when_total_and_tax_share_a_line() {
+        // OCR collapsed Freshco's two-column "TOTAL | TOTAL TAX | $74.55 | $1.82"
+        // row into a single line. The trailing price is the tax; the actual
+        // total is the larger value.
+        let lines = vec![
+            "SUBTOTAL $72.73".to_string(),
+            "TOTAL TOTAL TAX $74.55 $1.82".to_string(),
+        ];
+
+        assert_eq!(extract_total(&lines), 7_455);
+    }
 
     #[test]
     fn total_after_tax_zero_prefers_following_standalone_amount() {

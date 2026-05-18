@@ -80,19 +80,36 @@ fn re_parenthetical_only() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"^\([^)]*\)?$").unwrap())
 }
 
+// Canadian grocery receipts mark items with one or more trailing single-letter
+// tax flags right after the price: H (HST), G (GST), P (PST), T (TAX),
+// C (combined / container deposit eligible), F (food / non-taxable),
+// J (sometimes used for joint promos). Receipts routinely combine them, e.g.
+// "$1.79 HC" or "$8.99 HCF". The price-detection regexes below allow 0-3 of
+// these letters in any case.
+const TAX_FLAG_CLASS: &str = r"[CcFfGgHhJjPpTt]{0,3}";
+
 fn re_trailing_price() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(\d+\.\d{2})(-?)\s*[HhTtJj]?\s*$").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(&format!(r"(\d+\.\d{{2}})(-?)\s*{TAX_FLAG_CLASS}\s*$")).unwrap()
+    })
 }
 
 fn re_trailing_total_presence() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\s+\d+\.\d{2}\s*[HhTtJj]?\s*$").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(&format!(r"\s+\d+\.\d{{2}}\s*{TAX_FLAG_CLASS}\s*$")).unwrap()
+    })
 }
 
 fn re_tail_token() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"([0-9A-Za-z]\.[0-9A-Za-z]{2,3}[HhTtJj]?)\s*$").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(&format!(
+            r"([0-9A-Za-z]\.[0-9A-Za-z]{{2,3}}{TAX_FLAG_CLASS})\s*$"
+        ))
+        .unwrap()
+    })
 }
 
 fn re_compact_space() -> &'static Regex {
@@ -112,12 +129,16 @@ fn re_find_prices() -> &'static Regex {
 
 fn re_compact_promo_ghost() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"^[A-Z]{1,5}\$?\d+\.\d{2}[HHTTJJ]?$").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(&format!(r"^[A-Z]{{1,5}}\$?\d+\.\d{{2}}{TAX_FLAG_CLASS}$")).unwrap()
+    })
 }
 
 fn re_standalone_price_line() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"^\$?\d+\.\d{2}\s*[HhTtJj]?\s*$").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(&format!(r"^\$?\d+\.\d{{2}}\s*{TAX_FLAG_CLASS}\s*$")).unwrap()
+    })
 }
 
 fn re_long_digits_line() -> &'static Regex {
@@ -163,13 +184,18 @@ fn re_parenthetical_multibuy() -> &'static Regex {
 fn re_malformed_ocr_price() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"(\d+[Il]\.\d{2}|\d+\.[Il]\d|\d+\.\d[Il])\s*[HhTtJj]?\s*$").unwrap()
+        Regex::new(&format!(
+            r"(\d+[Il]\.\d{{2}}|\d+\.[Il]\d|\d+\.\d[Il])\s*{TAX_FLAG_CLASS}\s*$"
+        ))
+        .unwrap()
     })
 }
 
 fn re_trailing_noisy_price() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(\d+)\.(\d{3})\s*[HhTtJj]?\s*$").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(&format!(r"(\d+)\.(\d{{3}})\s*{TAX_FLAG_CLASS}\s*$")).unwrap()
+    })
 }
 
 fn re_count_at_price() -> &'static Regex {
@@ -1092,7 +1118,7 @@ pub(crate) fn extract_text_items(
                     let lower_bound = i.saturating_sub(5);
                     for j in (lower_bound..i).rev() {
                         let prev_line = normalized_lines[j].trim();
-                        if Regex::new(r"^[\d.]+\s*[HhTtJj]?\s*$")
+                        if Regex::new(&format!(r"^[\d.]+\s*{TAX_FLAG_CLASS}\s*$"))
                             .unwrap()
                             .is_match(prev_line)
                             || Regex::new(r"^\d{8,}$").unwrap().is_match(prev_line)

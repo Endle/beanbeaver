@@ -7,6 +7,35 @@ from beanbeaver.receipt.ocr_parser.items_text_parser import _extract_items
 from beanbeaver.runtime.item_category_rules import load_receipt_structuring_rule_layers
 
 
+def test_extract_items_supports_canadian_tax_flag_combinations() -> None:
+    # Canadian grocery receipts mark items with H/G/P/C/F/T tax flags right
+    # after the price, and often combine them ("HC", "HCF", ...). Previously
+    # only single H/T/J flags were tolerated, which dropped most items on a
+    # typical Freshco-style receipt.
+    lines = [
+        "Yog Drink Ayran $1.79 HC",
+        "Cocomax Coconut Wtr $3.49 C",
+        "Soft Drink Orange $8.99 HC",
+        "SUBTOTAL $14.27",
+        "TOTAL $15.27",
+    ]
+
+    items = _extract_items(
+        lines,
+        summary_amounts={Decimal("15.27")},
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
+    )
+
+    assert [item.price for item in items] == [
+        Decimal("1.79"),
+        Decimal("3.49"),
+        Decimal("8.99"),
+    ]
+    assert "Yog Drink Ayran" in items[0].description
+    assert "Cocomax Coconut Wtr" in items[1].description
+    assert "Soft Drink Orange" in items[2].description
+
+
 def test_extract_items_supports_trailing_j_tax_marker() -> None:
     lines = [
         "CRLSH ZER0 0 056000010660 $8.28 J",

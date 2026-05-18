@@ -9,6 +9,19 @@ from beanbeaver.receipt.ocr_parser.fields_parser import (
 )
 
 
+def test_extract_total_picks_max_when_total_and_tax_share_a_line() -> None:
+    # OCR collapsed Freshco's two-column "TOTAL | TOTAL TAX | $74.55 | $1.82"
+    # row into a single line. The trailing price is the tax; the total is the
+    # larger of the two prices on the line.
+    lines = [
+        "SUBTOTAL $72.73",
+        "TOTAL TOTAL TAX $74.55 $1.82",
+    ]
+
+    assert _extract_total(lines) == Decimal("74.55")
+    assert _extract_tax(lines) == Decimal("1.82")
+
+
 def test_extract_total_skips_discount_footer_total() -> None:
     lines = [
         "SUBTOTAL 69.03",
