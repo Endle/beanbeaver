@@ -1,64 +1,84 @@
 """Pure OCR transformation helpers for receipt parsing."""
 
+import hashlib
 import io
-import re
+import json
+import os
+import time
+from pathlib import Path
 from typing import Any
 
-from .detection_normalization import normalize_detections
+from PIL import Image
+
+from .detection_normalization import default_detection_pipeline, normalize_detections
+from .image_pipeline import (
+    MAX_IMAGE_DIMENSION,
+    OCR_IMAGE_PADDING,
+    ImagePipelineContext,
+    default_image_pipeline,
+    run_image_pipeline,
+)
 from .ocr_schema import OCR_ENGINE_NAME_PADDLE, OCR_SCHEMA_VERSION, OcrBBox, OcrDocument
 
-MAX_IMAGE_DIMENSION = 3000  # Resize if either dimension exceeds this
-OCR_IMAGE_PADDING = 50  # White padding around image to prevent edge truncation
+PREOCR_DUMP_DIR_ENV = "BEANBEAVER_PREOCR_DUMP_DIR"
+
+__all__ = [
+    "MAX_IMAGE_DIMENSION",
+    "OCR_IMAGE_PADDING",
+    "PREOCR_DUMP_DIR_ENV",
+    "resize_image_bytes",
+    "transform_paddleocr_result",
+]
+
+
+def _resolve_dump_dir(image_bytes: bytes, explicit: Path | None) -> Path | None:
+    if explicit is not None:
+        return explicit
+    root = os.environ.get(PREOCR_DUMP_DIR_ENV)
+    if not root:
+        return None
+    digest = hashlib.sha1(image_bytes).hexdigest()[:8]
+    timestamp = time.strftime("%Y%m%dT%H%M%S")
+    return Path(root) / f"{timestamp}_{digest}"
 
 
 def resize_image_bytes(
-    image_bytes: bytes, max_dimension: int = MAX_IMAGE_DIMENSION, padding: int = OCR_IMAGE_PADDING
+    image_bytes: bytes,
+    max_dimension: int = MAX_IMAGE_DIMENSION,
+    padding: int = OCR_IMAGE_PADDING,
+    *,
+    debug_dir: Path | None = None,
 ) -> bytes:
+    """Run the pre-OCR image pipeline on ``image_bytes`` and return JPEG bytes.
+
+    Thin shim over ``run_image_pipeline``: decode bytes, run the default
+    pass list (EXIF -> deskew -> resize -> pad), encode back to JPEG. The
+    PIL.Image IR stays in memory between passes; JPEG only at boundaries.
+
+    When ``debug_dir`` is set (or the ``BEANBEAVER_PREOCR_DUMP_DIR`` env var
+    points to a parent directory), each pass's output is snapshotted as
+    JPEG alongside the original input and a ``trace.json`` recording every
+    pass's metadata (deskew angle, resize ratio, etc).
     """
-    Resize image bytes if it exceeds max_dimension on either side.
-
-    Also adds white padding around the image to prevent OCR edge truncation.
-
-    Args:
-        image_bytes: Image data as bytes
-        max_dimension: Maximum allowed dimension (width or height)
-        padding: White padding to add around image (pixels)
-
-    Returns:
-        Image bytes (JPEG format), resized if necessary, with padding added
-    """
-    from PIL import Image, ImageOps
+    resolved_dir = _resolve_dump_dir(image_bytes, debug_dir)
+    if resolved_dir is not None:
+        resolved_dir.mkdir(parents=True, exist_ok=True)
+        (resolved_dir / "input.jpg").write_bytes(image_bytes)
 
     img = Image.open(io.BytesIO(image_bytes))
+    ctx = ImagePipelineContext(debug_dir=resolved_dir)
+    ops = default_image_pipeline(max_dimension=max_dimension, padding=padding)
+    final, _ = run_image_pipeline(img, ops, ctx)
 
-    # Apply EXIF orientation to normalize the image
-    # This ensures OCR and debug overlay see the same orientation
-    img = ImageOps.exif_transpose(img)
-
-    width, height = img.size
-
-    # Check if resizing is needed
-    if width <= max_dimension and height <= max_dimension:
-        img_final = img
-    else:
-        # Calculate new dimensions while maintaining aspect ratio
-        if width > height:
-            new_width = max_dimension
-            new_height = int(height * (max_dimension / width))
-        else:
-            new_height = max_dimension
-            new_width = int(width * (max_dimension / height))
-
-        img_final = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-
-    # Add white padding around the image to prevent OCR edge truncation
-    if padding > 0:
-        img_final = ImageOps.expand(img_final, border=padding, fill="white")
-
-    # Convert to JPEG bytes
     buffer = io.BytesIO()
-    img_final.convert("RGB").save(buffer, format="JPEG", quality=95)
-    return buffer.getvalue()
+    final.convert("RGB").save(buffer, format="JPEG", quality=95)
+    out_bytes = buffer.getvalue()
+
+    if resolved_dir is not None:
+        (resolved_dir / "output.jpg").write_bytes(out_bytes)
+        (resolved_dir / "trace.json").write_text(json.dumps(ctx.trace, indent=2, default=str) + "\n")
+
+    return out_bytes
 
 
 def _boxes_overlap_y(det1: dict, det2: dict, min_overlap_ratio: float = 0.3) -> bool:
@@ -160,45 +180,6 @@ def _distance_to_line_span(det: dict, line: list[dict]) -> float:
     if center_y < line_min:
         return line_min - center_y
     return center_y - line_max
-
-
-def _is_bob_marker_text(text: str) -> bool:
-    """Return True for Costco Bottom-Of-Basket marker rows."""
-    upper = text.upper()
-    has_bottom_banner = "BOTTOM OF BAS" in upper
-    has_bob_count_marker = "BOB COUNT" in upper and bool(re.search(r"[X*]{4,}", upper))
-    return has_bottom_banner or has_bob_count_marker
-
-
-def _filter_overlapping_bob_markers(detections: list[dict]) -> list[dict]:
-    """
-    Remove BOB marker detections when they overlap real item rows.
-
-    Costco receipts sometimes contain marker text like:
-    - "*xxxxxxxxxxBottom of Baske...*"
-    - "*x*********BOB Count 3"
-    on the same Y band as an item+price pair. Keeping those markers can
-    hijack line grouping and disconnect the real item description from price.
-    """
-    if not detections:
-        return detections
-
-    filtered: list[dict] = []
-    for det in detections:
-        if not _is_bob_marker_text(det["text"]):
-            filtered.append(det)
-            continue
-
-        overlaps_non_marker = any(
-            other is not det
-            and not _is_bob_marker_text(other["text"])
-            and _boxes_overlap_y(det, other, min_overlap_ratio=0.25)
-            for other in detections
-        )
-        if not overlaps_non_marker:
-            filtered.append(det)
-
-    return filtered
 
 
 def _group_detections_by_y_overlap(detections: list[dict], image_width: int = 1000) -> list[list[dict]]:
@@ -345,34 +326,18 @@ def transform_paddleocr_result(raw_result: dict[str, Any], padding: int = OCR_IM
             ],
         }
 
-    # Filter thresholds
-    min_confidence = 0.7
-    min_text_length = 2
-
-    # Extract all detections with their positions, filtering low quality ones
-    detection_data = []
+    # Parse raw PaddleOCR output into Detection dicts. Filtering, BOB-marker
+    # removal, deskew, and reading-order sort are all post-OCR ops handled by
+    # the detection pipeline below.
+    detection_data: list[dict[str, Any]] = []
     for detection in detections:
         bbox, (text, confidence) = detection
-
-        # Filter out low confidence detections
-        if confidence < min_confidence:
-            continue
-
-        # Filter out very short text (likely noise like single punctuation)
-        if len(text.strip()) < min_text_length:
-            continue
-
-        # bbox is [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
-        # Adjust coordinates to remove padding offset
         adjusted_bbox = [[p[0] - padding, p[1] - padding] for p in bbox]
-
-        # Get y-coordinates for line grouping (both center and range)
         y_coords = [point[1] for point in adjusted_bbox]
         center_y = sum(y_coords) / len(y_coords)
         y_min = min(y_coords)
         y_max = max(y_coords)
         min_x = min(point[0] for point in adjusted_bbox)
-
         detection_data.append(
             {
                 "bbox": adjusted_bbox,
@@ -389,12 +354,8 @@ def transform_paddleocr_result(raw_result: dict[str, Any], padding: int = OCR_IM
         detection_data,
         image_width=image_width,
         image_height=image_height,
+        operations=default_detection_pipeline(),
     )
-
-    detection_data = _filter_overlapping_bob_markers(detection_data)
-
-    # Sort by y-coordinate first, then x-coordinate
-    detection_data.sort(key=lambda d: (d["center_y"], d["min_x"]))
 
     # Group into lines using hybrid Y-grouping
     lines = _group_detections_by_y_overlap(detection_data, image_width)

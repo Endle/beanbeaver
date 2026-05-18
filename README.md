@@ -74,6 +74,28 @@ curl -X POST "http://<LAN_IP>:8080/beanbeaver" -F file=@receipt.jpg
 
 The server always saves a draft to `receipts/scanned/` for later manual review.
 
+On success the endpoint returns a JSON body that the iOS Shortcut can surface as a notification:
+
+```json
+{
+  "status": "success",
+  "summary": "Loblaws · 2026-05-16 · $32.70 · 8 items",
+  "parsed": {
+    "merchant": "Loblaws",
+    "date": "2026-05-16",
+    "date_is_placeholder": false,
+    "total": "32.70",
+    "subtotal": "29.10",
+    "tax": "3.60",
+    "item_count": 8,
+    "warnings": []
+  },
+  "draft_filename": "review_stage_1.receipt.json"
+}
+```
+
+On failure the body carries an `error_code` (`ocr_unreachable`, `ocr_error`, `parse_failed`, `internal_error`) and a human-readable `summary` you can show directly on the phone so you know whether to reshoot. Keep `bb serve` bound to localhost or your LAN — the response includes parsed merchant/date/amount.
+
 #### 3. Edit receipt
 
 ```

@@ -6,6 +6,7 @@ import re
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from beanbeaver.domain.receipt import Receipt
 from beanbeaver.receipt.ocr_extraction import resize_image_bytes, transform_paddleocr_result
 from beanbeaver.receipt.receipt_structuring import parse_receipt
 from beanbeaver.runtime import get_logger, get_paths, load_known_merchant_keywords, load_receipt_structuring_rule_layers
@@ -29,6 +31,60 @@ logger = get_logger(__name__)
 _paths = get_paths()
 RECEIPTS_DIR = _paths.receipts
 OCR_SERVICE_URL = os.environ.get("OCR_SERVICE_URL", "http://localhost:8001")
+
+
+def _format_decimal(value: Decimal | None) -> str | None:
+    if value is None:
+        return None
+    return f"{value:.2f}"
+
+
+def _format_summary(receipt: Receipt) -> str:
+    date_part = "UNKNOWN" if receipt.date_is_placeholder else receipt.date.isoformat()
+    item_word = "item" if len(receipt.items) == 1 else "items"
+    return f"{receipt.merchant} · {date_part} · ${receipt.total:.2f} · {len(receipt.items)} {item_word}"
+
+
+def build_upload_success_payload(
+    receipt: Receipt,
+    *,
+    draft_filename: str,
+    image_filename: str,
+    image_sha256: str,
+    size_bytes: int,
+) -> dict[str, Any]:
+    """Build the success JSON returned by /upload after a receipt is parsed."""
+    parsed = {
+        "merchant": receipt.merchant,
+        "date": receipt.date.isoformat(),
+        "date_is_placeholder": receipt.date_is_placeholder,
+        "total": _format_decimal(receipt.total),
+        "subtotal": _format_decimal(receipt.subtotal),
+        "tax": _format_decimal(receipt.tax),
+        "item_count": len(receipt.items),
+        "warnings": [warning.message for warning in receipt.warnings],
+    }
+    return {
+        "status": "success",
+        "action": "saved_for_review",
+        "message": f"Saved for review: {draft_filename}",
+        "summary": _format_summary(receipt),
+        "parsed": parsed,
+        "image_filename": image_filename,
+        "image_sha256": image_sha256,
+        "draft_filename": draft_filename,
+        "size_bytes": size_bytes,
+    }
+
+
+def build_upload_error_payload(*, error_code: str, message: str) -> dict[str, Any]:
+    """Build the error JSON returned by /upload when processing fails."""
+    return {
+        "status": "error",
+        "error_code": error_code,
+        "message": message,
+        "summary": message,
+    }
 
 
 class FixiOSMultipartMiddleware(BaseHTTPMiddleware):
@@ -138,6 +194,10 @@ async def upload_receipt(request: Request) -> JSONResponse:
     contents = await file.read()
     filepath.write_bytes(contents)
 
+    error_code = "internal_error"
+    error_message = "Receipt processing failed"
+    resized_filepath: Path | None = None
+
     try:
         image_sha256 = hashlib.sha256(contents).hexdigest()
         resized_contents = resize_image_bytes(contents)
@@ -147,12 +207,26 @@ async def upload_receipt(request: Request) -> JSONResponse:
         resized_filepath.write_bytes(resized_contents)
         logger.debug(f"Saved resized image to {resized_filepath}")
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                f"{OCR_SERVICE_URL}/ocr",
-                files={"file": (filename, resized_contents, "image/jpeg")},
-            )
-            if response.status_code == 200:
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    f"{OCR_SERVICE_URL}/ocr",
+                    files={"file": (filename, resized_contents, "image/jpeg")},
+                )
+        except httpx.RequestError as e:
+            logger.error(f"OCR service unavailable: {e}")
+            error_code = "ocr_unreachable"
+            error_message = f"OCR service unreachable at {OCR_SERVICE_URL}"
+            response = None
+
+        if response is not None:
+            if response.status_code != 200:
+                # TODO(security): This may include OCR payload text with PII.
+                # Keep only for localhost-only operation; redact before non-localhost deployment.
+                logger.error(f"OCR service error: {response.status_code} {response.text}")
+                error_code = "ocr_error"
+                error_message = f"OCR service returned HTTP {response.status_code}"
+            else:
                 raw_ocr_result = response.json()
                 ocr_result = transform_paddleocr_result(raw_ocr_result)
 
@@ -163,7 +237,11 @@ async def upload_receipt(request: Request) -> JSONResponse:
                         known_merchants=load_known_merchant_keywords(),
                         item_category_rule_layers=load_receipt_structuring_rule_layers(),
                     )
-
+                except Exception as e:
+                    logger.error(f"Failed to parse/format receipt: {e}")
+                    error_code = "parse_failed"
+                    error_message = f"Could not parse receipt: {e}"
+                else:
                     # TODO(security): These stdout lines include merchant/date/amount/path details.
                     # Keep only for localhost-only operation; redact before non-localhost deployment.
                     print(f"\n{'=' * 60}")
@@ -195,32 +273,28 @@ async def upload_receipt(request: Request) -> JSONResponse:
 
                     if filepath.exists():
                         filepath.unlink()
-                    if resized_filepath.exists():
+                    if resized_filepath is not None and resized_filepath.exists():
                         resized_filepath.unlink()
 
                     return JSONResponse(
-                        {
-                            "status": "success",
-                            "action": "saved_for_review",
-                            "message": f"Saved for review: {draft_filename}",
-                            "image_filename": filename,
-                            "image_sha256": image_sha256,
-                            "draft_filename": draft_filename,
-                            "size_bytes": len(contents),
-                        }
+                        build_upload_success_payload(
+                            receipt,
+                            draft_filename=draft_filename,
+                            image_filename=filename,
+                            image_sha256=image_sha256,
+                            size_bytes=len(contents),
+                        )
                     )
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Unexpected receipt processing failure: {e}")
+        error_code = "internal_error"
+        error_message = f"Unexpected error: {e}"
 
-                except Exception as e:
-                    logger.error(f"Failed to parse/format receipt: {e}")
-            else:
-                # TODO(security): This may include OCR payload text with PII.
-                # Keep only for localhost-only operation; redact before non-localhost deployment.
-                logger.error(f"OCR service error: {response.status_code} {response.text}")
-    except httpx.RequestError as e:
-        logger.error(f"OCR service unavailable: {e}")
+    if resized_filepath is not None and resized_filepath.exists():
+        resized_filepath.unlink()
 
     return JSONResponse(
-        {"status": "error", "message": "Receipt processing failed"},
+        build_upload_error_payload(error_code=error_code, message=error_message),
         status_code=500,
     )
 

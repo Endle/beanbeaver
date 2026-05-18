@@ -95,6 +95,36 @@ mod process_util {
         run_program_status("less", ["-N", "-S", path])
     }
 
+    pub(super) fn find_original_image(receipt_dir: &Path) -> io::Result<std::path::PathBuf> {
+        let source_dir = receipt_dir.join("source");
+        let entries = std::fs::read_dir(&source_dir).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("{}: {}", source_dir.display(), error),
+            )
+        })?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.file_stem().and_then(|stem| stem.to_str()) == Some("original") {
+                return Ok(path);
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("no original.* file under {}", source_dir.display()),
+        ))
+    }
+
+    pub(super) fn xdg_open_detached(path: &Path) -> io::Result<()> {
+        Command::new("xdg-open")
+            .arg(path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map(|_| ())
+    }
+
     pub(super) fn trash_file(path: &str) -> io::Result<Output> {
         run_program_output("trash", [path])
     }
@@ -347,6 +377,7 @@ const FAVA_HOST: &str = "127.0.0.1";
 const FAVA_PORT: u16 = 5000;
 const OCR_CONTAINER_NAME: &str = "beanbeaver-ocr";
 const OCR_IMAGE: &str = "ghcr.io/endle/beanbeaver-ocr:latest";
+const AUTOSTART_DISABLE_ENV: &str = "BB_TUI_DISABLE_AUTOSTART";
 const MAX_RUNTIME_LOG_LINES: usize = 400;
 const RECEIPTS_REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 const SERVE_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
@@ -2153,6 +2184,15 @@ impl ReviewState {
     }
 }
 
+fn receipt_dir_from_stage_path(stage_path: &Path) -> Option<&Path> {
+    let parent = stage_path.parent()?;
+    if parent.file_name().and_then(|name| name.to_str()) == Some("stages") {
+        parent.parent()
+    } else {
+        Some(parent)
+    }
+}
+
 fn review_decimal_to_scaled(value: &str) -> i64 {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -2263,7 +2303,7 @@ impl App {
     fn page_help(page: Page) -> &'static str {
         match page {
             Page::Receipts => {
-                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | Tab switch queues | h/l pane focus | s toggle details/status | j/k move or scroll | e edit | m TUI match | M CLI match | arrows pan | r reload | a approve | c config | q quit"
+                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | Tab switch queues | h/l pane focus | s toggle details/status | j/k move or scroll | e edit | o open image | m TUI match | M CLI match | arrows pan | r reload | a approve | c config | q quit"
             }
             Page::Serve => {
                 "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | s start `bb serve` | x stop `bb serve` | R restart | r refresh health | q quit"
@@ -2576,6 +2616,30 @@ impl App {
             result.source_path, result.approved_path
         ));
         Ok(())
+    }
+
+    fn open_selected_original_image(&mut self) {
+        let Some(stage_path) = self.selected_receipt().map(|receipt| receipt.path.clone()) else {
+            self.set_status("No receipt selected");
+            return;
+        };
+        let Some(receipt_dir) = receipt_dir_from_stage_path(Path::new(&stage_path)) else {
+            self.set_error(format!("Cannot derive receipt dir from {stage_path}"));
+            return;
+        };
+        let image_path = match process_util::find_original_image(receipt_dir) {
+            Ok(path) => path,
+            Err(error) => {
+                self.set_error(format!("Cannot find original image: {error}"));
+                return;
+            }
+        };
+        match process_util::xdg_open_detached(&image_path) {
+            Ok(()) => self.set_status(format!("Opened {} via xdg-open", image_path.display())),
+            Err(error) => {
+                self.set_error(format!("xdg-open {} failed: {error}", image_path.display()))
+            }
+        }
     }
 
     fn begin_edit_selected(&mut self) {
@@ -3342,6 +3406,27 @@ impl App {
             self.stop_fava_process()?;
         }
         Ok(())
+    }
+
+    /// Boot the long-lived services the Receipts pane depends on. Errors are
+    /// demoted to the status log so a missing OCR runtime or a busy port does
+    /// not abort the TUI; the user can recover from the OCR/serve/fava panes.
+    fn autostart_services(&mut self) {
+        self.set_status("Auto-starting `bb serve`, OCR container, and Fava…");
+        if let Err(error) = self.start_serve_process() {
+            self.set_error(format!("Auto-start `bb serve` failed: {error}"));
+        }
+        if let Err(error) = self.start_ocr_container() {
+            self.set_error(format!("Auto-start OCR container failed: {error}"));
+        }
+        // Fava needs a configured ledger path; skip silently when the project
+        // root isn't set yet rather than dumping a predictable error.
+        if self.config.resolved_main_beancount_path.is_empty() {
+            return;
+        }
+        if let Err(error) = self.start_fava_process() {
+            self.set_error(format!("Auto-start Fava failed: {error}"));
+        }
     }
 }
 
@@ -5775,6 +5860,9 @@ fn run_app(
                     (KeyCode::Char('e'), _) => {
                         app.begin_edit_selected();
                     }
+                    (KeyCode::Char('o'), KeyModifiers::NONE) => {
+                        app.open_selected_original_image();
+                    }
                     (KeyCode::Char('m'), KeyModifiers::NONE) => {
                         if let Err(error) = app.begin_match_selected_approved() {
                             app.set_error(error.to_string());
@@ -6004,12 +6092,29 @@ fn run_app(
     }
 }
 
+fn autostart_disabled_from_env(raw: Option<&str>) -> bool {
+    match raw {
+        None => false,
+        Some(value) => matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+    }
+}
+
+fn autostart_disabled() -> bool {
+    autostart_disabled_from_env(std::env::var(AUTOSTART_DISABLE_ENV).ok().as_deref())
+}
+
 pub fn run(quit_after_launch: bool) -> AppResult<()> {
     let mut terminal = setup_terminal()?;
     let result = (|| -> AppResult<()> {
         let mut app = App::new();
         app.refresh()?;
         app.refresh_runtime_pages(true)?;
+        if !quit_after_launch && !autostart_disabled() {
+            app.autostart_services();
+        }
         let run_result = run_app(&mut terminal, &mut app, quit_after_launch);
         let shutdown_result = app.shutdown();
         run_result.and(shutdown_result)
@@ -6045,6 +6150,21 @@ mod tests {
                 }
             }),
         }
+    }
+
+    #[test]
+    fn autostart_disabled_from_env_recognises_truthy_values() {
+        assert!(!autostart_disabled_from_env(None));
+        assert!(!autostart_disabled_from_env(Some("")));
+        assert!(!autostart_disabled_from_env(Some("0")));
+        assert!(!autostart_disabled_from_env(Some("no")));
+        assert!(!autostart_disabled_from_env(Some("false")));
+
+        assert!(autostart_disabled_from_env(Some("1")));
+        assert!(autostart_disabled_from_env(Some("true")));
+        assert!(autostart_disabled_from_env(Some("TRUE")));
+        assert!(autostart_disabled_from_env(Some("yes")));
+        assert!(autostart_disabled_from_env(Some(" on ")));
     }
 
     #[test]
