@@ -88,22 +88,26 @@ fn re_parenthetical_only() -> &'static Regex {
 // these letters in any case.
 const TAX_FLAG_CLASS: &str = r"[CcFfGgHhJjPpTt]{0,3}";
 
-// When the parser sees a standalone-price line (e.g. `$8.95` on its own) it
-// walks back up to 5 lines looking for the description that goes with it. On
-// some receipts the YOU SAVED amount escapes the skip patterns and lands as a
-// bare price line right after a previously-emitted complete item (e.g. the
-// Freshco "Cherries Red $6.69 C" / "YOU SAVED" / "$8.95" cluster). The walk
-// then re-grabs the already-paired "Cherries Red $6.69 C" description and
-// produces a ghost duplicate item at the wrong (savings) price.
+// When the parser sees a bare standalone-price line (e.g. `$8.95` on its own)
+// it walks back up to 5 lines looking for the description that goes with it.
+// On some receipts the YOU SAVED amount escapes the skip patterns and lands
+// as a bare price line right after a previously-emitted complete item (e.g.
+// the Freshco "Cherries Red $6.69 C" / "YOU SAVED" / "$8.95" cluster). The
+// walk then re-grabs the already-paired "Cherries Red $6.69 C" description
+// and produces a ghost duplicate item at the wrong (savings) price.
 //
-// With this guard on, the backward walk skips any candidate that already ends
-// in a trailing price — such a line is a fully-formed item, not a dangling
-// description waiting to be paired.
+// With this guard on, the backward walk skips candidates that already end in
+// a trailing price — such a line is a fully-formed item, not a dangling
+// description. The guard fires ONLY when the line being processed is a bare
+// price (no description, no quantity expression). Quantity-expression
+// triggers like "1 @ $9.99 3.99" (where the receipt's column layout merged
+// the next item's price onto the qty row) must keep their access to
+// trailing-price prev-lines: the only description for those is the OCR-
+// merged "ITEM NAME 9.99" line above. See e2e fixture
+// `unknown-date_foody_martmccowan_121_99` for that shape.
 //
-// REVERT: flip to `false` if a future regression shows real items going missing
-// because their description happened to end in a price-like token; that would
-// mean the trailing-price test is too aggressive and needs a tighter condition
-// (e.g. require the price to also match an already-emitted item's price).
+// REVERT: flip to `false` if a future regression shows real items going
+// missing because their description happened to end in a price-like token.
 const SKIP_PRICED_LINES_IN_BACKWARD_DESC_SEARCH: bool = true;
 
 fn re_trailing_price() -> &'static Regex {
@@ -1165,7 +1169,13 @@ pub(crate) fn extract_text_items(
                         }
                         // See SKIP_PRICED_LINES_IN_BACKWARD_DESC_SEARCH at top
                         // of file for rationale and revert instructions.
+                        // Limited to bare-price triggers (no qty expression,
+                        // no description) so OCR column-merge cases like
+                        // "1 @ $9.99 3.99" can still back-walk into a
+                        // legitimate "ITEM NAME 9.99" description line.
                         if SKIP_PRICED_LINES_IN_BACKWARD_DESC_SEARCH
+                            && !is_qty_expr
+                            && !force_backward
                             && line_has_trailing_price(prev_line)
                         {
                             continue;
