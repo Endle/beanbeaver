@@ -142,6 +142,8 @@ pub(crate) fn is_spatial_layout_receipt(full_text: &str) -> bool {
         "C & C",
         "NOFRILLS",
         "NO FRILLS",
+        "COSTCO",
+        "WHOLESALE",
     ] {
         if full_text_upper.contains(merchant) {
             return true;

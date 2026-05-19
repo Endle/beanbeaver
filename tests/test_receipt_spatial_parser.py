@@ -122,7 +122,7 @@ def test_extract_items_with_bbox_accepts_spaced_decimal_price_words() -> None:
         item_category_rule_layers=load_receipt_structuring_rule_layers(),
     )
 
-    assert any(item.description == "LUNCH MEAT" and item.price == Decimal("3.50") for item in items)
+    assert any(item.description == "05707200195 LUNCH MEAT" and item.price == Decimal("3.50") for item in items)
 
 
 def test_extract_items_with_bbox_keeps_next_priced_row_from_stealing_quantity_total() -> None:
@@ -172,9 +172,9 @@ def test_extract_items_with_bbox_keeps_next_priced_row_from_stealing_quantity_to
     )
 
     pairs = [(item.description, item.price) for item in items]
-    assert ("LUNCH MEAT", Decimal("3.50")) in pairs
-    assert ("SPRITE ZERO", Decimal("8.69")) in pairs
-    assert ("VEG OIL", Decimal("6.99")) in pairs
+    assert ("05707200195 LUNCH MEAT", Decimal("3.50")) in pairs
+    assert ("06700011056 SPRITE ZERO", Decimal("8.69")) in pairs
+    assert ("06780000102 VEG OIL", Decimal("6.99")) in pairs
 
 
 def test_extract_items_with_bbox_prefers_item_above_for_count_price_rows() -> None:
