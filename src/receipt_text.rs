@@ -860,7 +860,14 @@ pub(crate) fn extract_text_items(
         .collect();
 
     let total_line_idx = normalized_lines.iter().position(|line| {
-        re_total_word().is_match(line) && !line.to_ascii_uppercase().contains("SUBTOTAL")
+        let upper = line.to_ascii_uppercase();
+        re_total_word().is_match(line)
+            && !upper.contains("SUBTOTAL")
+            && !upper.contains("TOTAL NUMBER")
+            && !upper.contains("TOTAL DISCOUNT")
+            && !upper.contains("TOTAL ITEMS")
+            && !upper.contains("TOTAL SAVINGS")
+            && !upper.contains("TOTAL SAVED")
     });
 
     for (i, line) in normalized_lines.iter().enumerate() {
