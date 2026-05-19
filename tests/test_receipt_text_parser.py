@@ -7,6 +7,90 @@ from beanbeaver.receipt.ocr_parser.items_text_parser import _extract_items
 from beanbeaver.runtime.item_category_rules import load_receipt_structuring_rule_layers
 
 
+def test_extract_items_skips_account_payment_metadata_line() -> None:
+    # On a No Frills receipt with a single watermelon, OCR yields the
+    # payment-method line "Account: MASTERCARD CAD$ 4.99". Previously the
+    # parser back-paired the trailing $4.99 with "Account: MASTERCARD CAD$"
+    # and surfaced it as a duplicate item next to the real watermelon.
+    lines = [
+        "4032 WMELON RED 4.99",
+        "SUBTOTAL 4.99",
+        "TOTAL 4.99",
+        "PURCHASE",
+        "Trans. Type:",
+        "Account: MASTERCARD CAD$ 4.99",
+        "Card Type: CREDIT",
+    ]
+
+    items = _extract_items(
+        lines,
+        summary_amounts={Decimal("4.99")},
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
+    )
+
+    assert len(items) == 1, items
+    assert "WMELON" in items[0].description.upper()
+
+
+def test_extract_items_does_not_emit_ghost_from_standalone_you_saved_amount() -> None:
+    # On Freshco-style receipts the YOU SAVED amount sometimes lands on its
+    # own line right after a fully-paired item ("Cherries Red $6.69 C" / ...
+    # / "YOU SAVED" / "$8.95"). Previously the standalone "$8.95" was
+    # back-paired with the already-emitted Cherries Red description and
+    # surfaced as a ghost duplicate item at the savings price. Toggling
+    # SKIP_PRICED_LINES_IN_BACKWARD_DESC_SEARCH off in receipt_text.rs
+    # would re-introduce the ghost.
+    lines = [
+        "Cherries Red $6.69 C",
+        "1.015 kg @ $6.59 / kg",
+        "YOU SAVED",
+        "$8.95",
+        "Natrel Milk 2% 4L $11.19 C",
+        "SUBTOTAL $17.88",
+        "TOTAL $17.88",
+    ]
+
+    items = _extract_items(
+        lines,
+        summary_amounts={Decimal("17.88")},
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
+    )
+
+    prices = [item.price for item in items]
+    assert Decimal("8.95") not in prices, items
+    assert Decimal("6.69") in prices
+    assert Decimal("11.19") in prices
+
+
+def test_extract_items_supports_canadian_tax_flag_combinations() -> None:
+    # Canadian grocery receipts mark items with H/G/P/C/F/T tax flags right
+    # after the price, and often combine them ("HC", "HCF", ...). Previously
+    # only single H/T/J flags were tolerated, which dropped most items on a
+    # typical Freshco-style receipt.
+    lines = [
+        "Yog Drink Ayran $1.79 HC",
+        "Cocomax Coconut Wtr $3.49 C",
+        "Soft Drink Orange $8.99 HC",
+        "SUBTOTAL $14.27",
+        "TOTAL $15.27",
+    ]
+
+    items = _extract_items(
+        lines,
+        summary_amounts={Decimal("15.27")},
+        item_category_rule_layers=load_receipt_structuring_rule_layers(),
+    )
+
+    assert [item.price for item in items] == [
+        Decimal("1.79"),
+        Decimal("3.49"),
+        Decimal("8.99"),
+    ]
+    assert "Yog Drink Ayran" in items[0].description
+    assert "Cocomax Coconut Wtr" in items[1].description
+    assert "Soft Drink Orange" in items[2].description
+
+
 def test_extract_items_supports_trailing_j_tax_marker() -> None:
     lines = [
         "CRLSH ZER0 0 056000010660 $8.28 J",

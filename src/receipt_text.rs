@@ -59,7 +59,7 @@ fn re_skip_patterns() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(
-            r"(?i)TOTAL|SUBTOTAL|SUB\s+TOTAL|TOTALS?\s+ON|^TAX$|^HST|^GST|^PST|AFTER\s+TAX|\d+%$|^CASH\b|^CREDIT\b|^DEBIT\b|^CHANGE\b|^BALANCE|^VISA\b|^MASTERCARD\b|^AMEX\b|^APPROVED\b|^ACTIVATED\b|^PC\s+\d|^ACCT:|^REFERENCE|THANK YOU|WELCOME|RECEIPT|TRANSACTION|^POINTS\b|^REWARDS\b|^EARNED\b|^SAVED$|^YOU SAVED|^CARD|AUTH|REF\s*#|SLIP\s*#|^TILL|CASHIER|\bSTORE\b|^PHONE|ADDRESS|SIGNATURE|Merchant|^QTY$|^UNIT$|^SAV$|ITEM\s+COUNT|NUMBER\s+OF\s+ITEMS|XXXX+|^CAD|VERIFIED|^PIN$|CUSTOMER\s+COPY|COPY$|Optimum|Redeemed",
+            r"(?i)TOTAL|SUBTOTAL|SUB\s+TOTAL|TOTALS?\s+ON|^TAX$|^HST|^GST|^PST|AFTER\s+TAX|\d+%$|^CASH\b|^CREDIT\b|^DEBIT\b|^CHANGE\b|^BALANCE|^VISA\b|^MASTERCARD\b|^AMEX\b|^APPROVED\b|^ACTIVATED\b|^PC\s+\d|^ACCT:|^ACCOUNT:|^REFERENCE|THANK YOU|WELCOME|RECEIPT|TRANSACTION|^POINTS\b|^REWARDS\b|^EARNED\b|^SAVED$|^YOU SAVED|^CARD|AUTH|REF\s*#|SLIP\s*#|^TILL|CASHIER|\bSTORE\b|^PHONE|ADDRESS|SIGNATURE|Merchant|^QTY$|^UNIT$|^SAV$|ITEM\s+COUNT|NUMBER\s+OF\s+ITEMS|XXXX+|^CAD|VERIFIED|^PIN$|CUSTOMER\s+COPY|COPY$|Optimum|Redeemed",
         )
         .unwrap()
     })
@@ -80,19 +80,58 @@ fn re_parenthetical_only() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"^\([^)]*\)?$").unwrap())
 }
 
+// Canadian grocery receipts mark items with one or more trailing single-letter
+// tax flags right after the price: H (HST), G (GST), P (PST), T (TAX),
+// C (combined / container deposit eligible), F (food / non-taxable),
+// J (sometimes used for joint promos). Receipts routinely combine them, e.g.
+// "$1.79 HC" or "$8.99 HCF". The price-detection regexes below allow 0-3 of
+// these letters in any case.
+const TAX_FLAG_CLASS: &str = r"[CcFfGgHhJjPpTt]{0,3}";
+
+// When the parser sees a bare standalone-price line (e.g. `$8.95` on its own)
+// it walks back up to 5 lines looking for the description that goes with it.
+// On some receipts the YOU SAVED amount escapes the skip patterns and lands
+// as a bare price line right after a previously-emitted complete item (e.g.
+// the Freshco "Cherries Red $6.69 C" / "YOU SAVED" / "$8.95" cluster). The
+// walk then re-grabs the already-paired "Cherries Red $6.69 C" description
+// and produces a ghost duplicate item at the wrong (savings) price.
+//
+// With this guard on, the backward walk skips candidates that already end in
+// a trailing price — such a line is a fully-formed item, not a dangling
+// description. The guard fires ONLY when the line being processed is a bare
+// price (no description, no quantity expression). Quantity-expression
+// triggers like "1 @ $9.99 3.99" (where the receipt's column layout merged
+// the next item's price onto the qty row) must keep their access to
+// trailing-price prev-lines: the only description for those is the OCR-
+// merged "ITEM NAME 9.99" line above. See e2e fixture
+// `unknown-date_foody_martmccowan_121_99` for that shape.
+//
+// REVERT: flip to `false` if a future regression shows real items going
+// missing because their description happened to end in a price-like token.
+const SKIP_PRICED_LINES_IN_BACKWARD_DESC_SEARCH: bool = true;
+
 fn re_trailing_price() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(\d+\.\d{2})(-?)\s*[HhTtJj]?\s*$").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(&format!(r"(\d+\.\d{{2}})(-?)\s*{TAX_FLAG_CLASS}\s*$")).unwrap()
+    })
 }
 
 fn re_trailing_total_presence() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\s+\d+\.\d{2}\s*[HhTtJj]?\s*$").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(&format!(r"\s+\d+\.\d{{2}}\s*{TAX_FLAG_CLASS}\s*$")).unwrap()
+    })
 }
 
 fn re_tail_token() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"([0-9A-Za-z]\.[0-9A-Za-z]{2,3}[HhTtJj]?)\s*$").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(&format!(
+            r"([0-9A-Za-z]\.[0-9A-Za-z]{{2,3}}{TAX_FLAG_CLASS})\s*$"
+        ))
+        .unwrap()
+    })
 }
 
 fn re_compact_space() -> &'static Regex {
@@ -112,12 +151,16 @@ fn re_find_prices() -> &'static Regex {
 
 fn re_compact_promo_ghost() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"^[A-Z]{1,5}\$?\d+\.\d{2}[HHTTJJ]?$").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(&format!(r"^[A-Z]{{1,5}}\$?\d+\.\d{{2}}{TAX_FLAG_CLASS}$")).unwrap()
+    })
 }
 
 fn re_standalone_price_line() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"^\$?\d+\.\d{2}\s*[HhTtJj]?\s*$").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(&format!(r"^\$?\d+\.\d{{2}}\s*{TAX_FLAG_CLASS}\s*$")).unwrap()
+    })
 }
 
 fn re_long_digits_line() -> &'static Regex {
@@ -163,13 +206,18 @@ fn re_parenthetical_multibuy() -> &'static Regex {
 fn re_malformed_ocr_price() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"(\d+[Il]\.\d{2}|\d+\.[Il]\d|\d+\.\d[Il])\s*[HhTtJj]?\s*$").unwrap()
+        Regex::new(&format!(
+            r"(\d+[Il]\.\d{{2}}|\d+\.[Il]\d|\d+\.\d[Il])\s*{TAX_FLAG_CLASS}\s*$"
+        ))
+        .unwrap()
     })
 }
 
 fn re_trailing_noisy_price() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(\d+)\.(\d{3})\s*[HhTtJj]?\s*$").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(&format!(r"(\d+)\.(\d{{3}})\s*{TAX_FLAG_CLASS}\s*$")).unwrap()
+    })
 }
 
 fn re_count_at_price() -> &'static Regex {
@@ -1092,7 +1140,7 @@ pub(crate) fn extract_text_items(
                     let lower_bound = i.saturating_sub(5);
                     for j in (lower_bound..i).rev() {
                         let prev_line = normalized_lines[j].trim();
-                        if Regex::new(r"^[\d.]+\s*[HhTtJj]?\s*$")
+                        if Regex::new(&format!(r"^[\d.]+\s*{TAX_FLAG_CLASS}\s*$"))
                             .unwrap()
                             .is_match(prev_line)
                             || Regex::new(r"^\d{8,}$").unwrap().is_match(prev_line)
@@ -1116,6 +1164,19 @@ pub(crate) fn extract_text_items(
                             || re_onsale_parenthetical().is_match(prev_line)
                             || re_parenthetical_multibuy().is_match(prev_line)
                             || prev_line.len() <= 3
+                        {
+                            continue;
+                        }
+                        // See SKIP_PRICED_LINES_IN_BACKWARD_DESC_SEARCH at top
+                        // of file for rationale and revert instructions.
+                        // Limited to bare-price triggers (no qty expression,
+                        // no description) so OCR column-merge cases like
+                        // "1 @ $9.99 3.99" can still back-walk into a
+                        // legitimate "ITEM NAME 9.99" description line.
+                        if SKIP_PRICED_LINES_IN_BACKWARD_DESC_SEARCH
+                            && !is_qty_expr
+                            && !force_backward
+                            && line_has_trailing_price(prev_line)
                         {
                             continue;
                         }

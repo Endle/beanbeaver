@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -79,6 +80,36 @@ def resize_image_bytes(
         (resolved_dir / "trace.json").write_text(json.dumps(ctx.trace, indent=2, default=str) + "\n")
 
     return out_bytes
+
+
+_SUMMARY_LABEL_RE = re.compile(
+    r"^\s*(?:SUB\s*T[OCQDG0]TAL|SUBTOTAL|TOTAL|HST|GST|PST|TAX|"
+    r"MASTER(?:CARD)?|VISA|DEBIT|CREDIT|POINTS|CASH|CHANGE|BALANCE|"
+    r"APPROVED|CARD|TERMINAL|MEMBER|AMOUNT|REFERENCE|AUTH)\b",
+    re.IGNORECASE,
+)
+
+
+def _belongs_in_left_column(text: str, x_norm: float) -> bool:
+    """
+    Decide whether a detection sits in the LEFT (SKU/summary-label) column.
+
+    Tokens with x_norm < 0.2 are unambiguously LEFT. In the 0.2-0.3
+    transition band the answer depends on content: numeric SKU-style
+    tokens (digits-led) and summary labels (TOTAL, TAX, …) belong on
+    the LEFT; alpha-led short tokens like Costco's `CRAISINS 1.8` are
+    descriptions and belong in MIDDLE.
+    """
+    if x_norm < 0.2:
+        return True
+    if x_norm >= 0.3:
+        return False
+    stripped = (text or "").lstrip()
+    if not stripped:
+        return False
+    if stripped[0].isdigit():
+        return True
+    return _SUMMARY_LABEL_RE.match(stripped) is not None
 
 
 def _boxes_overlap_y(det1: dict, det2: dict, min_overlap_ratio: float = 0.3) -> bool:
@@ -187,17 +218,26 @@ def _group_detections_by_y_overlap(detections: list[dict], image_width: int = 10
     if not detections:
         return []
 
-    # Separate into LEFT, MIDDLE, RIGHT groups
+    # Separate into LEFT, MIDDLE, RIGHT groups.
+    #
+    # SKUs cluster at x_norm <= ~0.15 and the description column starts
+    # around 0.25-0.30. Tokens in the 0.2-0.3 band are ambiguous: real
+    # SKUs (numeric) and summary labels (TOTAL/TAX/SUBTOTAL) belong on
+    # the LEFT, while short numeric descriptions (e.g. Costco's
+    # `CRAISINS 1.8`) belong in MIDDLE. Mis-routing a description into
+    # LEFT makes it compete with the real SKU for the same price
+    # column and cascades an off-by-one row drift through the items
+    # block.
     left_items = []
     middle_items = []
     right_items = []
 
     for det in detections:
         x_norm = det["min_x"] / image_width
-        if x_norm < 0.3:
-            left_items.append(det)
-        elif x_norm > 0.7:
+        if x_norm > 0.7:
             right_items.append(det)
+        elif _belongs_in_left_column(det.get("text", ""), x_norm):
+            left_items.append(det)
         else:
             middle_items.append(det)
 

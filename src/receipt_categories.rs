@@ -217,6 +217,16 @@ pub(crate) fn find_all_matches(
     let mut matches = Vec::new();
 
     for (rule_index, rule) in rule_layers.rules.iter().enumerate() {
+        // Scan all keywords in this rule and keep the strongest match: an
+        // exact (substring) hit beats a fuzzy hit, and among equally strong
+        // hits the longer keyword wins. Without this preference, a fuzzy
+        // match on an early keyword would mask an exact match on a later
+        // keyword in the same rule — e.g. dairy's "MILK CHOCOLATE" fuzzy-
+        // matching "Chocolate Milk" before its own exact "CHOCOLATE MILK"
+        // keyword gets a chance.
+        let mut best_keyword: Option<&String> = None;
+        let mut best_is_exact = false;
+        let mut best_keyword_length: usize = 0;
         for keyword in &rule.keywords {
             let threshold = if rule_layers.exact_only_keywords.contains(keyword) {
                 Some(1.0)
@@ -224,18 +234,35 @@ pub(crate) fn find_all_matches(
                 None
             };
             let (matched, _, is_exact) = fuzzy_contains(keyword, description, threshold);
-            if matched {
-                matches.push(RuleMatch {
-                    category: rule.category.clone(),
-                    tags: rule.tags.clone(),
-                    matched_keyword: keyword.clone(),
-                    priority: rule.priority,
-                    keyword_length: keyword.chars().filter(|ch| !ch.is_whitespace()).count(),
-                    is_exact,
-                    rule_index,
-                });
-                break;
+            if !matched {
+                continue;
             }
+            let kw_len = keyword.chars().filter(|ch| !ch.is_whitespace()).count();
+            let strictly_better = match (best_is_exact, is_exact) {
+                (false, true) => true,
+                (true, false) => false,
+                _ => kw_len > best_keyword_length,
+            };
+            if best_keyword.is_none() || strictly_better {
+                best_keyword = Some(keyword);
+                best_is_exact = is_exact;
+                best_keyword_length = kw_len;
+                if is_exact && kw_len >= rule.keywords.iter().map(|k| k.len()).max().unwrap_or(0) {
+                    // Already the longest exact match possible for this rule.
+                    break;
+                }
+            }
+        }
+        if let Some(keyword) = best_keyword {
+            matches.push(RuleMatch {
+                category: rule.category.clone(),
+                tags: rule.tags.clone(),
+                matched_keyword: keyword.clone(),
+                priority: rule.priority,
+                keyword_length: best_keyword_length,
+                is_exact: best_is_exact,
+                rule_index,
+            });
         }
     }
 

@@ -3,7 +3,13 @@ exact_only_keywords = []
 
 [[rules]]
 id = "legacy_0000"
-keywords = ["EGG", "EGGS", "STRAWBERRY MILK", "CHOCOLATE MILK", "CHOC MILK", "CHOC MLK", "MILK", "CHEESE", "YOGURT", "YOGOURT", "BUTTER", "CREAM", "SOUR CREAM", "COTTAGE", "MARGARINE", "CHEDDAR", "MOZZARELLA", "PARMESAN", "SWEETENED SOYA"]
+# "MILK CHOCOLATE" (note: the product is chocolate made with milk; distinct from
+# "CHOCOLATE MILK" the beverage) is listed BEFORE "CHOCOLATE MILK" so the
+# per-rule keyword loop in find_all_matches sees it first and breaks on an
+# exact match, beating the snacks rule's fuzzy "CHOCOLATE" hit on the
+# is_exact tiebreaker. Order matters: do not move "MILK CHOCOLATE" below
+# "CHOCOLATE MILK".
+keywords = ["EGG", "EGGS", "MILK CHOCOLATE", "STRAWBERRY MILK", "CHOCOLATE MILK", "CHOC MILK", "CHOC MLK", "MILK", "CHEESE", "YOGURT", "YOGOURT", "BUTTER", "CREAM", "SOUR CREAM", "COTTAGE", "MARGARINE", "CHEDDAR", "MOZZARELLA", "PARMESAN", "SWEETENED SOYA"]
 category = "grocery_dairy"
 tags = ["grocery", "dairy"]
 priority = 0
@@ -523,6 +529,26 @@ exact_only = false
 [[rules]]
 id = "legacy_0070"
 keywords = ["TROPICANA DAILY C TEA", "DAILY C TEA DR"]
+category = "grocery_drink"
+tags = ["grocery", "drink"]
+priority = 80
+exact_only = false
+
+# YQSL is a Chinese tea-drink brand. Listed before the generic GRAPEFRUIT
+# (fruit) rule wins on truncated OCR like "YQSL - Grapefruit Tea Dri".
+[[rules]]
+id = "legacy_0070a"
+keywords = ["YQSL - GRAPEFRUIT TEA", "YQSL - JASMINE TEA", "YQSL - "]
+category = "grocery_drink"
+tags = ["grocery", "drink"]
+priority = 80
+exact_only = false
+
+# LZY is a Chinese drink brand. "Original Flavor Dri" alone has no drink
+# indicator after OCR truncation, so we anchor on the brand prefix.
+[[rules]]
+id = "legacy_0070b"
+keywords = ["LZY - ORIGINAL FLAVOR", "LZY - "]
 category = "grocery_drink"
 tags = ["grocery", "drink"]
 priority = 80

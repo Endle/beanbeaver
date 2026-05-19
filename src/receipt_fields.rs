@@ -121,6 +121,18 @@ pub(crate) fn extract_price_from_line(line: &str) -> Option<i64> {
     None
 }
 
+/// Return the largest price found on the line, or None if no price is present.
+/// Used to disambiguate cases like a single OCR line collapsing two columns
+/// `TOTAL ... TOTAL TAX ... $74.55 $1.82` — the trailing price is the tax, but
+/// the total is by definition the larger of the two.
+fn extract_max_price_from_line(line: &str) -> Option<i64> {
+    let normalized = normalize_decimal_spacing(line);
+    re_price_anywhere()
+        .captures_iter(&normalized)
+        .filter_map(|captures| captures.get(1).and_then(|m| parse_cents(m.as_str())))
+        .max()
+}
+
 pub(crate) fn extract_total(lines: &[String]) -> i64 {
     const EXCLUDED_PHRASES: [&str; 6] = [
         "TOTAL DISCOUNT",
@@ -170,6 +182,18 @@ pub(crate) fn extract_total(lines: &[String]) -> i64 {
                         return next_amount;
                     }
                 }
+                // Collapsed two-column TOTAL row: when the same line carries
+                // both a TOTAL label and a TAX label (e.g. OCR mashes
+                // "TOTAL | TOTAL TAX | $74.55 | $1.82" into one line), the
+                // trailing price is the tax. Prefer the largest of the two,
+                // which by definition is the total.
+                if re_tax_tokens().is_match(&line_upper) {
+                    if let Some(max_amount) = extract_max_price_from_line(&lines[idx]) {
+                        if max_amount > amount {
+                            return max_amount;
+                        }
+                    }
+                }
                 return amount;
             }
             if idx + 1 < lines.len() {
@@ -184,6 +208,28 @@ pub(crate) fn extract_total(lines: &[String]) -> i64 {
                     && !prev_line_upper.contains("GST")
                 {
                     if let Some(amount) = extract_price_from_line(&lines[idx - 1]) {
+                        return amount;
+                    }
+                }
+            }
+            // Costco-style layout: the TOTAL label sits on its own line
+            // ("TOTAL.") and the value lives further down in the payment
+            // block as a standalone amount (typically a few lines above
+            // an "AMOUNT :" label that OCR linearization reorders).
+            // Scan forward for the first standalone decimal, stopping
+            // at section boundaries that can't be the total.
+            const FORWARD_SCAN_WINDOW: usize = 20;
+            let upper_bound = (idx + 1 + FORWARD_SCAN_WINDOW).min(lines.len());
+            for scan_idx in (idx + 1)..upper_bound {
+                let scan_upper = lines[scan_idx].to_ascii_uppercase();
+                if scan_upper.contains("SUBTOTAL")
+                    || scan_upper.contains("CHANGE")
+                    || scan_upper.contains("BALANCE")
+                {
+                    break;
+                }
+                if re_standalone_amount().is_match(&lines[scan_idx]) {
+                    if let Some(amount) = extract_price_from_line(&lines[scan_idx]) {
                         return amount;
                     }
                 }
@@ -254,10 +300,18 @@ pub(crate) fn extract_tax(lines: &[String]) -> Option<i64> {
     None
 }
 
+fn re_subtotal_label() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    // The inner 'O' in SUBTOTAL is the most common OCR victim — accept the
+    // usual O-confusables (0/C/Q/D/G). Costco receipts have been observed as
+    // SUBTCTAL.
+    RE.get_or_init(|| Regex::new(r"SUB\s*T[OCQDG0]TAL").unwrap())
+}
+
 pub(crate) fn extract_subtotal(lines: &[String]) -> Option<i64> {
     for (idx, line) in lines.iter().enumerate() {
         let line_upper = line.to_ascii_uppercase();
-        if line_upper.contains("SUBTOTAL") || line_upper.contains("SUB TOTAL") {
+        if re_subtotal_label().is_match(&line_upper) {
             if let Some(amount) = extract_price_from_line(line) {
                 return Some(amount);
             }
@@ -273,7 +327,32 @@ pub(crate) fn extract_subtotal(lines: &[String]) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_total;
+    use super::{extract_subtotal, extract_total};
+
+    #[test]
+    fn subtotal_tolerates_costco_subtctal_ocr_typo() {
+        // Costco "SUBTOTAL" OCR'd as "SUBTCTAL" (inner O → C).
+        let lines = vec![
+            "***END OF PRE-SCANNED ITEMS***".to_string(),
+            "SUBTCTAL 159.08".to_string(),
+            "TAX 14.07".to_string(),
+        ];
+
+        assert_eq!(extract_subtotal(&lines), Some(15_908));
+    }
+
+    #[test]
+    fn total_picks_max_when_total_and_tax_share_a_line() {
+        // OCR collapsed Freshco's two-column "TOTAL | TOTAL TAX | $74.55 | $1.82"
+        // row into a single line. The trailing price is the tax; the actual
+        // total is the larger value.
+        let lines = vec![
+            "SUBTOTAL $72.73".to_string(),
+            "TOTAL TOTAL TAX $74.55 $1.82".to_string(),
+        ];
+
+        assert_eq!(extract_total(&lines), 7_455);
+    }
 
     #[test]
     fn total_after_tax_zero_prefers_following_standalone_amount() {

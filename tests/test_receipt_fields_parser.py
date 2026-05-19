@@ -9,6 +9,19 @@ from beanbeaver.receipt.ocr_parser.fields_parser import (
 )
 
 
+def test_extract_total_picks_max_when_total_and_tax_share_a_line() -> None:
+    # OCR collapsed Freshco's two-column "TOTAL | TOTAL TAX | $74.55 | $1.82"
+    # row into a single line. The trailing price is the tax; the total is the
+    # larger of the two prices on the line.
+    lines = [
+        "SUBTOTAL $72.73",
+        "TOTAL TOTAL TAX $74.55 $1.82",
+    ]
+
+    assert _extract_total(lines) == Decimal("74.55")
+    assert _extract_tax(lines) == Decimal("1.82")
+
+
 def test_extract_total_skips_discount_footer_total() -> None:
     lines = [
         "SUBTOTAL 69.03",
@@ -98,6 +111,46 @@ def test_extract_subtotal_keeps_zero_amount() -> None:
     ]
 
     assert _extract_subtotal(lines) == Decimal("0.00")
+
+
+def test_extract_total_picks_up_costco_amount_below_bare_total_label() -> None:
+    # Costco lays the total label ("TOTAL.") on its own row and the value
+    # appears as a standalone decimal further down in the payment block,
+    # because OCR linearizes by row and the "AMOUNT : 173.15" cell is
+    # reordered relative to its label.
+    lines = [
+        "SUBTOTAL 159.08",
+        "TAX 14.07",
+        "TOTAL.",
+        "XXXXXXXXXXXX4385",
+        "ACCT: MASTERCARD",
+        "REFERENCE",
+        "AUTH #: 6643J 2026/04/26 09:32:21",
+        "Invoice Number: 203948",
+        "Purchase - RoiGErs MC",
+        "A0000000041010",
+        "0000008000 E800",
+        "APPROVED - THANK YOU 027",
+        "01",
+        "173.15",
+        "AMOUNT :",
+        "MasterCard CUSTOMER COPY 173.15",
+        "CHANGE 0.00",
+    ]
+
+    assert _extract_total(lines) == Decimal("173.15")
+
+
+def test_extract_subtotal_tolerates_costco_subtctal_ocr_typo() -> None:
+    # Costco's "SUBTOTAL" label is regularly OCR'd as "SUBTCTAL" (inner O -> C).
+    lines = [
+        "***END OF PRE-SCANNED ITEMS***",
+        "SUBTCTAL 159.08",
+        "TAX 14.07",
+        "TOTAL 173.15",
+    ]
+
+    assert _extract_subtotal(lines) == Decimal("159.08")
 
 
 def test_extract_date_reference_date_makes_short_year_resolution_deterministic() -> None:

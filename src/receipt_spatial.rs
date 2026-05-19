@@ -4,7 +4,6 @@ use std::sync::OnceLock;
 const SCALE: i64 = 10_000;
 const MIN_CONFIDENCE: f64 = 0.5;
 const PRICE_X_THRESHOLD: f64 = 0.65;
-const ITEM_X_THRESHOLD: f64 = 0.6;
 const Y_TOLERANCE: f64 = 0.02;
 const MAX_ITEM_DISTANCE: f64 = 0.08;
 const SPATIAL_FLOAT_EPSILON: f64 = 1e-6;
@@ -199,7 +198,11 @@ fn re_ascii_words() -> &'static Regex {
 
 fn re_price_word() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"^\$?(\d+\.\d{2})$").unwrap())
+    // Trailing `-` is Costco's convention for discount/refund lines
+    // (e.g. TPD/<sku> 3.00-). The optional trailing letter is Costco's
+    // tax flag (H/T/J) which can fuse with the price into a single
+    // OCR token (e.g. "5.00- H").
+    RE.get_or_init(|| Regex::new(r"^\$?(\d+\.\d{2})(-?)\s*[HhTtJj]?$").unwrap())
 }
 
 fn re_embedded_trailing_price_word() -> &'static Regex {
@@ -260,6 +263,17 @@ fn re_garbled_price_artifact() -> &'static Regex {
 fn re_cahrd() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"\bCAHRD\b").unwrap())
+}
+
+fn re_costco_discount_line() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    // Costco's "tier price discount" lines reference another SKU and are
+    // therefore mostly digits ("TPD/1234567", "TPD/1234567/7"), which
+    // fails the generic alpha-ratio filter in `is_valid_item_line`.
+    // Allow embedded whitespace too — Costco OCR sometimes reads a digit
+    // as a space (e.g. "TPD/1 96144" for "TPD/1796144"). Allow `TP[A-Z]/`
+    // because OCR also occasionally reads the `D` as `U` etc.
+    RE.get_or_init(|| Regex::new(r"^TP[A-Z]/[\d/\s]+$").unwrap())
 }
 
 fn re_hed_word() -> &'static Regex {
@@ -338,11 +352,12 @@ fn format_scaled_currency(value: i64) -> String {
 }
 
 fn alpha_ratio(value: &str) -> f64 {
-    if value.is_empty() {
+    let non_ws_count = value.chars().filter(|ch| !ch.is_whitespace()).count();
+    if non_ws_count == 0 {
         return 0.0;
     }
     let alpha_count = value.chars().filter(|ch| ch.is_ascii_alphabetic()).count();
-    alpha_count as f64 / value.len() as f64
+    alpha_count as f64 / non_ws_count as f64
 }
 
 fn is_section_name(text: &str) -> bool {
@@ -409,7 +424,12 @@ fn is_summary_line(text: &str) -> bool {
 fn trailing_price_scaled(text: &str) -> Option<i64> {
     let normalized = normalize_decimal_spacing(text.trim());
     let captures = re_trailing_price().captures(&normalized)?;
-    parse_scaled_decimal(captures.get(1)?.as_str())
+    let value = parse_scaled_decimal(captures.get(1)?.as_str())?;
+    let is_negative = captures
+        .get(2)
+        .map(|m| m.as_str() == "-")
+        .unwrap_or(false);
+    Some(if is_negative { -value } else { value })
 }
 
 fn line_has_trailing_price(text: &str) -> bool {
@@ -507,7 +527,6 @@ fn clean_description(desc: &str) -> String {
     cleaned = re_garbled_price_artifact()
         .replace_all(&cleaned, "")
         .to_string();
-    cleaned = re_leading_long_sku().replace(&cleaned, "").to_string();
     cleaned = re_leading_section_item_prefix()
         .replace(&cleaned, "")
         .to_string();
@@ -538,7 +557,12 @@ fn is_price_word(text: &str) -> Option<i64> {
         .or_else(|| normalized.strip_prefix('w').map(str::trim_start))
         .unwrap_or(normalized.as_str());
     if let Some(captures) = re_price_word().captures(stripped) {
-        return parse_scaled_decimal(captures.get(1)?.as_str());
+        let value = parse_scaled_decimal(captures.get(1)?.as_str())?;
+        let is_negative = captures
+            .get(2)
+            .map(|m| m.as_str() == "-")
+            .unwrap_or(false);
+        return Some(if is_negative { -value } else { value });
     }
     if stripped.contains('@') || stripped.contains('/') {
         return None;
@@ -606,7 +630,8 @@ fn is_valid_item_line(line: &ParsedLine, total_line_y: Option<f64>) -> bool {
     if re_long_digits_only().is_match(&line.full_text) {
         return false;
     }
-    if alpha_ratio(&left_text_for_ratio) < 0.5 {
+    let is_costco_discount = re_costco_discount_line().is_match(&left_text_for_ratio);
+    if !is_costco_discount && alpha_ratio(&left_text_for_ratio) < 0.5 {
         return false;
     }
     if re_malformed_ocr_prefix().is_match(&line.left_text) {
@@ -702,7 +727,10 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
             let mut left_y = None;
             for word in &line.words {
                 let x = x_center(word);
-                if x < ITEM_X_THRESHOLD {
+                // PRICE_X_THRESHOLD is the description/price boundary;
+                // there's no dead zone (Costco's "2% 4L" pack-size token
+                // sits at cx≈0.6 and must count as description text).
+                if x < PRICE_X_THRESHOLD {
                     let text = word.text.as_str();
                     if text.len() <= 1 || re_digits_dots_only().is_match(text) {
                         continue;
@@ -732,7 +760,7 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
                     continue;
                 }
                 if let Some(price_scaled) = is_price_word(&word.text) {
-                    if price_scaled > 0 {
+                    if price_scaled != 0 {
                         price_candidates.push(PriceCandidate {
                             price_y: y_center(word),
                             price_scaled,
@@ -1247,7 +1275,8 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
                 if left_text_for_ratio.is_empty() {
                     continue;
                 }
-                if alpha_ratio(&left_text_for_ratio) < 0.4 {
+                let is_costco_discount = re_costco_discount_line().is_match(&left_text_for_ratio);
+                if !is_costco_discount && alpha_ratio(&left_text_for_ratio) < 0.4 {
                     continue;
                 }
                 let description = clean_description(&line.left_text);

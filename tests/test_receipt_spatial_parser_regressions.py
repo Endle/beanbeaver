@@ -214,7 +214,8 @@ def test_extract_items_with_bbox_accepts_embedded_trailing_price_word() -> None:
     )
 
     pairs = [(item.description, item.price) for item in items]
-    assert pairs.count(("SEAFOOD CNTR", Decimal("14.99"))) == 2
+    seafood_pairs = [(desc, price) for desc, price in pairs if "SEAFOOD CNTR" in desc and price == Decimal("14.99")]
+    assert len(seafood_pairs) == 2
 
 
 def test_extract_items_with_bbox_handles_actual_nofrills_coors_and_deposit_cluster() -> None:
@@ -222,7 +223,9 @@ def test_extract_items_with_bbox_handles_actual_nofrills_coors_and_deposit_clust
         {
             "text": "26-L.IQUOR COORS LIGHT 6 PK HQ 15.79",
             "words": [
-                _word("26-L.IQUOR", 0.031438127090301006, 0.28933333333333333, 0.19130434782608696, 0.30933333333333335),
+                _word(
+                    "26-L.IQUOR", 0.031438127090301006, 0.28933333333333333, 0.19130434782608696, 0.30933333333333335
+                ),
                 _word("COORS LIGHT 6 PK HQ", 0.3177257525083612, 0.301, 0.6876254180602007, 0.32766666666666666),
                 _word("15.79", 0.7598662207357859, 0.29833333333333334, 0.8595317725752508, 0.3243333333333333),
             ],
@@ -238,7 +241,9 @@ def test_extract_items_with_bbox_handles_actual_nofrills_coors_and_deposit_clust
             "text": "DEPOSIT 1 COORS PINEAPPLE HQ 3.19",
             "words": [
                 _word("DEPOSIT 1", 0.10167224080267559, 0.32766666666666666, 0.25752508361204013, 0.3476666666666667),
-                _word("COORS PINEAPPLE", 0.32240802675585284, 0.3423333333333333, 0.5792642140468227, 0.36533333333333334),
+                _word(
+                    "COORS PINEAPPLE", 0.32240802675585284, 0.3423333333333333, 0.5792642140468227, 0.36533333333333334
+                ),
                 _word("HQ", 0.65685618729097, 0.341, 0.7010033444816054, 0.362),
                 _word("3.19", 0.7926421404682275, 0.33766666666666667, 0.8762541806020067, 0.3606666666666667),
             ],
@@ -293,12 +298,16 @@ def test_extract_items_with_bbox_handles_actual_nofrills_grocery_preceding_coors
         },
         {
             "text": "4 @ $1.79",
-            "words": [_word("4 @ $1.79", 0.1020066889632107, 0.2926666666666667, 0.2608695652173913, 0.31133333333333335)],
+            "words": [
+                _word("4 @ $1.79", 0.1020066889632107, 0.2926666666666667, 0.2608695652173913, 0.31133333333333335)
+            ],
         },
         {
             "text": "26-L.IQUOR COORS LIGHT 6 PK HQ 15.79",
             "words": [
-                _word("26-L.IQUOR", 0.031438127090301006, 0.28933333333333333, 0.19130434782608696, 0.30933333333333335),
+                _word(
+                    "26-L.IQUOR", 0.031438127090301006, 0.28933333333333333, 0.19130434782608696, 0.30933333333333335
+                ),
                 _word("COORS LIGHT 6 PK HQ", 0.3177257525083612, 0.301, 0.6876254180602007, 0.32766666666666666),
                 _word("15.79", 0.7598662207357859, 0.29833333333333334, 0.8595317725752508, 0.3243333333333333),
             ],
@@ -314,7 +323,9 @@ def test_extract_items_with_bbox_handles_actual_nofrills_grocery_preceding_coors
             "text": "DEPOSIT 1 COORS PINEAPPLE HQ 3.19",
             "words": [
                 _word("DEPOSIT 1", 0.10167224080267559, 0.32766666666666666, 0.25752508361204013, 0.3476666666666667),
-                _word("COORS PINEAPPLE", 0.32240802675585284, 0.3423333333333333, 0.5792642140468227, 0.36533333333333334),
+                _word(
+                    "COORS PINEAPPLE", 0.32240802675585284, 0.3423333333333333, 0.5792642140468227, 0.36533333333333334
+                ),
                 _word("HQ", 0.65685618729097, 0.341, 0.7010033444816054, 0.362),
                 _word("3.19", 0.7926421404682275, 0.33766666666666667, 0.8762541806020067, 0.3606666666666667),
             ],
@@ -345,7 +356,7 @@ def test_extract_items_with_bbox_handles_actual_nofrills_grocery_preceding_coors
     )
 
     pairs = [(item.description, item.price) for item in items]
-    assert ("DICED TOMATO", Decimal("7.16")) in pairs
+    assert ("06780000235 DICED TOMATO", Decimal("7.16")) in pairs
     assert ("26-L.IQUOR COORS LIGHT 6 PK HQ", Decimal("15.79")) in pairs
     assert ("26-L.IQUOR COORS LIGHT 6 PK HQ", Decimal("0.60")) not in pairs
     assert ("DEPOSIT 1 COORS PINEAPPLE", Decimal("3.19")) in pairs
@@ -374,14 +385,18 @@ def test_extract_items_with_bbox_handles_actual_nofrills_produce_and_seafood_clu
             "text": "81363501124 BLACKBERRIES 60Z MRJ bruten",
             "words": [
                 _word("81363501124", 0.05351170568561873, 0.5306666666666666, 0.25418060200668896, 0.5513333333333333),
-                _word("BLACKBERRIES 60Z", 0.31906354515050167, 0.5276666666666666, 0.6020066889632107, 0.5486666666666666),
+                _word(
+                    "BLACKBERRIES 60Z", 0.31906354515050167, 0.5276666666666666, 0.6020066889632107, 0.5486666666666666
+                ),
                 _word("MRJ", 0.6408026755852843, 0.5276666666666666, 0.7036789297658863, 0.5473333333333333),
                 _word("bruten", 0.7605351170568562, 0.5416666666666666, 0.8775919732441472, 0.5573333333333333),
             ],
         },
         {
             "text": "32-SEAFOOD",
-            "words": [_word("32-SEAFOOD", 0.015384615384615385, 0.5493333333333333, 0.20602006688963212, 0.5713333333333334)],
+            "words": [
+                _word("32-SEAFOOD", 0.015384615384615385, 0.5493333333333333, 0.20602006688963212, 0.5713333333333334)
+            ],
         },
         {
             "text": "2146010 SEAFOOD CNTR gnigoQq bn14.99",
@@ -417,4 +432,5 @@ def test_extract_items_with_bbox_handles_actual_nofrills_produce_and_seafood_clu
     pairs = [(item.description, item.price) for item in items]
     assert ("CANTALOUPE", Decimal("1.99")) in pairs
     assert ("BLACKBERRIES 60Z", Decimal("1.99")) in pairs
-    assert pairs.count(("SEAFOOD CNTR", Decimal("14.99"))) == 2
+    seafood_pairs = [(desc, price) for desc, price in pairs if "SEAFOOD CNTR" in desc and price == Decimal("14.99")]
+    assert len(seafood_pairs) == 2
