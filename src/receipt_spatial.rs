@@ -776,7 +776,13 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
         .iter()
         .filter(|line| {
             let upper = line.full_text.to_ascii_uppercase();
-            upper.contains("TOTAL") && !upper.contains("SUBTOTAL")
+            upper.contains("TOTAL")
+                && !upper.contains("SUBTOTAL")
+                && !upper.contains("TOTAL NUMBER")
+                && !upper.contains("TOTAL DISCOUNT")
+                && !upper.contains("TOTAL ITEMS")
+                && !upper.contains("TOTAL SAVINGS")
+                && !upper.contains("TOTAL SAVED")
         })
         .map(|line| line.line_y)
         .min_by(|a, b| a.partial_cmp(b).unwrap());
