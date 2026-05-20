@@ -6,7 +6,6 @@ import os
 
 import pytest
 from _pytest.config.argparsing import Parser
-
 from beanbeaver.receipt._rust import require_rust_matcher
 
 

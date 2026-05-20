@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from _pytest.monkeypatch import MonkeyPatch
-from beanbeaver.runtime.rule_engine import RuleEngine
 from beanbeaver.runtime import rule_engine as rule_engine_module
+from beanbeaver.runtime.rule_engine import RuleEngine
 
 
 class _Txn:
