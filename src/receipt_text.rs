@@ -85,8 +85,11 @@ fn re_parenthetical_only() -> &'static Regex {
 // C (combined / container deposit eligible), F (food / non-taxable),
 // J (sometimes used for joint promos). Receipts routinely combine them, e.g.
 // "$1.79 HC" or "$8.99 HCF". The price-detection regexes below allow 0-3 of
-// these letters in any case.
-const TAX_FLAG_CLASS: &str = r"[CcFfGgHhJjPpTt]{0,3}";
+// these letters in any case. Some merchants (e.g. Sunny Foodmart) suffix a
+// category digit — "$3.88 Tx1" — so an optional 'x' and up to two trailing
+// digits are tolerated, but only after at least one tax letter (so a bare
+// trailing number like "9.99 5" is not silently swallowed as a flag).
+const TAX_FLAG_CLASS: &str = r"(?:[CcFfGgHhJjPpTtXx]{1,3}\d{0,2})?";
 
 // When the parser sees a bare standalone-price line (e.g. `$8.95` on its own)
 // it walks back up to 5 lines looking for the description that goes with it.
@@ -903,6 +906,31 @@ pub(crate) fn extract_text_items(
             && !upper.contains("TOTAL SAVED")
     });
 
+    // Authoritative receipt total, when a grand-total line carries a price.
+    // Used as a sanity ceiling on individual item prices: a single positive
+    // line item can never exceed (total + sum of discounts), so a price above
+    // that ceiling is an OCR artifact (e.g. "$1.58" misread as "81.58") and is
+    // dropped rather than mis-paired — "prefer missing items over wrong
+    // pairings". Taken as the max over genuine grand-total lines (not the
+    // first match) so sub-lines like "TOTAL TAX" never stand in for the total.
+    let total_cap_cents = normalized_lines
+        .iter()
+        .filter(|line| {
+            let upper = line.to_ascii_uppercase();
+            re_total_word().is_match(line)
+                && !upper.contains("SUBTOTAL")
+                && !upper.contains("TOTAL TAX")
+                && !upper.contains("TOTAL NUMBER")
+                && !upper.contains("TOTAL DISCOUNT")
+                && !upper.contains("TOTAL ITEMS")
+                && !upper.contains("TOTAL SAVINGS")
+                && !upper.contains("TOTAL SAVED")
+                && !upper.contains("TOTAL POINTS")
+        })
+        .filter_map(|line| extract_trailing_price_cents(line).map(|(c, _, _)| c))
+        .filter(|c| *c > 0)
+        .max();
+
     for (i, line) in normalized_lines.iter().enumerate() {
         if total_line_idx.is_some_and(|total_idx| i > total_idx) {
             break;
@@ -1375,6 +1403,32 @@ pub(crate) fn extract_text_items(
         }
     }
 
+    if let Some(cap_base) = total_cap_cents {
+        let discount_sum: i64 = items
+            .iter()
+            .filter(|it| it.price_cents < 0)
+            .map(|it| -it.price_cents)
+            .sum();
+        let cap = cap_base + discount_sum;
+        let mut kept = Vec::with_capacity(items.len());
+        for it in items.into_iter() {
+            if it.price_cents > cap {
+                maybe_push_warning(
+                    &mut warnings,
+                    kept.len(),
+                    format!(
+                        "dropped implausible item price \"{}\" exceeding receipt total (context: \"{}\")",
+                        format_cents(it.price_cents),
+                        it.description,
+                    ),
+                );
+            } else {
+                kept.push(it);
+            }
+        }
+        items = kept;
+    }
+
     (items, warnings)
 }
 
@@ -1535,5 +1589,44 @@ mod tests {
         assert!(prices.contains(&1399), "positive item missing: {prices:?}");
         assert!(prices.contains(&-196), "D9 discount must be negative: {prices:?}");
         assert!(prices.contains(&-528), "D7 discount must be negative: {prices:?}");
+    }
+
+    #[test]
+    fn parses_tx_category_tax_suffix_prices() {
+        // Sunny Foodmart suffixes a category digit after the tax flag
+        // ("$3.88 Tx1"); these must still extract as normal prices.
+        let lines = vec![
+            "SUNNY FOODMART".to_string(),
+            "Coconut Water $3.88 Tx1".to_string(),
+            "Sweet Potato Noodle $5.98".to_string(),
+            "SUB TOTAL $9.86".to_string(),
+            "TOTAL $9.86".to_string(),
+        ];
+        let summary_amounts = HashSet::from([986]);
+
+        let (items, _warnings) = extract_text_items(&lines, &summary_amounts);
+        let prices: Vec<i64> = items.iter().map(|it| it.price_cents).collect();
+        assert!(prices.contains(&388), "Tx1-suffixed price not recovered: {prices:?}");
+        assert!(prices.contains(&598), "plain price missing: {prices:?}");
+    }
+
+    #[test]
+    fn drops_item_price_exceeding_receipt_total() {
+        // Sunny Foodmart: "$1.58" misread as "81.58". With the Tx1 suffix now
+        // parsed it would otherwise surface as an 81.58 item, far above the
+        // $25.44 total — the ceiling guard drops it (prefer missing over wrong).
+        let lines = vec![
+            "SUNNY FOODMART".to_string(),
+            "Alienercy Vitamin B Drink 81.58 Tx1".to_string(),
+            "Coconut Water $3.88 Tx1".to_string(),
+            "SUB TOTAL $24.32".to_string(),
+            "TOTAL $25.44".to_string(),
+        ];
+        let summary_amounts = HashSet::from([2432, 2544]);
+
+        let (items, _warnings) = extract_text_items(&lines, &summary_amounts);
+        let prices: Vec<i64> = items.iter().map(|it| it.price_cents).collect();
+        assert!(!prices.contains(&8158), "81.58 outlier should be dropped: {prices:?}");
+        assert!(prices.contains(&388), "valid Tx1 item should remain: {prices:?}");
     }
 }
