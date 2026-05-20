@@ -24,6 +24,9 @@ jobs:
       - name: Execute demo script
         run: ./demo/run_demo.sh
 
+      - name: Build Rust extension
+        run: pixi run --manifest-path pixi.toml maturin-develop-native
+
       - name: Scan cached receipt and emit parsed JSON
         run: pixi run --manifest-path pixi.toml bash ./demo/scan_receipt_to_json.sh
 
