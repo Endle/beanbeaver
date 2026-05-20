@@ -556,8 +556,23 @@ fn looks_like_quantity_expression(text: &str) -> bool {
 fn extract_trailing_price_cents(line: &str) -> Option<(i64, bool, usize)> {
     let captures = re_trailing_price().captures(line)?;
     let cents = parse_cents(captures.get(1)?.as_str())?;
-    let is_discount = captures.get(2).map(|m| m.as_str() == "-").unwrap_or(false);
+    let trailing_minus = captures.get(2).map(|m| m.as_str() == "-").unwrap_or(false);
     let start = captures.get(1)?.start();
+    // Leading-minus discount convention (e.g. Asian-grocery lines like
+    // "D9 -$1.96"): a '-' glued to the price — directly or through a '$' —
+    // marks a discount, complementing Costco's trailing-minus form. Require
+    // the '-' to sit at a token boundary or against a '$' so mid-token
+    // hyphens ("ITEM-1.96") and " - 1.96" separators are not mis-signed.
+    let leading_minus = {
+        let prefix = &line[..start];
+        let had_dollar = prefix.ends_with('$');
+        let stripped = prefix.strip_suffix('$').unwrap_or(prefix);
+        match stripped.strip_suffix('-') {
+            Some(rest) => had_dollar || rest.is_empty() || rest.ends_with(char::is_whitespace),
+            None => false,
+        }
+    };
+    let is_discount = trailing_minus || leading_minus;
     Some((if is_discount { -cents } else { cents }, is_discount, start))
 }
 
@@ -1483,5 +1498,42 @@ mod tests {
         assert_eq!(normalize_decimal_spacing("Markham, ON"), "Markham, ON");
         // Negative: three fraction digits are not a clean 2-decimal price.
         assert_eq!(normalize_decimal_spacing("0,999"), "0,999");
+    }
+
+    #[test]
+    fn extract_trailing_price_cents_signs_discounts() {
+        use super::extract_trailing_price_cents;
+        // Leading-minus discount convention (e.g. Jin Lian "D9 -$1.96").
+        assert_eq!(extract_trailing_price_cents("250g D9 -$1.96").map(|t| t.0), Some(-196));
+        assert_eq!(extract_trailing_price_cents("JL5 -$5.00").map(|t| t.0), Some(-500));
+        // Costco trailing-minus stays negative (and isn't double-handled).
+        assert_eq!(extract_trailing_price_cents("TPD/1796144 3.00-").map(|t| t.0), Some(-300));
+        // Plain prices stay positive.
+        assert_eq!(extract_trailing_price_cents("Meat 20.53").map(|t| t.0), Some(2053));
+        // Guards: a mid-token hyphen and a spaced " - " separator must NOT
+        // flip the sign — only a '-' glued to the price (directly or via '$').
+        assert_eq!(extract_trailing_price_cents("ITEM-1.96").map(|t| t.0), Some(196));
+        assert_eq!(extract_trailing_price_cents("MILK 2% - 3.99").map(|t| t.0), Some(399));
+    }
+
+    #[test]
+    fn parses_leading_minus_discount_lines_as_negative_items() {
+        // Mirrors the Jin Lian Food receipt: discount lines print the minus
+        // ahead of the price ("-$1.96") rather than Costco's trailing form.
+        let lines = vec![
+            "JIN LIAN FOOD".to_string(),
+            "2LB $F Pacific white $13.99".to_string(),
+            "250g D9 -$1.96".to_string(),
+            "D7 -$5.28".to_string(),
+            "SUBTOTAL $55.49".to_string(),
+            "TOTAL $50.49".to_string(),
+        ];
+        let summary_amounts = HashSet::from([5549, 5049]);
+
+        let (items, _warnings) = extract_text_items(&lines, &summary_amounts);
+        let prices: Vec<i64> = items.iter().map(|it| it.price_cents).collect();
+        assert!(prices.contains(&1399), "positive item missing: {prices:?}");
+        assert!(prices.contains(&-196), "D9 discount must be negative: {prices:?}");
+        assert!(prices.contains(&-528), "D7 discount must be negative: {prices:?}");
     }
 }
