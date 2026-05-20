@@ -85,8 +85,11 @@ fn re_parenthetical_only() -> &'static Regex {
 // C (combined / container deposit eligible), F (food / non-taxable),
 // J (sometimes used for joint promos). Receipts routinely combine them, e.g.
 // "$1.79 HC" or "$8.99 HCF". The price-detection regexes below allow 0-3 of
-// these letters in any case.
-const TAX_FLAG_CLASS: &str = r"[CcFfGgHhJjPpTt]{0,3}";
+// these letters in any case. Some merchants (e.g. Sunny Foodmart) suffix a
+// category digit — "$3.88 Tx1" — so an optional 'x' and up to two trailing
+// digits are tolerated, but only after at least one tax letter (so a bare
+// trailing number like "9.99 5" is not silently swallowed as a flag).
+const TAX_FLAG_CLASS: &str = r"(?:[CcFfGgHhJjPpTtXx]{1,3}\d{0,2})?";
 
 // When the parser sees a bare standalone-price line (e.g. `$8.95` on its own)
 // it walks back up to 5 lines looking for the description that goes with it.
@@ -220,6 +223,20 @@ fn re_trailing_noisy_price() -> &'static Regex {
     })
 }
 
+// A two-digit fraction where one digit was OCR'd as a letter (I/l for 1).
+// Routes these through malformed-price reconciliation (which maps the letter
+// back to a digit via levenshtein) instead of the warning-only path, e.g.
+// "0.9I" -> 0.91 when the subtotal corroborates it.
+fn re_trailing_letter_fraction_price() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(&format!(
+            r"(\d+)\.([0-9][Il]|[Il][0-9]|[Il]{{2}})\s*{TAX_FLAG_CLASS}\s*$"
+        ))
+        .unwrap()
+    })
+}
+
 fn re_count_at_price() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"^(\d+)\s*@\s*\$?(-?\d+\.\d{2})").unwrap())
@@ -302,6 +319,24 @@ fn normalize_decimal_spacing(text: &str) -> String {
                 i = j + 2;
                 continue;
             }
+        }
+        // OCR sometimes reads a price's decimal point as a comma ("0,99").
+        // Only treat a comma as a decimal point when it sits directly between
+        // a digit and exactly two fraction digits, so thousands separators
+        // ("1,000") and prose ("Markham, ON") are left untouched.
+        if bytes[i] == b','
+            && i > 0
+            && bytes[i - 1].is_ascii_digit()
+            && i + 2 < bytes.len()
+            && bytes[i + 1].is_ascii_digit()
+            && bytes[i + 2].is_ascii_digit()
+            && (i + 3 == bytes.len() || !bytes[i + 3].is_ascii_digit())
+        {
+            out.push('.');
+            out.push(bytes[i + 1] as char);
+            out.push(bytes[i + 2] as char);
+            i += 3;
+            continue;
         }
         out.push(bytes[i] as char);
         i += 1;
@@ -538,8 +573,23 @@ fn looks_like_quantity_expression(text: &str) -> bool {
 fn extract_trailing_price_cents(line: &str) -> Option<(i64, bool, usize)> {
     let captures = re_trailing_price().captures(line)?;
     let cents = parse_cents(captures.get(1)?.as_str())?;
-    let is_discount = captures.get(2).map(|m| m.as_str() == "-").unwrap_or(false);
+    let trailing_minus = captures.get(2).map(|m| m.as_str() == "-").unwrap_or(false);
     let start = captures.get(1)?.start();
+    // Leading-minus discount convention (e.g. Asian-grocery lines like
+    // "D9 -$1.96"): a '-' glued to the price — directly or through a '$' —
+    // marks a discount, complementing Costco's trailing-minus form. Require
+    // the '-' to sit at a token boundary or against a '$' so mid-token
+    // hyphens ("ITEM-1.96") and " - 1.96" separators are not mis-signed.
+    let leading_minus = {
+        let prefix = &line[..start];
+        let had_dollar = prefix.ends_with('$');
+        let stripped = prefix.strip_suffix('$').unwrap_or(prefix);
+        match stripped.strip_suffix('-') {
+            Some(rest) => had_dollar || rest.is_empty() || rest.ends_with(char::is_whitespace),
+            None => false,
+        }
+    };
+    let is_discount = trailing_minus || leading_minus;
     Some((if is_discount { -cents } else { cents }, is_discount, start))
 }
 
@@ -628,7 +678,9 @@ fn truncated_context(line: &str) -> String {
 }
 
 fn extract_trailing_noisy_price(line: &str) -> Option<(String, String, i64, usize)> {
-    let captures = re_trailing_noisy_price().captures(line)?;
+    let captures = re_trailing_noisy_price()
+        .captures(line)
+        .or_else(|| re_trailing_letter_fraction_price().captures(line))?;
     let whole = captures.get(1)?.as_str().to_string();
     let fraction = captures.get(2)?.as_str().to_string();
     let whole_dollars = whole.parse::<i64>().ok()?;
@@ -860,8 +912,40 @@ pub(crate) fn extract_text_items(
         .collect();
 
     let total_line_idx = normalized_lines.iter().position(|line| {
-        re_total_word().is_match(line) && !line.to_ascii_uppercase().contains("SUBTOTAL")
+        let upper = line.to_ascii_uppercase();
+        re_total_word().is_match(line)
+            && !upper.contains("SUBTOTAL")
+            && !upper.contains("TOTAL NUMBER")
+            && !upper.contains("TOTAL DISCOUNT")
+            && !upper.contains("TOTAL ITEMS")
+            && !upper.contains("TOTAL SAVINGS")
+            && !upper.contains("TOTAL SAVED")
     });
+
+    // Authoritative receipt total, when a grand-total line carries a price.
+    // Used as a sanity ceiling on individual item prices: a single positive
+    // line item can never exceed (total + sum of discounts), so a price above
+    // that ceiling is an OCR artifact (e.g. "$1.58" misread as "81.58") and is
+    // dropped rather than mis-paired — "prefer missing items over wrong
+    // pairings". Taken as the max over genuine grand-total lines (not the
+    // first match) so sub-lines like "TOTAL TAX" never stand in for the total.
+    let total_cap_cents = normalized_lines
+        .iter()
+        .filter(|line| {
+            let upper = line.to_ascii_uppercase();
+            re_total_word().is_match(line)
+                && !upper.contains("SUBTOTAL")
+                && !upper.contains("TOTAL TAX")
+                && !upper.contains("TOTAL NUMBER")
+                && !upper.contains("TOTAL DISCOUNT")
+                && !upper.contains("TOTAL ITEMS")
+                && !upper.contains("TOTAL SAVINGS")
+                && !upper.contains("TOTAL SAVED")
+                && !upper.contains("TOTAL POINTS")
+        })
+        .filter_map(|line| extract_trailing_price_cents(line).map(|(c, _, _)| c))
+        .filter(|c| *c > 0)
+        .max();
 
     for (i, line) in normalized_lines.iter().enumerate() {
         if total_line_idx.is_some_and(|total_idx| i > total_idx) {
@@ -1335,6 +1419,32 @@ pub(crate) fn extract_text_items(
         }
     }
 
+    if let Some(cap_base) = total_cap_cents {
+        let discount_sum: i64 = items
+            .iter()
+            .filter(|it| it.price_cents < 0)
+            .map(|it| -it.price_cents)
+            .sum();
+        let cap = cap_base + discount_sum;
+        let mut kept = Vec::with_capacity(items.len());
+        for it in items.into_iter() {
+            if it.price_cents > cap {
+                maybe_push_warning(
+                    &mut warnings,
+                    kept.len(),
+                    format!(
+                        "dropped implausible item price \"{}\" exceeding receipt total (context: \"{}\")",
+                        format_cents(it.price_cents),
+                        it.description,
+                    ),
+                );
+            } else {
+                kept.push(it);
+            }
+        }
+        items = kept;
+    }
+
     (items, warnings)
 }
 
@@ -1427,5 +1537,132 @@ mod tests {
         assert!(warnings[0]
             .message
             .contains("maybe missed item with malformed OCR price \"2.991\""));
+    }
+
+    #[test]
+    fn recovers_item_with_comma_decimal_price() {
+        // OCR read this Bestco Fresh line's decimal point as a comma ("0,99").
+        let lines = vec![
+            "BESTCO FRESH".to_string(),
+            "*Kang Shi Fu Plum Juice 50 0,99".to_string(),
+            "TOTAL 0.99".to_string(),
+        ];
+        let summary_amounts = HashSet::from([99]);
+
+        let (items, _warnings) = extract_text_items(&lines, &summary_amounts);
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].price_cents, 99);
+        assert!(items[0].description.contains("Plum Juice"));
+    }
+
+    #[test]
+    fn comma_decimal_normalization_leaves_non_price_commas_untouched() {
+        use super::normalize_decimal_spacing;
+        // Positive: a comma between a digit and exactly two fraction digits.
+        assert_eq!(normalize_decimal_spacing("0,99"), "0.99");
+        assert_eq!(normalize_decimal_spacing("item 12,49 H"), "item 12.49 H");
+        // Negative: thousands separators and prose stay as-is.
+        assert_eq!(normalize_decimal_spacing("1,000"), "1,000");
+        assert_eq!(normalize_decimal_spacing("12,345"), "12,345");
+        assert_eq!(normalize_decimal_spacing("Markham, ON"), "Markham, ON");
+        // Negative: three fraction digits are not a clean 2-decimal price.
+        assert_eq!(normalize_decimal_spacing("0,999"), "0,999");
+    }
+
+    #[test]
+    fn extract_trailing_price_cents_signs_discounts() {
+        use super::extract_trailing_price_cents;
+        // Leading-minus discount convention (e.g. Jin Lian "D9 -$1.96").
+        assert_eq!(extract_trailing_price_cents("250g D9 -$1.96").map(|t| t.0), Some(-196));
+        assert_eq!(extract_trailing_price_cents("JL5 -$5.00").map(|t| t.0), Some(-500));
+        // Costco trailing-minus stays negative (and isn't double-handled).
+        assert_eq!(extract_trailing_price_cents("TPD/1796144 3.00-").map(|t| t.0), Some(-300));
+        // Plain prices stay positive.
+        assert_eq!(extract_trailing_price_cents("Meat 20.53").map(|t| t.0), Some(2053));
+        // Guards: a mid-token hyphen and a spaced " - " separator must NOT
+        // flip the sign — only a '-' glued to the price (directly or via '$').
+        assert_eq!(extract_trailing_price_cents("ITEM-1.96").map(|t| t.0), Some(196));
+        assert_eq!(extract_trailing_price_cents("MILK 2% - 3.99").map(|t| t.0), Some(399));
+    }
+
+    #[test]
+    fn parses_leading_minus_discount_lines_as_negative_items() {
+        // Mirrors the Jin Lian Food receipt: discount lines print the minus
+        // ahead of the price ("-$1.96") rather than Costco's trailing form.
+        let lines = vec![
+            "JIN LIAN FOOD".to_string(),
+            "2LB $F Pacific white $13.99".to_string(),
+            "250g D9 -$1.96".to_string(),
+            "D7 -$5.28".to_string(),
+            "SUBTOTAL $55.49".to_string(),
+            "TOTAL $50.49".to_string(),
+        ];
+        let summary_amounts = HashSet::from([5549, 5049]);
+
+        let (items, _warnings) = extract_text_items(&lines, &summary_amounts);
+        let prices: Vec<i64> = items.iter().map(|it| it.price_cents).collect();
+        assert!(prices.contains(&1399), "positive item missing: {prices:?}");
+        assert!(prices.contains(&-196), "D9 discount must be negative: {prices:?}");
+        assert!(prices.contains(&-528), "D7 discount must be negative: {prices:?}");
+    }
+
+    #[test]
+    fn parses_tx_category_tax_suffix_prices() {
+        // Sunny Foodmart suffixes a category digit after the tax flag
+        // ("$3.88 Tx1"); these must still extract as normal prices.
+        let lines = vec![
+            "SUNNY FOODMART".to_string(),
+            "Coconut Water $3.88 Tx1".to_string(),
+            "Sweet Potato Noodle $5.98".to_string(),
+            "SUB TOTAL $9.86".to_string(),
+            "TOTAL $9.86".to_string(),
+        ];
+        let summary_amounts = HashSet::from([986]);
+
+        let (items, _warnings) = extract_text_items(&lines, &summary_amounts);
+        let prices: Vec<i64> = items.iter().map(|it| it.price_cents).collect();
+        assert!(prices.contains(&388), "Tx1-suffixed price not recovered: {prices:?}");
+        assert!(prices.contains(&598), "plain price missing: {prices:?}");
+    }
+
+    #[test]
+    fn recovers_letter_fraction_malformed_price_via_reconciliation() {
+        // "0.91" OCR'd as "0.9I" (1 -> I); recovered through malformed-price
+        // reconciliation once the subtotal corroborates it, instead of being
+        // left as a warning-only missed item.
+        let lines = vec![
+            "FOODY MART".to_string(),
+            "HLY - Fish Cracker Seawee 2.59H".to_string(),
+            "HLY - Fish Cracker Seawee 0.9IH".to_string(),
+            "Sub Total 3.50".to_string(),
+            "Total 3.50".to_string(),
+        ];
+        let summary_amounts = HashSet::from([350]);
+
+        let (items, _warnings) = extract_text_items(&lines, &summary_amounts);
+        let prices: Vec<i64> = items.iter().map(|it| it.price_cents).collect();
+        assert!(prices.contains(&259), "regular item missing: {prices:?}");
+        assert!(prices.contains(&91), "0.9I should reconcile to 0.91: {prices:?}");
+    }
+
+    #[test]
+    fn drops_item_price_exceeding_receipt_total() {
+        // Sunny Foodmart: "$1.58" misread as "81.58". With the Tx1 suffix now
+        // parsed it would otherwise surface as an 81.58 item, far above the
+        // $25.44 total — the ceiling guard drops it (prefer missing over wrong).
+        let lines = vec![
+            "SUNNY FOODMART".to_string(),
+            "Alienercy Vitamin B Drink 81.58 Tx1".to_string(),
+            "Coconut Water $3.88 Tx1".to_string(),
+            "SUB TOTAL $24.32".to_string(),
+            "TOTAL $25.44".to_string(),
+        ];
+        let summary_amounts = HashSet::from([2432, 2544]);
+
+        let (items, _warnings) = extract_text_items(&lines, &summary_amounts);
+        let prices: Vec<i64> = items.iter().map(|it| it.price_cents).collect();
+        assert!(!prices.contains(&8158), "81.58 outlier should be dropped: {prices:?}");
+        assert!(prices.contains(&388), "valid Tx1 item should remain: {prices:?}");
     }
 }

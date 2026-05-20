@@ -14,7 +14,6 @@ from beanbeaver.ledger_access.api import (
 )
 
 
-
 class LedgerWriter:
     def __init__(self, default_ledger_path: Path | None = None) -> None:
         self.default_ledger_path = default_ledger_path or DEFAULT_MAIN_BEANCOUNT_PATH

@@ -319,6 +319,24 @@ fn normalize_decimal_spacing(text: &str) -> String {
                 continue;
             }
         }
+        // OCR sometimes reads a price's decimal point as a comma ("0,99").
+        // Only treat a comma as a decimal point when it sits directly between
+        // a digit and exactly two fraction digits, so thousands separators
+        // ("1,000") and prose ("Markham, ON") are left untouched.
+        if bytes[i] == b','
+            && i > 0
+            && bytes[i - 1].is_ascii_digit()
+            && i + 2 < bytes.len()
+            && bytes[i + 1].is_ascii_digit()
+            && bytes[i + 2].is_ascii_digit()
+            && (i + 3 == bytes.len() || !bytes[i + 3].is_ascii_digit())
+        {
+            out.push('.');
+            out.push(bytes[i + 1] as char);
+            out.push(bytes[i + 2] as char);
+            i += 3;
+            continue;
+        }
         out.push(bytes[i] as char);
         i += 1;
     }
@@ -776,7 +794,13 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
         .iter()
         .filter(|line| {
             let upper = line.full_text.to_ascii_uppercase();
-            upper.contains("TOTAL") && !upper.contains("SUBTOTAL")
+            upper.contains("TOTAL")
+                && !upper.contains("SUBTOTAL")
+                && !upper.contains("TOTAL NUMBER")
+                && !upper.contains("TOTAL DISCOUNT")
+                && !upper.contains("TOTAL ITEMS")
+                && !upper.contains("TOTAL SAVINGS")
+                && !upper.contains("TOTAL SAVED")
         })
         .map(|line| line.line_y)
         .min_by(|a, b| a.partial_cmp(b).unwrap());
