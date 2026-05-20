@@ -223,6 +223,20 @@ fn re_trailing_noisy_price() -> &'static Regex {
     })
 }
 
+// A two-digit fraction where one digit was OCR'd as a letter (I/l for 1).
+// Routes these through malformed-price reconciliation (which maps the letter
+// back to a digit via levenshtein) instead of the warning-only path, e.g.
+// "0.9I" -> 0.91 when the subtotal corroborates it.
+fn re_trailing_letter_fraction_price() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(&format!(
+            r"(\d+)\.([0-9][Il]|[Il][0-9]|[Il]{{2}})\s*{TAX_FLAG_CLASS}\s*$"
+        ))
+        .unwrap()
+    })
+}
+
 fn re_count_at_price() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"^(\d+)\s*@\s*\$?(-?\d+\.\d{2})").unwrap())
@@ -664,7 +678,9 @@ fn truncated_context(line: &str) -> String {
 }
 
 fn extract_trailing_noisy_price(line: &str) -> Option<(String, String, i64, usize)> {
-    let captures = re_trailing_noisy_price().captures(line)?;
+    let captures = re_trailing_noisy_price()
+        .captures(line)
+        .or_else(|| re_trailing_letter_fraction_price().captures(line))?;
     let whole = captures.get(1)?.as_str().to_string();
     let fraction = captures.get(2)?.as_str().to_string();
     let whole_dollars = whole.parse::<i64>().ok()?;
@@ -1608,6 +1624,26 @@ mod tests {
         let prices: Vec<i64> = items.iter().map(|it| it.price_cents).collect();
         assert!(prices.contains(&388), "Tx1-suffixed price not recovered: {prices:?}");
         assert!(prices.contains(&598), "plain price missing: {prices:?}");
+    }
+
+    #[test]
+    fn recovers_letter_fraction_malformed_price_via_reconciliation() {
+        // "0.91" OCR'd as "0.9I" (1 -> I); recovered through malformed-price
+        // reconciliation once the subtotal corroborates it, instead of being
+        // left as a warning-only missed item.
+        let lines = vec![
+            "FOODY MART".to_string(),
+            "HLY - Fish Cracker Seawee 2.59H".to_string(),
+            "HLY - Fish Cracker Seawee 0.9IH".to_string(),
+            "Sub Total 3.50".to_string(),
+            "Total 3.50".to_string(),
+        ];
+        let summary_amounts = HashSet::from([350]);
+
+        let (items, _warnings) = extract_text_items(&lines, &summary_amounts);
+        let prices: Vec<i64> = items.iter().map(|it| it.price_cents).collect();
+        assert!(prices.contains(&259), "regular item missing: {prices:?}");
+        assert!(prices.contains(&91), "0.9I should reconcile to 0.91: {prices:?}");
     }
 
     #[test]
