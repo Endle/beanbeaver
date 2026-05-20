@@ -319,6 +319,24 @@ fn normalize_decimal_spacing(text: &str) -> String {
                 continue;
             }
         }
+        // OCR sometimes reads a price's decimal point as a comma ("0,99").
+        // Only treat a comma as a decimal point when it sits directly between
+        // a digit and exactly two fraction digits, so thousands separators
+        // ("1,000") and prose ("Markham, ON") are left untouched.
+        if bytes[i] == b','
+            && i > 0
+            && bytes[i - 1].is_ascii_digit()
+            && i + 2 < bytes.len()
+            && bytes[i + 1].is_ascii_digit()
+            && bytes[i + 2].is_ascii_digit()
+            && (i + 3 == bytes.len() || !bytes[i + 3].is_ascii_digit())
+        {
+            out.push('.');
+            out.push(bytes[i + 1] as char);
+            out.push(bytes[i + 2] as char);
+            i += 3;
+            continue;
+        }
         out.push(bytes[i] as char);
         i += 1;
     }

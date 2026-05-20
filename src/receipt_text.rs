@@ -303,6 +303,24 @@ fn normalize_decimal_spacing(text: &str) -> String {
                 continue;
             }
         }
+        // OCR sometimes reads a price's decimal point as a comma ("0,99").
+        // Only treat a comma as a decimal point when it sits directly between
+        // a digit and exactly two fraction digits, so thousands separators
+        // ("1,000") and prose ("Markham, ON") are left untouched.
+        if bytes[i] == b','
+            && i > 0
+            && bytes[i - 1].is_ascii_digit()
+            && i + 2 < bytes.len()
+            && bytes[i + 1].is_ascii_digit()
+            && bytes[i + 2].is_ascii_digit()
+            && (i + 3 == bytes.len() || !bytes[i + 3].is_ascii_digit())
+        {
+            out.push('.');
+            out.push(bytes[i + 1] as char);
+            out.push(bytes[i + 2] as char);
+            i += 3;
+            continue;
+        }
         out.push(bytes[i] as char);
         i += 1;
     }
@@ -1434,5 +1452,36 @@ mod tests {
         assert!(warnings[0]
             .message
             .contains("maybe missed item with malformed OCR price \"2.991\""));
+    }
+
+    #[test]
+    fn recovers_item_with_comma_decimal_price() {
+        // OCR read this Bestco Fresh line's decimal point as a comma ("0,99").
+        let lines = vec![
+            "BESTCO FRESH".to_string(),
+            "*Kang Shi Fu Plum Juice 50 0,99".to_string(),
+            "TOTAL 0.99".to_string(),
+        ];
+        let summary_amounts = HashSet::from([99]);
+
+        let (items, _warnings) = extract_text_items(&lines, &summary_amounts);
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].price_cents, 99);
+        assert!(items[0].description.contains("Plum Juice"));
+    }
+
+    #[test]
+    fn comma_decimal_normalization_leaves_non_price_commas_untouched() {
+        use super::normalize_decimal_spacing;
+        // Positive: a comma between a digit and exactly two fraction digits.
+        assert_eq!(normalize_decimal_spacing("0,99"), "0.99");
+        assert_eq!(normalize_decimal_spacing("item 12,49 H"), "item 12.49 H");
+        // Negative: thousands separators and prose stay as-is.
+        assert_eq!(normalize_decimal_spacing("1,000"), "1,000");
+        assert_eq!(normalize_decimal_spacing("12,345"), "12,345");
+        assert_eq!(normalize_decimal_spacing("Markham, ON"), "Markham, ON");
+        // Negative: three fraction digits are not a clean 2-decimal price.
+        assert_eq!(normalize_decimal_spacing("0,999"), "0,999");
     }
 }
