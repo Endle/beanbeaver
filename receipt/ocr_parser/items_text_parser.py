@@ -1,4 +1,5 @@
 """Text-line based receipt item extraction."""
+
 from decimal import Decimal
 
 from beanbeaver.domain.receipt import ReceiptItem, ReceiptWarning

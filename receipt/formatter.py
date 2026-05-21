@@ -36,10 +36,7 @@ def format_parsed_receipt(
     Returns:
         Formatted beancount content with metadata header
     """
-    item_accounts = [
-        _posting_account_for_item(item.category, default="Expenses:FIXME")
-        for item in receipt.items
-    ]
+    item_accounts = [_posting_account_for_item(item.category, default="Expenses:FIXME") for item in receipt.items]
     return require_rust_matcher().receipt_format_parsed_receipt(
         receipt,
         item_accounts,
@@ -61,10 +58,7 @@ def format_draft_beancount(receipt: Receipt, credit_card_account: str = "Liabili
     Returns:
         Formatted beancount transaction as a string
     """
-    item_accounts = [
-        _posting_account_for_item(item.category, default="Expenses:FIXME")
-        for item in receipt.items
-    ]
+    item_accounts = [_posting_account_for_item(item.category, default="Expenses:FIXME") for item in receipt.items]
     return require_rust_matcher().receipt_format_draft_beancount(
         receipt,
         item_accounts,
@@ -100,10 +94,7 @@ def format_enriched_transaction(
     Returns:
         Formatted beancount transaction as a string
     """
-    item_accounts = [
-        _posting_account_for_item(item.category, default=default_expense)
-        for item in receipt.items
-    ]
+    item_accounts = [_posting_account_for_item(item.category, default=default_expense) for item in receipt.items]
     return require_rust_matcher().receipt_format_enriched_transaction(
         receipt,
         item_accounts,

@@ -124,7 +124,9 @@ def _select_account(
     if selected_account is not None:
         if selected_account not in matches:
             options = ", ".join(matches)
-            raise RuntimeError(f"Selected {account_label} account not available: {selected_account}. Options: {options}")
+            raise RuntimeError(
+                f"Selected {account_label} account not available: {selected_account}. Options: {options}"
+            )
         return selected_account
     as_of_text = as_of.isoformat() if as_of else "today"
     return select_interactive_option(

@@ -115,6 +115,52 @@ def test_sonicare_maps_to_personal_care_tooth() -> None:
     )
 
 
+def test_colgate_maps_to_personal_care_tooth() -> None:
+    # Costco receipt 2026-05-20_costco_74_22: "1474938 COLGATE PR".
+    assert (
+        categorize_item(
+            "1474938 COLGATE PR",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:PersonalCare:Tooth"
+    )
+
+
+def test_natrel_maps_to_dairy() -> None:
+    # Foody Mart 2026-04-27_foody_mart_67_71: "Natrel - 2% Partly Skimme".
+    assert (
+        categorize_item(
+            "Natrel - 2% Partly Skimme",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Dairy"
+    )
+
+
+def test_tropicana_brand_beats_fruit_flavour_keyword() -> None:
+    # "Tropicana - Blackberry" is juice, not fruit (must beat "BLACKBERRY").
+    assert (
+        categorize_item(
+            "Tropicana - Blackberry Bl",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Drink:Juice"
+    )
+
+
+def test_soft_drink_beats_fruit_keyword() -> None:
+    # FreshCo receipt 2026-05-20_freshco_55_90: "Soft Drink Orange" must not
+    # classify as fruit on the "ORANGE" keyword; "SOFT DRINK" is the longer,
+    # more specific match.
+    assert (
+        categorize_item(
+            "Soft Drink Orange",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Drink"
+    )
+
+
 @pytest.mark.parametrize(
     ("description", "expected"),
     [

@@ -22,9 +22,7 @@ class _Paths:
     legacy_default_merchant_rules: Path
 
 
-def test_public_struc_tube_rule_applies_without_project_config(
-    tmp_path: Path, monkeypatch: MonkeyPatch
-) -> None:
+def test_public_struc_tube_rule_applies_without_project_config(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     public_rules = Path(__file__).resolve().parents[1] / "rules" / "default_merchant_rules.toml"
     monkeypatch.setattr(
         rule_engine_module,
@@ -39,9 +37,7 @@ def test_public_struc_tube_rule_applies_without_project_config(
     assert engine.categorize(_Txn("STRUC-TUBE LTD/12424 LAVAL QC")) == "Expenses:Home:Furniture"
 
 
-def test_public_grocery_and_home_rules_apply_without_project_config(
-    tmp_path: Path, monkeypatch: MonkeyPatch
-) -> None:
+def test_public_grocery_and_home_rules_apply_without_project_config(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     public_rules = Path(__file__).resolve().parents[1] / "rules" / "default_merchant_rules.toml"
     monkeypatch.setattr(
         rule_engine_module,
@@ -54,10 +50,10 @@ def test_public_grocery_and_home_rules_apply_without_project_config(
     )
     engine = RuleEngine(config_path=tmp_path / "missing.toml")
 
-    assert engine.categorize(_Txn("FOODY MART MARKHAM ON")) == "Expenses:Food:Grocery"
-    assert engine.categorize(_Txn("TREDISH GROCERIES TORO TORONTO ON")) == "Expenses:Food:Grocery"
-    assert engine.categorize(_Txn("ONE S BETTER LIVING SCARBOROUGH ON")) == "Expenses:Home"
-    assert engine.categorize(_Txn("MINISO CANADA MARKHAM ON")) == "Expenses:Home"
+    assert engine.categorize(_Txn("FOODY MART")) == "Expenses:Food:Grocery"
+    assert engine.categorize(_Txn("TREDISH GROCERIES TORO")) == "Expenses:Food:Grocery"
+    assert engine.categorize(_Txn("ONE S BETTER LIVING")) == "Expenses:Home"
+    assert engine.categorize(_Txn("MINISO CANADA")) == "Expenses:Home"
 
 
 def test_project_rule_overrides_public_fallback_rule(tmp_path: Path) -> None:
@@ -72,5 +68,3 @@ category = "Expenses:ProjectSpecific:Override"
 
     engine = RuleEngine(config_path=config_path)
     assert engine.categorize(_Txn("STRUC-TUBE LTD/12424 LAVAL QC")) == "Expenses:ProjectSpecific:Override"
-
-

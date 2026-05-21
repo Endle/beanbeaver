@@ -170,7 +170,7 @@ class TestMerchantSimilarity:
     def test_family_alias_match(self) -> None:
         score = _merchant_similarity(
             "REAL CANADIAN",
-            "RCSS 1077 TORONTO ON",
+            "RCSS",
             merchant_families=merchant_families(),
         )
         assert score > 0.8
@@ -208,7 +208,7 @@ class TestTryMatch:
             total=Decimal("73.63"),
         )
         txn = make_transaction(
-            payee="RCSS 1077 TORONTO ON",
+            payee="RCSS",
             txn_date=date(2026, 2, 2),
             amount=Decimal("-73.63"),
         )
@@ -222,6 +222,7 @@ class TestTryMatch:
 
 def test_rust_backend_is_loaded() -> None:
     assert os.environ.get("BEANBEAVER_REQUIRE_RUST_MATCHER") == "1"
+
 
 def test_rust_backend_accepts_named_dict_payloads() -> None:
     assert os.environ.get("BEANBEAVER_REQUIRE_RUST_MATCHER") == "1"
@@ -244,7 +245,7 @@ def test_rust_backend_accepts_named_dict_payloads() -> None:
     transaction_payloads = [
         {
             "date_ordinal": date(2024, 1, 17).toordinal(),
-            "payee": "RCSS 1077 TORONTO ON",
+            "payee": "RCSS",
             "posting_amounts_scaled": [-1_000_000],
         }
     ]

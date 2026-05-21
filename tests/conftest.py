@@ -28,6 +28,4 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     try:
         require_rust_matcher()
     except ImportError as exc:
-        raise pytest.UsageError(
-            "beanbeaver._rust_matcher must be built before running pytest"
-        ) from exc
+        raise pytest.UsageError("beanbeaver._rust_matcher must be built before running pytest") from exc

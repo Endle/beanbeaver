@@ -84,10 +84,14 @@ def list_transactions(*, ledger_path: Path | str | None = None) -> LedgerTransac
         )
         for txn in transactions_payload
     ]
-    return LedgerTransactionList(Path(raw_path), transactions, list(errors), {str(k): v for k, v in dict(options).items()})
+    return LedgerTransactionList(
+        Path(raw_path), transactions, list(errors), {str(k): v for k, v in dict(options).items()}
+    )
 
 
-def open_accounts(patterns: list[str], *, as_of: dt.date | None = None, ledger_path: Path | str | None = None) -> list[str]:
+def open_accounts(
+    patterns: list[str], *, as_of: dt.date | None = None, ledger_path: Path | str | None = None
+) -> list[str]:
     if not patterns:
         return []
     as_of = as_of or dt.date.today()
@@ -106,7 +110,16 @@ def validate_ledger(*, ledger_path: Path | str | None = None) -> list[str]:
     return list(_native_backend.ledger_access_validate_ledger(str(path)))
 
 
-def apply_receipt_match(*, ledger_path: Path | str | None, statement_path: Path, line_number: int, include_rel_path: str, receipt_name: str, enriched_path: Path, enriched_content: str) -> str:
+def apply_receipt_match(
+    *,
+    ledger_path: Path | str | None,
+    statement_path: Path,
+    line_number: int,
+    include_rel_path: str,
+    receipt_name: str,
+    enriched_path: Path,
+    enriched_content: str,
+) -> str:
     path = _resolve_path(ledger_path)
     return str(
         _native_backend.ledger_access_apply_receipt_match(
@@ -122,11 +135,15 @@ def apply_receipt_match(*, ledger_path: Path | str | None, statement_path: Path,
 
 
 def snapshot_receipt_match_files(*, statement_path: Path, enriched_path: Path) -> ReceiptMatchFileSnapshot:
-    statement_original, enriched_existed, enriched_original = _native_backend.ledger_access_snapshot_receipt_match_files(
-        str(statement_path),
-        str(enriched_path),
+    statement_original, enriched_existed, enriched_original = (
+        _native_backend.ledger_access_snapshot_receipt_match_files(
+            str(statement_path),
+            str(enriched_path),
+        )
     )
-    return ReceiptMatchSnapshot(statement_path, statement_original, enriched_path, bool(enriched_existed), enriched_original)
+    return ReceiptMatchSnapshot(
+        statement_path, statement_original, enriched_path, bool(enriched_existed), enriched_original
+    )
 
 
 def restore_receipt_match_files(snapshot: ReceiptMatchFileSnapshot) -> None:

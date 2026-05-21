@@ -138,6 +138,7 @@ def _transaction_location(txn: object) -> tuple[str, int]:
                 line_number = 0
     return file_path, line_number
 
+
 def _config_or_default(config: MatchConfig | None) -> MatchConfig:
     return config if config is not None else MatchConfig()
 

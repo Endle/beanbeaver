@@ -9,7 +9,7 @@ id = "legacy_0000"
 # exact match, beating the snacks rule's fuzzy "CHOCOLATE" hit on the
 # is_exact tiebreaker. Order matters: do not move "MILK CHOCOLATE" below
 # "CHOCOLATE MILK".
-keywords = ["EGG", "EGGS", "MILK CHOCOLATE", "STRAWBERRY MILK", "CHOCOLATE MILK", "CHOC MILK", "CHOC MLK", "MILK", "CHEESE", "YOGURT", "YOGOURT", "BUTTER", "CREAM", "SOUR CREAM", "COTTAGE", "MARGARINE", "CHEDDAR", "MOZZARELLA", "PARMESAN", "SWEETENED SOYA"]
+keywords = ["EGG", "EGGS", "MILK CHOCOLATE", "STRAWBERRY MILK", "CHOCOLATE MILK", "CHOC MILK", "CHOC MLK", "MILK", "CHEESE", "YOGURT", "YOGOURT", "BUTTER", "CREAM", "SOUR CREAM", "COTTAGE", "MARGARINE", "CHEDDAR", "MOZZARELLA", "PARMESAN", "SWEETENED SOYA", "NATREL"]
 category = "grocery_dairy"
 tags = ["grocery", "dairy"]
 priority = 0
@@ -136,7 +136,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0017"
-keywords = ["RICE", "PASTA", "NOODLE", "NOODLES", "DRIED NOOD", "SPAGHETTI", "MACARONI", "PENNE", "FLOUR", "SUGAR", "SALT", "OIL", "OLIVE OIL", "CANOLA OIL", "VINEGAR", "OATMEAL", "OATS", "CEREAL", "QUINOA", "COUSCOUS", "BARLEY", "LENTIL", "LENTILS", "CHICKPEA", "BEAN", "BEANS", "BLACK BEAN", "KIDNEY BEAN", "PINTO BEAN", "INSTANT NOODLE", "INSTANT NOODLES", "LONGKOU", "VERMICELLI"]
+keywords = ["RICE", "PASTA", "NOODLE", "NOODLES", "DRIED NOOD", "SPAGHETTI", "MACARONI", "PENNE", "FLOUR", "SUGAR", "SALT", "OIL", "OLIVE OIL", "CANOLA OIL", "VINEGAR", "OATMEAL", "OATS", "CEREAL", "QUINOA", "COUSCOUS", "BARLEY", "LENTIL", "LENTILS", "CHICKPEA", "BEAN", "BEANS", "BLACK BEAN", "KIDNEY BEAN", "PINTO BEAN", "INSTANT NOODLE", "INSTANT NOODLES", "LONGKOU", "VERMICELLI", "RAMEN"]
 category = "grocery_staple"
 tags = ["grocery", "staple"]
 priority = 0
@@ -191,6 +191,16 @@ priority = 0
 exact_only = false
 
 [[rules]]
+# Juice brands that also contain a fruit-flavour word (e.g. "Tropicana -
+# Blackberry"); priority 1 so the brand wins over the longer fruit keyword.
+id = "juice_brands"
+keywords = ["TROPICANA"]
+category = "grocery_drink_juice"
+tags = ["grocery", "drink", "juice"]
+priority = 1
+exact_only = false
+
+[[rules]]
 id = "legacy_0026"
 keywords = ["COFFEE BEAN", "GROUND COFFEE", "INSTANT COFFEE", "COFFEE PODS", "K-CUP", "NESPRESSO", "TEA", "TEA BAG", "GREEN TEA", "BLACK TEA", "HERBAL TEA", "CHAMOMILE", "EARL GREY"]
 category = "grocery_drink_coffee"
@@ -200,7 +210,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0027"
-keywords = ["WATER", "SPARKLING WATER", "MINERAL WATER", "SPRING WATER", "COCONUT WATER", "SPORTS DRINK", "GATORADE", "POWERADE", "ENERGY DRINK", "RED BULL", "MONSTER", "CRUSH", "FANTA STRAUBERRY", "FANTA STRAWBERRY", "FANTA", "PEACE TEA", "DRINK", "BEVERAGE"]
+keywords = ["WATER", "SPARKLING WATER", "MINERAL WATER", "SPRING WATER", "COCONUT WATER", "SPORTS DRINK", "SOFT DRINK", "GATORADE", "POWERADE", "ENERGY DRINK", "RED BULL", "MONSTER", "CRUSH", "FANTA STRAUBERRY", "FANTA STRAWBERRY", "FANTA", "PEACE TEA", "DRINK", "BEVERAGE"]
 category = "grocery_drink"
 tags = ["grocery", "drink"]
 priority = 0
@@ -232,7 +242,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0031"
-keywords = ["TOOTHPASTE", "TOOTHBRUSH", "MOUTHWASH", "DENTAL FLOSS", "FLOSS", "SONICARE"]
+keywords = ["TOOTHPASTE", "TOOTHBRUSH", "MOUTHWASH", "DENTAL FLOSS", "FLOSS", "SONICARE", "COLGATE"]
 category = "personal_care_tooth"
 tags = ["personal", "care", "tooth"]
 priority = 0
@@ -296,7 +306,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0041"
-keywords = ["KS IBU", "KIRKLAND IBU", "IBUPROFEN", "IBU 400M"]
+keywords = ["KS IBU", "KIRKLAND IBU", "IBUPROFEN", "IBU 400M", "LUTEIN", "IRONKIDS", "MULTIVITAMIN", "VITAMIN"]
 category = "health_pharmacy"
 tags = ["health", "pharmacy"]
 priority = 0

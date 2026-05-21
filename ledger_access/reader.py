@@ -30,7 +30,9 @@ class LedgerReader:
     def _resolve_path(self, ledger_path: Path | str | None) -> Path:
         return self.default_ledger_path if ledger_path is None else Path(ledger_path)
 
-    def list_transactions_payload(self, ledger_path: Path | str | None = None) -> tuple[Path, list[dict[str, object]], list[str], dict[str, object]]:
+    def list_transactions_payload(
+        self, ledger_path: Path | str | None = None
+    ) -> tuple[Path, list[dict[str, object]], list[str], dict[str, object]]:
         result = list_transactions(ledger_path=self._resolve_path(ledger_path))
         payload = [
             {
@@ -52,10 +54,18 @@ class LedgerReader:
         ]
         return result.path, payload, result.errors, result.options
 
-    def open_accounts(self, patterns: list[str], *, as_of: dt.date | None = None, ledger_path: Path | str | None = None) -> list[str]:
+    def open_accounts(
+        self, patterns: list[str], *, as_of: dt.date | None = None, ledger_path: Path | str | None = None
+    ) -> list[str]:
         return open_accounts(patterns, as_of=as_of, ledger_path=self._resolve_path(ledger_path))
 
-    def open_credit_card_accounts(self, *, as_of: dt.date | None = None, ledger_path: Path | str | None = None, prefix: str = "Liabilities:CreditCard") -> list[str]:
+    def open_credit_card_accounts(
+        self,
+        *,
+        as_of: dt.date | None = None,
+        ledger_path: Path | str | None = None,
+        prefix: str = "Liabilities:CreditCard",
+    ) -> list[str]:
         normalized_prefix = prefix[:-1] if prefix.endswith(":") else prefix
         return self.open_accounts([f"{normalized_prefix}:*"], as_of=as_of, ledger_path=ledger_path)
 

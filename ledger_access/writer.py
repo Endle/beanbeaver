@@ -30,7 +30,9 @@ class LedgerWriter:
     def restore_receipt_match_files(self, snapshot: ReceiptMatchSnapshot) -> None:
         restore_receipt_match_files(snapshot)
 
-    def _replace_transaction_with_include(self, statement_path: Path, line_number: int, include_rel_path: str, receipt_name: str) -> str:
+    def _replace_transaction_with_include(
+        self, statement_path: Path, line_number: int, include_rel_path: str, receipt_name: str
+    ) -> str:
         from beanbeaver.ledger_access._native import _native_backend
 
         return str(
@@ -42,7 +44,17 @@ class LedgerWriter:
             )
         )
 
-    def apply_receipt_match(self, *, ledger_path: Path | str | None, statement_path: Path, line_number: int, include_rel_path: str, receipt_name: str, enriched_path: Path, enriched_content: str) -> str:
+    def apply_receipt_match(
+        self,
+        *,
+        ledger_path: Path | str | None,
+        statement_path: Path,
+        line_number: int,
+        include_rel_path: str,
+        receipt_name: str,
+        enriched_path: Path,
+        enriched_content: str,
+    ) -> str:
         return apply_receipt_match(
             ledger_path=self._resolve_path(ledger_path),
             statement_path=statement_path,

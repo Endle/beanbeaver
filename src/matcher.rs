@@ -587,7 +587,7 @@ mod tests {
     fn merchant_similarity_handles_family_aliases() {
         let (score, family) = merchant_similarity_impl(
             "REAL CANADIAN",
-            "RCSS 1077 TORONTO ON",
+            "RCSS",
             &merchant_families(),
         );
         assert!(score > 0.8);
@@ -619,7 +619,7 @@ mod tests {
         let result = match_transaction_to_receipt_impl(
             739_284,
             736_300,
-            "RCSS 1077 TORONTO ON",
+            "RCSS",
             &receipt,
             &default_config(),
             &merchant_families(),

@@ -89,7 +89,10 @@ fn re_parenthetical_only() -> &'static Regex {
 // category digit — "$3.88 Tx1" — so an optional 'x' and up to two trailing
 // digits are tolerated, but only after at least one tax letter (so a bare
 // trailing number like "9.99 5" is not silently swallowed as a flag).
-const TAX_FLAG_CLASS: &str = r"(?:[CcFfGgHhJjPpTtXx]{1,3}\d{0,2})?";
+// Some merchants print a '*' immediately before the tax letter(s) — e.g.
+// FreshCo's "$25.96*HC" — so an optional leading asterisk is tolerated; without
+// it the whole price token fails to parse and the line is silently dropped.
+const TAX_FLAG_CLASS: &str = r"(?:\*?[CcFfGgHhJjPpTtXx]{1,3}\d{0,2})?";
 
 // When the parser sees a bare standalone-price line (e.g. `$8.95` on its own)
 // it walks back up to 5 lines looking for the description that goes with it.
@@ -323,7 +326,7 @@ fn normalize_decimal_spacing(text: &str) -> String {
         // OCR sometimes reads a price's decimal point as a comma ("0,99").
         // Only treat a comma as a decimal point when it sits directly between
         // a digit and exactly two fraction digits, so thousands separators
-        // ("1,000") and prose ("Markham, ON") are left untouched.
+        // ("1,000") and prose ("Anytown, ON") are left untouched.
         if bytes[i] == b','
             && i > 0
             && bytes[i - 1].is_ascii_digit()
@@ -467,7 +470,7 @@ fn is_priced_generic_item_label(left_text: &str, full_text: &str) -> bool {
         && line_has_trailing_price(full_text)
         && matches!(
             left_text.trim().to_ascii_uppercase().as_str(),
-            "MEAT" | "BAKERY"
+            "MEAT" | "BAKERY" | "FROZEN"
         )
 }
 
@@ -960,6 +963,43 @@ pub(crate) fn extract_text_items(
 
         let is_qty_line = looks_like_quantity_expression(line);
         let has_trailing_total = re_trailing_total_presence().is_match(line);
+
+        // OCR column-merge recovery: a quantity line can absorb the NEXT
+        // item's price into its own text row -- e.g. FreshCo
+        // "2 @ 1/ $12.98 $11.19 C", where $11.19 is the price of the
+        // price-less "Natrel Milk 2% 4L" line below (the right-hand price
+        // column drifted up one row in OCR reading order). When a qty line
+        // carries a trailing price that does NOT reconcile as its own line
+        // total (qty x unit) and the next line is a bare, price-less
+        // description, pair that orphan price with that description. The qty
+        // line itself is still consumed below as a modifier of the item above.
+        if is_qty_line {
+            let prices: Vec<i64> = re_find_prices()
+                .captures_iter(line)
+                .filter_map(|caps| caps.get(1).and_then(|m| parse_cents(m.as_str())))
+                .collect();
+            if prices.len() >= 2 {
+                let orphan_cents = *prices.last().unwrap();
+                let reconciles_as_own_total = parse_quantity_modifier(line)
+                    .map(|modifier| validate_quantity_price(orphan_cents, &modifier))
+                    .unwrap_or(false);
+                if orphan_cents > 0 && !reconciles_as_own_total {
+                    if let Some(next_line) = normalized_lines.get(i + 1) {
+                        let next_trimmed = next_line.trim();
+                        if is_descriptive_candidate(next_trimmed) {
+                            let desc = strip_leading_receipt_codes(next_trimmed);
+                            deferred.push(DeferredTextOutcome::Item(ParsedTextItem {
+                                category_source: desc.clone(),
+                                description: desc,
+                                price_cents: orphan_cents,
+                                quantity: 1,
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+
         if is_qty_line && !has_trailing_total {
             if line.to_ascii_lowercase().contains("/for") {
                 let tail_token = re_tail_token()
@@ -1454,6 +1494,57 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
+    fn recovers_asterisk_tax_flag_and_ocr_merged_orphan_price() {
+        // FreshCo 2026-05-02_freshcc_117_85: "$25.96*HC" must parse despite
+        // the '*' separator, and the OCR-merged "$11.19" on the qty row must
+        // pair with the price-less "Natrel Milk 2% 4L" line below it.
+        let lines: Vec<String> = [
+            "CocaCola Zero Can $25.96*HC",
+            "2 @ 1/ $12.98",
+            "CocaCola Zero Can $25.96xHC",
+            "2 @ 1/ $12.98 $11.19 C",
+            "Natrel Milk 2% 4L",
+            "Eggs Large $9.79 C",
+            "SUBTOTAL $73.70",
+            "TOTAL $73.70",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let summary_amounts = HashSet::from([7370i64]);
+        let (items, _warnings) = extract_text_items(&lines, &summary_amounts);
+        let prices: Vec<i64> = items.iter().map(|it| it.price_cents).collect();
+        // Both colas recovered (asterisk tolerated) plus the orphaned Natrel.
+        assert_eq!(prices.iter().filter(|&&p| p == 2596).count(), 2);
+        assert!(
+            items
+                .iter()
+                .any(|it| it.description.contains("Natrel") && it.price_cents == 1119),
+            "expected Natrel paired at 11.19, got {items:?}"
+        );
+    }
+
+    #[test]
+    fn emits_priced_frozen_generic_item_label() {
+        // Foody Mart 2026-04-27_foody_mart_67_71: a generic "Frozen 6.99"
+        // line is a real item, not a section header.
+        let lines: Vec<String> = [
+            "Meat 7.24",
+            "Frozen 6.99",
+            "Item Count: 2",
+            "Sub Total 14.23",
+            "Total 14.23",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let summary_amounts = HashSet::from([1423i64]);
+        let (items, _warnings) = extract_text_items(&lines, &summary_amounts);
+        let prices: Vec<i64> = items.iter().map(|it| it.price_cents).collect();
+        assert!(prices.contains(&699), "Frozen 6.99 should be an item: {items:?}");
+    }
+
+    #[test]
     fn recovers_unique_malformed_three_decimal_prices_via_summary_reconciliation() {
         let lines = vec![
             "COSTCO".to_string(),
@@ -1565,7 +1656,7 @@ mod tests {
         // Negative: thousands separators and prose stay as-is.
         assert_eq!(normalize_decimal_spacing("1,000"), "1,000");
         assert_eq!(normalize_decimal_spacing("12,345"), "12,345");
-        assert_eq!(normalize_decimal_spacing("Markham, ON"), "Markham, ON");
+        assert_eq!(normalize_decimal_spacing("Anytown, ON"), "Anytown, ON");
         // Negative: three fraction digits are not a clean 2-decimal price.
         assert_eq!(normalize_decimal_spacing("0,999"), "0,999");
     }
