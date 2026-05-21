@@ -83,7 +83,7 @@ fn re_standalone_price() -> &'static Regex {
 
 fn re_trailing_price() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(\d+\.\d{2})(-?)\s*[HhTtJj]?\s*$").unwrap())
+    RE.get_or_init(|| Regex::new(r"(\d+\.\d{2})(-?)(?:\s*[HhTtJjGgPp])*\s*$").unwrap())
 }
 
 fn re_weight_info() -> &'static Regex {
@@ -199,10 +199,11 @@ fn re_ascii_words() -> &'static Regex {
 fn re_price_word() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     // Trailing `-` is Costco's convention for discount/refund lines
-    // (e.g. TPD/<sku> 3.00-). The optional trailing letter is Costco's
-    // tax flag (H/T/J) which can fuse with the price into a single
-    // OCR token (e.g. "5.00- H").
-    RE.get_or_init(|| Regex::new(r"^\$?(\d+\.\d{2})(-?)\s*[HhTtJj]?$").unwrap())
+    // (e.g. TPD/<sku> 3.00-). The optional trailing letters are tax flags
+    // that can fuse with the price into a single OCR token: Costco's H/T/J
+    // and T&T's G (GST) / P (PST), and T&T may print several space-separated
+    // (e.g. "$6.87 G P").
+    RE.get_or_init(|| Regex::new(r"^\$?(\d+\.\d{2})(-?)(?:\s*[HhTtJjGgPp])*$").unwrap())
 }
 
 fn re_embedded_trailing_price_word() -> &'static Regex {
@@ -1347,7 +1348,17 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_spatial_items, BboxInput, LineInput, PageInput, WordInput};
+    use super::{extract_spatial_items, is_price_word, BboxInput, LineInput, PageInput, WordInput};
+
+    #[test]
+    fn parses_tt_price_with_gst_pst_tax_flags() {
+        // T&T prints GST/PST flags after the price, sometimes several
+        // space-separated (e.g. "W $6.87 G P"). Costco's H/T/J must still work.
+        assert_eq!(is_price_word("W $6.87 G P"), Some(68_700));
+        assert_eq!(is_price_word("W $13.97"), Some(139_700));
+        assert_eq!(is_price_word("6.87 G"), Some(68_700));
+        assert_eq!(is_price_word("5.00- H"), Some(-50_000));
+    }
 
     fn word(text: &str, left: f64, top: f64, right: f64, bottom: f64) -> WordInput {
         WordInput {
