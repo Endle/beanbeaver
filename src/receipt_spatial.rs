@@ -323,7 +323,7 @@ fn normalize_decimal_spacing(text: &str) -> String {
         // OCR sometimes reads a price's decimal point as a comma ("0,99").
         // Only treat a comma as a decimal point when it sits directly between
         // a digit and exactly two fraction digits, so thousands separators
-        // ("1,000") and prose ("Markham, ON") are left untouched.
+        // ("1,000") and prose ("Anytown, ON") are left untouched.
         if bytes[i] == b','
             && i > 0
             && bytes[i - 1].is_ascii_digit()

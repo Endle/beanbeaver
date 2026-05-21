@@ -784,7 +784,7 @@ mod tests {
             transactions: vec![NativeLedgerTransaction {
                 date_ordinal: 739314,
                 date_iso: "2026-03-04".to_string(),
-                payee: Some("FOODY MART MARKHAM ON".to_string()),
+                payee: Some("FOODY MART".to_string()),
                 narration: Some(String::new()),
                 postings: vec![NativeLedgerPosting {
                     account: "Liabilities:CreditCard:CardA".to_string(),

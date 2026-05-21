@@ -326,7 +326,7 @@ fn normalize_decimal_spacing(text: &str) -> String {
         // OCR sometimes reads a price's decimal point as a comma ("0,99").
         // Only treat a comma as a decimal point when it sits directly between
         // a digit and exactly two fraction digits, so thousands separators
-        // ("1,000") and prose ("Markham, ON") are left untouched.
+        // ("1,000") and prose ("Anytown, ON") are left untouched.
         if bytes[i] == b','
             && i > 0
             && bytes[i - 1].is_ascii_digit()
@@ -1656,7 +1656,7 @@ mod tests {
         // Negative: thousands separators and prose stay as-is.
         assert_eq!(normalize_decimal_spacing("1,000"), "1,000");
         assert_eq!(normalize_decimal_spacing("12,345"), "12,345");
-        assert_eq!(normalize_decimal_spacing("Markham, ON"), "Markham, ON");
+        assert_eq!(normalize_decimal_spacing("Anytown, ON"), "Anytown, ON");
         // Negative: three fraction digits are not a clean 2-decimal price.
         assert_eq!(normalize_decimal_spacing("0,999"), "0,999");
     }

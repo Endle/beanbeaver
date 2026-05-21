@@ -50,10 +50,10 @@ def test_public_grocery_and_home_rules_apply_without_project_config(tmp_path: Pa
     )
     engine = RuleEngine(config_path=tmp_path / "missing.toml")
 
-    assert engine.categorize(_Txn("FOODY MART MARKHAM ON")) == "Expenses:Food:Grocery"
-    assert engine.categorize(_Txn("TREDISH GROCERIES TORO TORONTO ON")) == "Expenses:Food:Grocery"
-    assert engine.categorize(_Txn("ONE S BETTER LIVING SCARBOROUGH ON")) == "Expenses:Home"
-    assert engine.categorize(_Txn("MINISO CANADA MARKHAM ON")) == "Expenses:Home"
+    assert engine.categorize(_Txn("FOODY MART")) == "Expenses:Food:Grocery"
+    assert engine.categorize(_Txn("TREDISH GROCERIES TORO")) == "Expenses:Food:Grocery"
+    assert engine.categorize(_Txn("ONE S BETTER LIVING")) == "Expenses:Home"
+    assert engine.categorize(_Txn("MINISO CANADA")) == "Expenses:Home"
 
 
 def test_project_rule_overrides_public_fallback_rule(tmp_path: Path) -> None:

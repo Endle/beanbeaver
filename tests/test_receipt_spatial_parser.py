@@ -89,7 +89,7 @@ def test_extract_items_with_bbox_keeps_short_produce_name_alignment() -> None:
 
 
 def test_is_spatial_layout_receipt_detects_nofrills() -> None:
-    assert _is_spatial_layout_receipt([], "NOFRILLS\nPETER & SUZI'S NF MARKHAM\nTOTAL 46.56")
+    assert _is_spatial_layout_receipt([], "NOFRILLS\nNF STORE\nTOTAL 46.56")
 
 
 def test_extract_items_with_bbox_accepts_spaced_decimal_price_words() -> None:

@@ -116,7 +116,7 @@ pub(crate) fn extract_merchant(
 
     // FreshCo's banner line is often OCR'd with a trailing confusable
     // ("FRESHCC"), but the correct "FreshCo" reliably reappears in the store
-    // address/footer (e.g. "McCowan & Bur Oak FreshCo"). The confidence
+    // address/footer (e.g. "123 Example St FreshCo"). The confidence
     // fallback below would otherwise return the mis-OCR'd banner line, so
     // prefer the canonical spelling whenever it occurs anywhere in the text.
     if full_text_upper.contains("FRESHCO") {
@@ -124,7 +124,7 @@ pub(crate) fn extract_merchant(
     }
 
     // Foody Mart's banner runs the store name into the branch/address on one
-    // OCR line ("FOODY MART(McCowan) 5221 Highway 7"), so the confidence
+    // OCR line ("FOODY MART(Branch) 123 Example Rd"), so the confidence
     // fallback returns a long noisy string. Collapse to the canonical name.
     if full_text_upper.contains("FOODY MART") {
         return "FOODY MART".to_string();
@@ -188,7 +188,7 @@ mod tests {
     #[test]
     fn canonicalizes_costco_ocr_dropped_leading_c() {
         // OCR dropped the leading C; "WHOLESALE" banner confirms Costco.
-        let full_text = "OSTCO\nWHOLESALE\nE Markham #545\n1268728 UNREAL 17.99";
+        let full_text = "OSTCO\nWHOLESALE\nBranch #001\n1268728 UNREAL 17.99";
         let lines: Vec<String> = full_text.lines().map(str::to_string).collect();
         assert_eq!(
             extract_merchant(&lines, full_text, &[], &["COSTCO".to_string()]),
@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn canonicalizes_freshco_from_address_when_banner_misocrd() {
         // Banner OCR'd as "FRESHCC"; correct spelling appears in the address.
-        let full_text = "FRESHCC\nMcCowan & Bur Oak FreshCo\nCilantro $0.99";
+        let full_text = "FRESHCC\n123 Example St FreshCo\nCilantro $0.99";
         let lines: Vec<String> = full_text.lines().map(str::to_string).collect();
         assert_eq!(
             extract_merchant(&lines, full_text, &[], &["COSTCO".to_string()]),
@@ -210,7 +210,7 @@ mod tests {
     #[test]
     fn canonicalizes_foody_mart_from_noisy_banner() {
         // Banner runs name into branch/address on one OCR line.
-        let full_text = "FOODY MART(McCowan) 5221 Highway 7\nAsahi 1.99";
+        let full_text = "FOODY MART(Branch) 123 Example Rd\nAsahi 1.99";
         let lines: Vec<String> = full_text.lines().map(str::to_string).collect();
         assert_eq!(
             extract_merchant(&lines, full_text, &[], &["COSTCO".to_string()]),

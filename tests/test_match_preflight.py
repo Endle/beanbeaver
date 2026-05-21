@@ -183,7 +183,7 @@ def test_format_receipt_inspection_includes_items_and_warnings(tmp_path: Path) -
 def test_format_transaction_inspection_includes_postings() -> None:
     txn = LedgerTransaction(
         date=date(2026, 1, 26),
-        payee="T&T SUPERMARKET #020 RICHMOND HILLON",
+        payee="T&T SUPERMARKET",
         narration="",
         postings=(
             LedgerPosting(
@@ -191,7 +191,7 @@ def test_format_transaction_inspection_includes_postings() -> None:
                 units=LedgerAmount(number=Decimal("106.10"), currency="CAD"),
             ),
             LedgerPosting(
-                account="Liabilities:CreditCard:MBNA:Dan:WEMC",
+                account="Liabilities:CreditCard:MBNA:WEMC",
                 units=LedgerAmount(number=Decimal("-106.10"), currency="CAD"),
             ),
         ),
@@ -211,7 +211,7 @@ def test_format_transaction_inspection_includes_postings() -> None:
     assert "  Candidate [1] (68% confidence):" in lines
     assert "    Charge amount: $106.10" in lines
     assert "      - Expenses:Food:Grocery: 106.10 CAD" in lines
-    assert "      - Liabilities:CreditCard:MBNA:Dan:WEMC: -106.10 CAD" in lines
+    assert "      - Liabilities:CreditCard:MBNA:WEMC: -106.10 CAD" in lines
 
 
 def test_prompt_match_choice_views_details_then_returns_selection(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
@@ -225,11 +225,11 @@ def test_prompt_match_choice_views_details_then_returns_selection(monkeypatch: M
     )
     txn = LedgerTransaction(
         date=date(2026, 1, 26),
-        payee="T&T SUPERMARKET #020 RICHMOND HILLON",
+        payee="T&T SUPERMARKET",
         narration="",
         postings=(
             LedgerPosting(
-                account="Liabilities:CreditCard:MBNA:Dan:WEMC",
+                account="Liabilities:CreditCard:MBNA:WEMC",
                 units=LedgerAmount(number=Decimal("-106.10"), currency="CAD"),
             ),
         ),
