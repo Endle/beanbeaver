@@ -115,6 +115,17 @@ def test_sonicare_maps_to_personal_care_tooth() -> None:
     )
 
 
+def test_colgate_maps_to_personal_care_tooth() -> None:
+    # Costco receipt 2026-05-20_costco_74_22: "1474938 COLGATE PR".
+    assert (
+        categorize_item(
+            "1474938 COLGATE PR",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:PersonalCare:Tooth"
+    )
+
+
 @pytest.mark.parametrize(
     ("description", "expected"),
     [

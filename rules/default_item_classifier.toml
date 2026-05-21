@@ -232,7 +232,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0031"
-keywords = ["TOOTHPASTE", "TOOTHBRUSH", "MOUTHWASH", "DENTAL FLOSS", "FLOSS", "SONICARE"]
+keywords = ["TOOTHPASTE", "TOOTHBRUSH", "MOUTHWASH", "DENTAL FLOSS", "FLOSS", "SONICARE", "COLGATE"]
 category = "personal_care_tooth"
 tags = ["personal", "care", "tooth"]
 priority = 0
