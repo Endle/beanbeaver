@@ -9,7 +9,7 @@ id = "legacy_0000"
 # exact match, beating the snacks rule's fuzzy "CHOCOLATE" hit on the
 # is_exact tiebreaker. Order matters: do not move "MILK CHOCOLATE" below
 # "CHOCOLATE MILK".
-keywords = ["EGG", "EGGS", "MILK CHOCOLATE", "STRAWBERRY MILK", "CHOCOLATE MILK", "CHOC MILK", "CHOC MLK", "MILK", "CHEESE", "YOGURT", "YOGOURT", "BUTTER", "CREAM", "SOUR CREAM", "COTTAGE", "MARGARINE", "CHEDDAR", "MOZZARELLA", "PARMESAN", "SWEETENED SOYA"]
+keywords = ["EGG", "EGGS", "MILK CHOCOLATE", "STRAWBERRY MILK", "CHOCOLATE MILK", "CHOC MILK", "CHOC MLK", "MILK", "CHEESE", "YOGURT", "YOGOURT", "BUTTER", "CREAM", "SOUR CREAM", "COTTAGE", "MARGARINE", "CHEDDAR", "MOZZARELLA", "PARMESAN", "SWEETENED SOYA", "NATREL"]
 category = "grocery_dairy"
 tags = ["grocery", "dairy"]
 priority = 0
@@ -188,6 +188,16 @@ keywords = ["ORANGE JUICE", "APPLE JUICE", "GRAPE JUICE", "FRUIT PUNCH", "CRANBE
 category = "grocery_drink_juice"
 tags = ["grocery", "drink", "juice"]
 priority = 0
+exact_only = false
+
+[[rules]]
+# Juice brands that also contain a fruit-flavour word (e.g. "Tropicana -
+# Blackberry"); priority 1 so the brand wins over the longer fruit keyword.
+id = "juice_brands"
+keywords = ["TROPICANA"]
+category = "grocery_drink_juice"
+tags = ["grocery", "drink", "juice"]
+priority = 1
 exact_only = false
 
 [[rules]]

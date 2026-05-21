@@ -470,7 +470,7 @@ fn is_priced_generic_item_label(left_text: &str, full_text: &str) -> bool {
         && line_has_trailing_price(full_text)
         && matches!(
             left_text.trim().to_ascii_uppercase().as_str(),
-            "MEAT" | "BAKERY"
+            "MEAT" | "BAKERY" | "FROZEN"
         )
 }
 
@@ -1522,6 +1522,26 @@ mod tests {
                 .any(|it| it.description.contains("Natrel") && it.price_cents == 1119),
             "expected Natrel paired at 11.19, got {items:?}"
         );
+    }
+
+    #[test]
+    fn emits_priced_frozen_generic_item_label() {
+        // Foody Mart 2026-04-27_foody_mart_67_71: a generic "Frozen 6.99"
+        // line is a real item, not a section header.
+        let lines: Vec<String> = [
+            "Meat 7.24",
+            "Frozen 6.99",
+            "Item Count: 2",
+            "Sub Total 14.23",
+            "Total 14.23",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let summary_amounts = HashSet::from([1423i64]);
+        let (items, _warnings) = extract_text_items(&lines, &summary_amounts);
+        let prices: Vec<i64> = items.iter().map(|it| it.price_cents).collect();
+        assert!(prices.contains(&699), "Frozen 6.99 should be an item: {items:?}");
     }
 
     #[test]

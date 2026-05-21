@@ -123,6 +123,13 @@ pub(crate) fn extract_merchant(
         return "FRESHCO".to_string();
     }
 
+    // Foody Mart's banner runs the store name into the branch/address on one
+    // OCR line ("FOODY MART(McCowan) 5221 Highway 7"), so the confidence
+    // fallback returns a long noisy string. Collapse to the canonical name.
+    if full_text_upper.contains("FOODY MART") {
+        return "FOODY MART".to_string();
+    }
+
     if let Some(confident) = extract_merchant_with_confidence(pages) {
         return confident;
     }
@@ -197,6 +204,17 @@ mod tests {
         assert_eq!(
             extract_merchant(&lines, full_text, &[], &["COSTCO".to_string()]),
             "FRESHCO"
+        );
+    }
+
+    #[test]
+    fn canonicalizes_foody_mart_from_noisy_banner() {
+        // Banner runs name into branch/address on one OCR line.
+        let full_text = "FOODY MART(McCowan) 5221 Highway 7\nAsahi 1.99";
+        let lines: Vec<String> = full_text.lines().map(str::to_string).collect();
+        assert_eq!(
+            extract_merchant(&lines, full_text, &[], &["COSTCO".to_string()]),
+            "FOODY MART"
         );
     }
 
