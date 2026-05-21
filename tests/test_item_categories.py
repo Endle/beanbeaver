@@ -126,6 +126,19 @@ def test_colgate_maps_to_personal_care_tooth() -> None:
     )
 
 
+def test_soft_drink_beats_fruit_keyword() -> None:
+    # FreshCo receipt 2026-05-20_freshco_55_90: "Soft Drink Orange" must not
+    # classify as fruit on the "ORANGE" keyword; "SOFT DRINK" is the longer,
+    # more specific match.
+    assert (
+        categorize_item(
+            "Soft Drink Orange",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Food:Grocery:Drink"
+    )
+
+
 @pytest.mark.parametrize(
     ("description", "expected"),
     [

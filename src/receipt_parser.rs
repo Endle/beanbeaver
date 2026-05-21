@@ -40,6 +40,21 @@ pub(crate) struct ParsedReceiptData {
     pub(crate) warnings: Vec<ParsedReceiptWarning>,
 }
 
+/// Some merchants print a line-item discount with NO sign — e.g. FreshCo's
+/// "INSTANT SAVINGS $5.00" — unlike Costco's trailing-minus ("4.00-") or the
+/// leading-minus Asian-grocery form. Such a line is a reduction, so its price
+/// must be negative. Detection is keyword-based on the resolved item
+/// description. Summary lines ("TOTAL SAVINGS", "Your Total Savings") are
+/// filtered upstream and never reach here as items; the `TOTAL` guard is a
+/// belt-and-suspenders exclusion in case one slips through.
+fn is_unsigned_discount_line(description: &str) -> bool {
+    let upper = description.to_ascii_uppercase();
+    if upper.contains("TOTAL") {
+        return false;
+    }
+    upper.contains("SAVINGS")
+}
+
 fn cents_to_fixed(value: i64) -> String {
     let sign = if value < 0 { "-" } else { "" };
     let abs = value.abs();
@@ -143,7 +158,7 @@ pub(crate) fn parse_receipt(
     let spatial_layout = receipt_parse_helpers::has_useful_bbox_data(pages_for_helper)
         && receipt_parse_helpers::is_spatial_layout_receipt(full_text);
 
-    let (items, warnings) = if spatial_layout {
+    let (items, warnings): (Vec<ParsedReceiptItem>, Vec<ParsedReceiptWarning>) = if spatial_layout {
         let spatial_outcome = receipt_spatial::extract_spatial_items(pages_for_spatial.to_vec());
         if spatial_outcome.items.is_empty() {
             let (items, warnings) = receipt_text::extract_text_items(&lines, &summary_amounts);
@@ -209,6 +224,19 @@ pub(crate) fn parse_receipt(
         )
     };
 
+    // Sign-correct unsigned line-item discounts (e.g. FreshCo "INSTANT
+    // SAVINGS $5.00"), covering both the spatial and text paths at their
+    // single merge point.
+    let items: Vec<ParsedReceiptItem> = items
+        .into_iter()
+        .map(|mut item| {
+            if !item.price.starts_with('-') && is_unsigned_discount_line(&item.description) {
+                item.price = format!("-{}", item.price);
+            }
+            item
+        })
+        .collect();
+
     ParsedReceiptData {
         merchant,
         date,
@@ -220,5 +248,27 @@ pub(crate) fn parse_receipt(
         raw_text: full_text.to_string(),
         image_filename: image_filename.to_string(),
         warnings,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_unsigned_discount_line;
+
+    #[test]
+    fn flags_unsigned_savings_lines() {
+        // FreshCo prints "INSTANT SAVINGS $5.00" with no minus sign.
+        assert!(is_unsigned_discount_line("INSTANT SAVINGS $"));
+        assert!(is_unsigned_discount_line("Member Savings"));
+    }
+
+    #[test]
+    fn ignores_summary_and_regular_items() {
+        // Summary rollups must never be sign-flipped as items.
+        assert!(!is_unsigned_discount_line("TOTAL SAVINGS"));
+        assert!(!is_unsigned_discount_line("Your Total Savings"));
+        // Ordinary products are untouched.
+        assert!(!is_unsigned_discount_line("Tom Diced"));
+        assert!(!is_unsigned_discount_line("Soft Drink Orange"));
     }
 }
