@@ -184,7 +184,8 @@ def test_api_list_item_categories_returns_category_options(
     captured = json.loads(capsys.readouterr().out)
     assert exit_code == 0
     assert any(
-        category == {
+        category
+        == {
             "key": "grocery_dairy",
             "account": "Expenses:Food:Grocery:Dairy",
         }
@@ -683,9 +684,7 @@ option "operating_currency" "CAD"
     assert captured["account_resolution"]["import_type"] == "cc"
     assert captured["account_resolution"]["importer_id"] == "bmo"
     assert captured["account_resolution"]["account_label"] == "BMO credit card"
-    assert captured["account_resolution"]["account_options"] == [
-        "Liabilities:CreditCard:Primary:BMO:CardA"
-    ]
+    assert captured["account_resolution"]["account_options"] == ["Liabilities:CreditCard:Primary:BMO:CardA"]
     assert captured["account_resolution"]["as_of"] == "2026-03-04"
 
 

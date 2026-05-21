@@ -39,7 +39,7 @@ MIN_TEXT_LENGTH = 2
 # Detection-level deskew via RANSAC over same-row item↔price slopes.
 # See docs/detection_deskew_plan.md for derivation.
 DESKEW_MIN_CONFIDENCE = 0.95
-DESKEW_MIN_ITEM_WIDTH = 0.08      # × image_width
+DESKEW_MIN_ITEM_WIDTH = 0.08  # × image_width
 DESKEW_MIN_PRICE_WIDTH = 0.03
 DESKEW_MIN_X_DISTANCE = 0.50
 DESKEW_ITEM_X_MAX_FRAC = 0.40
@@ -164,9 +164,7 @@ def _bbox_x_extent(bbox: list[list[float]]) -> tuple[float, float, float]:
     return min(xs), max(xs), sum(xs) / len(xs)
 
 
-def _build_pair_candidates(
-    detections: list[Detection], image_width: int
-) -> list[_PairCandidate]:
+def _build_pair_candidates(detections: list[Detection], image_width: int) -> list[_PairCandidate]:
     """Cross-product item/price candidates filtered by column/width/proximity.
 
     Liberally generated; mispairings are expected to fall out as RANSAC
@@ -179,7 +177,7 @@ def _build_pair_candidates(
     min_price_width = image_width * DESKEW_MIN_PRICE_WIDTH
     min_x_distance = image_width * DESKEW_MIN_X_DISTANCE
 
-    items: list[tuple[float, float, float]] = []   # (cx, cy, x_max)
+    items: list[tuple[float, float, float]] = []  # (cx, cy, x_max)
     prices: list[tuple[float, float, float]] = []  # (cx, cy, x_min)
 
     for det in detections:
@@ -197,11 +195,7 @@ def _build_pair_candidates(
 
         if x_max < item_x_max_cap and width >= min_item_width:
             items.append((x_center, cy, x_max))
-        if (
-            x_min > price_x_min_floor
-            and width >= min_price_width
-            and _PRICE_TEXT_RE.match(text)
-        ):
+        if x_min > price_x_min_floor and width >= min_price_width and _PRICE_TEXT_RE.match(text):
             prices.append((x_center, cy, x_min))
 
     candidates: list[_PairCandidate] = []
@@ -241,19 +235,14 @@ def _ransac_consensus(candidates: list[_PairCandidate]) -> tuple[float, int]:
         trial = statistics.median(c.angle_deg for c in sample)
         if abs(trial) > DESKEW_ANGLE_CAP_DEG:
             continue
-        inliers = [
-            c for c in candidates
-            if abs(c.angle_deg - trial) <= DESKEW_INLIER_TOL_DEG
-        ]
+        inliers = [c for c in candidates if abs(c.angle_deg - trial) <= DESKEW_INLIER_TOL_DEG]
         if len(inliers) > best_inliers:
             best_inliers = len(inliers)
             best_angle = statistics.fmean(c.angle_deg for c in inliers)
     return best_angle, best_inliers
 
 
-def _apply_shear(
-    detections: list[Detection], angle_deg: float, image_width: int
-) -> list[Detection]:
+def _apply_shear(detections: list[Detection], angle_deg: float, image_width: int) -> list[Detection]:
     tan_angle = math.tan(math.radians(angle_deg))
     x_ref = image_width / 2
     corrected: list[Detection] = []
@@ -372,9 +361,7 @@ def normalize_detections(
     resolved_dir = _resolve_dump_dir(detections, debug_dir)
     if resolved_dir is not None:
         resolved_dir.mkdir(parents=True, exist_ok=True)
-        (resolved_dir / "detections_input.json").write_text(
-            json.dumps(detections, indent=2, default=str) + "\n"
-        )
+        (resolved_dir / "detections_input.json").write_text(json.dumps(detections, indent=2, default=str) + "\n")
 
     ctx = DetectionNormalizationContext(
         image_width=image_width,
@@ -392,8 +379,6 @@ def normalize_detections(
             )
 
     if resolved_dir is not None:
-        (resolved_dir / "trace.json").write_text(
-            json.dumps(ctx.trace, indent=2, default=str) + "\n"
-        )
+        (resolved_dir / "trace.json").write_text(json.dumps(ctx.trace, indent=2, default=str) + "\n")
 
     return normalized

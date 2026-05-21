@@ -126,9 +126,7 @@ def _validate_item_review_patches(
                 label=f"item price for '{item_id}'",
             )
         if "category" in review_patch:
-            item_review["classification"] = {
-                "category": _normalize_item_category(review_patch.get("category"))
-            }
+            item_review["classification"] = {"category": _normalize_item_category(review_patch.get("category"))}
         if "notes" in review_patch:
             item_review["notes"] = _normalize_optional_text(review_patch.get("notes"))
         if "removed" in review_patch:

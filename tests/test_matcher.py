@@ -223,6 +223,7 @@ class TestTryMatch:
 def test_rust_backend_is_loaded() -> None:
     assert os.environ.get("BEANBEAVER_REQUIRE_RUST_MATCHER") == "1"
 
+
 def test_rust_backend_accepts_named_dict_payloads() -> None:
     assert os.environ.get("BEANBEAVER_REQUIRE_RUST_MATCHER") == "1"
     from beanbeaver.receipt import matcher as matcher_module

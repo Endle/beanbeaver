@@ -39,7 +39,7 @@ def test_format_parsed_receipt_renders_expected_metadata_and_warning_anchor() ->
     output = format_parsed_receipt(receipt, image_sha256="abc123")
 
     assert '; @merchant: Fresh "Mart"' in output
-    assert '; @image_sha256: abc123' in output
+    assert "; @image_sha256: abc123" in output
     assert '2026-03-05 * "Fresh \'Mart\'" "Receipt scan"' in output
     assert "Liabilities:CreditCard:PENDING" in output
     assert "card ****1234" in output
@@ -75,7 +75,7 @@ def test_format_draft_beancount_warns_when_items_exceed_total() -> None:
 
     assert "; === DRAFT - REVIEW NEEDED ===" in output
     assert "  ; WARNING: items total (6.50) exceeds receipt total (5.00)" in output
-    assert '; --- Raw OCR Text (for reference) ---' in output
+    assert "; --- Raw OCR Text (for reference) ---" in output
 
 
 def test_generate_filename_uses_placeholder_and_normalizes_merchant() -> None:
@@ -137,9 +137,9 @@ def test_format_enriched_transaction_keeps_original_card_posting_and_reference()
     output = format_enriched_transaction(receipt, match)
 
     assert "; === ENRICHED TRANSACTION - REVIEW NEEDED ===" in output
-    assert '; Matched: /tmp/ledger.beancount:42' in output
-    assert '; Confidence: 68% (amount: exact match)' in output
-    assert '2026-03-06 * "Fresh \'Mart\'" "Weekly \'groceries\'"' in output
+    assert "; Matched: /tmp/ledger.beancount:42" in output
+    assert "; Confidence: 68% (amount: exact match)" in output
+    assert "2026-03-06 * \"Fresh 'Mart'\" \"Weekly 'groceries'\"" in output
     assert "Liabilities:CreditCard:Visa" in output
     assert "-12.75 CAD" in output
     assert "Expenses:Food:Grocery:Dairy" in output

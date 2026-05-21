@@ -69,7 +69,7 @@ def _row_pair(text_item: str, price: str, cy: float) -> list[dict]:
     """A typical receipt row: an item on the left, a price on the right."""
     return [
         _make_det(text=text_item, cx=200, cy=cy, width=200),  # item: x in [100,300]
-        _make_det(text=price, cx=850, cy=cy, width=80),       # price: x in [810,890]
+        _make_det(text=price, cx=850, cy=cy, width=80),  # price: x in [810,890]
     ]
 
 

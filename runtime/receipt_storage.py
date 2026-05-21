@@ -56,6 +56,7 @@ def _next_available_dir(path: Path) -> Path:
             return candidate
         counter += 1
 
+
 def _slug(text: str | None) -> str:
     """Return a filesystem-safe slug."""
     if not text:
@@ -139,6 +140,7 @@ def _rendered_current_path(receipt_dir: Path) -> Path:
 
 def _receipt_meta_path(receipt_dir: Path) -> Path:
     return receipt_dir / "meta.json"
+
 
 def _ensure_receipt_dir(receipt_dir: Path) -> None:
     receipt_dir.mkdir(parents=True, exist_ok=True)
@@ -256,6 +258,8 @@ def _write_current_artifacts(receipt_dir: Path, stage_path: Path) -> tuple[Path,
     )
     _write_receipt_meta(receipt_dir, document, latest_stage_path=stage_path)
     return current_path, rendered_path
+
+
 def _is_canonical_receipt_dir(path: Path) -> bool:
     return path.is_dir() and (_stages_dir(path).exists() or _current_receipt_path(path).exists())
 
