@@ -101,6 +101,19 @@ pub(crate) fn extract_merchant(
         }
     }
 
+    // Costco's name is frequently OCR'd with the leading "C" dropped or an
+    // O/0 confusable ("OSTCO", "C0STCO"), so the exact \bCOSTCO\b match above
+    // misses. The "WHOLESALE" banner is unmistakably Costco, so when it
+    // co-occurs with such a token, canonicalize to COSTCO. This branch only
+    // runs after the exact known-merchant match has already failed, so a real
+    // "COSTCO" receipt never reaches here and ordinary merchants (no
+    // "WHOLESALE") are never rewritten.
+    if full_text_upper.contains("WHOLESALE")
+        && (full_text_upper.contains("OSTCO") || full_text_upper.contains("C0STCO"))
+    {
+        return "COSTCO".to_string();
+    }
+
     if let Some(confident) = extract_merchant_with_confidence(pages) {
         return confident;
     }
@@ -150,4 +163,31 @@ pub(crate) fn is_spatial_layout_receipt(full_text: &str) -> bool {
         }
     }
     re_spatial_w_price().is_match(full_text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_merchant;
+
+    #[test]
+    fn canonicalizes_costco_ocr_dropped_leading_c() {
+        // OCR dropped the leading C; "WHOLESALE" banner confirms Costco.
+        let full_text = "OSTCO\nWHOLESALE\nE Markham #545\n1268728 UNREAL 17.99";
+        let lines: Vec<String> = full_text.lines().map(str::to_string).collect();
+        assert_eq!(
+            extract_merchant(&lines, full_text, &[], &["COSTCO".to_string()]),
+            "COSTCO"
+        );
+    }
+
+    #[test]
+    fn does_not_rewrite_non_wholesale_merchants() {
+        // No "WHOLESALE" banner: a coincidental token must not become COSTCO.
+        let full_text = "FRESHCO\nMcCowan & Bur Oak FreshCo";
+        let lines: Vec<String> = full_text.lines().map(str::to_string).collect();
+        assert_eq!(
+            extract_merchant(&lines, full_text, &[], &["COSTCO".to_string()]),
+            "FRESHCO"
+        );
+    }
 }
