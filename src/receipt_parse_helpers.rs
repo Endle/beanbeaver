@@ -114,6 +114,15 @@ pub(crate) fn extract_merchant(
         return "COSTCO".to_string();
     }
 
+    // FreshCo's banner line is often OCR'd with a trailing confusable
+    // ("FRESHCC"), but the correct "FreshCo" reliably reappears in the store
+    // address/footer (e.g. "McCowan & Bur Oak FreshCo"). The confidence
+    // fallback below would otherwise return the mis-OCR'd banner line, so
+    // prefer the canonical spelling whenever it occurs anywhere in the text.
+    if full_text_upper.contains("FRESHCO") {
+        return "FRESHCO".to_string();
+    }
+
     if let Some(confident) = extract_merchant_with_confidence(pages) {
         return confident;
     }
@@ -181,13 +190,24 @@ mod tests {
     }
 
     #[test]
-    fn does_not_rewrite_non_wholesale_merchants() {
-        // No "WHOLESALE" banner: a coincidental token must not become COSTCO.
-        let full_text = "FRESHCO\nMcCowan & Bur Oak FreshCo";
+    fn canonicalizes_freshco_from_address_when_banner_misocrd() {
+        // Banner OCR'd as "FRESHCC"; correct spelling appears in the address.
+        let full_text = "FRESHCC\nMcCowan & Bur Oak FreshCo\nCilantro $0.99";
         let lines: Vec<String> = full_text.lines().map(str::to_string).collect();
         assert_eq!(
             extract_merchant(&lines, full_text, &[], &["COSTCO".to_string()]),
             "FRESHCO"
+        );
+    }
+
+    #[test]
+    fn does_not_rewrite_unrelated_merchants() {
+        // Neither a Costco banner nor a FreshCo token: keep the OCR'd line.
+        let full_text = "SHOPRITE\n123 Main Street\nMilk $2.99";
+        let lines: Vec<String> = full_text.lines().map(str::to_string).collect();
+        assert_eq!(
+            extract_merchant(&lines, full_text, &[], &["COSTCO".to_string()]),
+            "SHOPRITE"
         );
     }
 }
