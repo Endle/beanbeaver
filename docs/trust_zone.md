@@ -63,7 +63,7 @@ the crate's internal `use crate::...` graph, enforced from
 - `Excluded`
   - `lib.rs`
   - `main.rs`
-  - `tui.rs`
+  - `tui/` (the `bb-tui` app; all `src/tui/*.rs` submodules)
 
 `Excluded` modules are extension/binary bootstrap (module registration, the CLI
 entry point, and the `bb-tui` app) and are exempt like tooling and tests. Any
