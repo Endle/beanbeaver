@@ -1,6 +1,8 @@
+mod detection_normalization;
 mod match_domain;
 mod match_service;
 mod matcher;
+mod python_detection_normalization;
 mod python_ledger_access;
 mod python_match_service;
 mod python_receipt_categories;
@@ -183,6 +185,7 @@ fn _rust_matcher(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(match_transaction_to_receipts, module)?)?;
     python_match_service::register(module)?;
     python_ledger_access::register(module)?;
+    python_detection_normalization::register(module)?;
     python_receipt_categories::register(module)?;
     python_receipt_common::register(module)?;
     python_receipt_formatter::register(module)?;
