@@ -69,6 +69,18 @@ class TransactionOverridePayload:
 
 
 @dataclass(frozen=True)
+class TransactionEditPayload:
+    """Plain-data per-transaction edit from the CC category review (category/amount/deletion)."""
+
+    date: str
+    payee: str
+    amount: str
+    category: str
+    new_amount: str | None = None
+    deleted: bool = False
+
+
+@dataclass(frozen=True)
 class ApplyImportRequest:
     import_type: ImportType
     csv_file: str
@@ -79,7 +91,7 @@ class ApplyImportRequest:
     allow_uncommitted: bool | None = None
     cc_payment_overrides: tuple[TransactionOverridePayload, ...] = ()
     bank_transfer_overrides: tuple[TransactionOverridePayload, ...] = ()
-    category_overrides: tuple[TransactionOverridePayload, ...] = ()
+    transaction_edits: tuple[TransactionEditPayload, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -389,17 +401,19 @@ def preflight_chequing_import(
     )
 
 
-def _convert_category_overrides(
-    overrides: tuple[TransactionOverridePayload, ...],
-) -> tuple[credit_card_import.CategoryOverride, ...]:
+def _convert_transaction_edits(
+    edits: tuple[TransactionEditPayload, ...],
+) -> tuple[credit_card_import.TransactionEdit, ...]:
     return tuple(
-        credit_card_import.CategoryOverride(
+        credit_card_import.TransactionEdit(
             date=item.date,
-            payee=item.description,
+            payee=item.payee,
             amount=item.amount,
-            category=item.account,
+            category=item.category,
+            new_amount=item.new_amount,
+            deleted=item.deleted,
         )
-        for item in overrides
+        for item in edits
     )
 
 
@@ -424,8 +438,10 @@ def preflight_credit_card_import(
         )
         for entry in result.entries
     )
+    # Preflight only ever reports ok/error (it never confirms or aborts a write).
+    status: Literal["ok", "error"] = "ok" if result.status == "ok" else "error"
     return PreflightCreditCardImportResult(
-        status=result.status,
+        status=status,
         card_account=result.card_account,
         entries=entries,
         candidate_categories=result.candidate_categories,
@@ -443,7 +459,7 @@ def apply_import_machine_readable(request: ApplyImportRequest) -> ApplyImportRes
                 importer_id=None if request.importer_id is None else request.importer_id,  # type: ignore[arg-type]
                 selected_account=request.selected_account,
                 allow_uncommitted=request.allow_uncommitted,
-                category_overrides=_convert_category_overrides(request.category_overrides),
+                transaction_edits=_convert_transaction_edits(request.transaction_edits),
             )
         )
         summary = None if result.result_file_path is None else f"Import complete: {result.result_file_path}"

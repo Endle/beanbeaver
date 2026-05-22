@@ -79,13 +79,13 @@ def test_preflight_propagates_preparation_error(monkeypatch: MonkeyPatch) -> Non
     assert result.entries == ()
 
 
-def test_apply_category_overrides_rewrites_matching_expense_posting() -> None:
+def test_apply_edits_rewrites_matching_expense_posting() -> None:
     entries: list[data.Directive] = [
         _txn("2026-05-02", "UNKNOWN SHOP", "42.00", "Expenses:Uncategorized"),
         _txn("2026-05-01", "STARBUCKS", "6.50", "Expenses:Food:Coffee"),
     ]
-    overrides = (
-        credit_card.CategoryOverride(
+    edits = (
+        credit_card.TransactionEdit(
             date="2026-05-02",
             payee="UNKNOWN SHOP",
             amount="42.00",
@@ -93,17 +93,17 @@ def test_apply_category_overrides_rewrites_matching_expense_posting() -> None:
         ),
     )
 
-    credit_card._apply_category_overrides(entries, overrides)
+    result = credit_card._apply_transaction_edits(entries, edits)
 
-    assert entries[0].postings[1].account == "Expenses:Shopping:Electronics"
+    assert result[0].postings[1].account == "Expenses:Shopping:Electronics"
     # Untouched transaction keeps its rule-assigned category.
-    assert entries[1].postings[1].account == "Expenses:Food:Coffee"
+    assert result[1].postings[1].account == "Expenses:Food:Coffee"
 
 
-def test_apply_category_overrides_ignores_non_matching_keys() -> None:
+def test_apply_edits_ignores_non_matching_keys() -> None:
     entries: list[data.Directive] = [_txn("2026-05-02", "UNKNOWN SHOP", "42.00", "Expenses:Uncategorized")]
-    overrides = (
-        credit_card.CategoryOverride(
+    edits = (
+        credit_card.TransactionEdit(
             date="2026-05-02",
             payee="DIFFERENT PAYEE",
             amount="42.00",
@@ -111,6 +111,49 @@ def test_apply_category_overrides_ignores_non_matching_keys() -> None:
         ),
     )
 
-    credit_card._apply_category_overrides(entries, overrides)
+    result = credit_card._apply_transaction_edits(entries, edits)
 
-    assert entries[0].postings[1].account == "Expenses:Uncategorized"
+    assert result[0].postings[1].account == "Expenses:Uncategorized"
+
+
+def test_apply_edits_rewrites_amount_and_keeps_transaction_balanced() -> None:
+    entries: list[data.Directive] = [_txn("2026-05-02", "UNKNOWN SHOP", "42.00", "Expenses:Uncategorized")]
+    edits = (
+        credit_card.TransactionEdit(
+            date="2026-05-02",
+            payee="UNKNOWN SHOP",
+            amount="42.00",
+            category="Expenses:Food:Grocery",
+            new_amount="40.00",
+        ),
+    )
+
+    result = credit_card._apply_transaction_edits(entries, edits)
+
+    expense_posting = result[0].postings[1]
+    card_posting = result[0].postings[0]
+    assert expense_posting.account == "Expenses:Food:Grocery"
+    assert str(expense_posting.units.number) == "40.00"
+    # Card posting mirrors the expense so the transaction still balances.
+    assert str(card_posting.units.number) == "-40.00"
+
+
+def test_apply_edits_deletes_transaction() -> None:
+    entries: list[data.Directive] = [
+        _txn("2026-05-02", "UNKNOWN SHOP", "42.00", "Expenses:Uncategorized"),
+        _txn("2026-05-01", "STARBUCKS", "6.50", "Expenses:Food:Coffee"),
+    ]
+    edits = (
+        credit_card.TransactionEdit(
+            date="2026-05-02",
+            payee="UNKNOWN SHOP",
+            amount="42.00",
+            category="Expenses:Uncategorized",
+            deleted=True,
+        ),
+    )
+
+    result = credit_card._apply_transaction_edits(entries, edits)
+
+    assert len(result) == 1
+    assert result[0].payee == "STARBUCKS"

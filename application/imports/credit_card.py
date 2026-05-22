@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 from beancount.core import data
+from beancount.core.number import D
 
 from beanbeaver.application.imports.account_discovery import find_open_accounts
 from beanbeaver.application.imports.csv_routing import (
@@ -66,13 +67,19 @@ EXPENSE_ACCOUNT_PATTERNS = ["Expenses:*"]
 
 
 @dataclass(frozen=True)
-class CategoryOverride:
-    """A reviewer's category choice for one imported transaction, keyed by date/payee/amount."""
+class TransactionEdit:
+    """A reviewer's edit to one imported transaction, keyed by date/payee/amount.
+
+    `category` re-points the expense posting; `new_amount` (when set) rewrites both the
+    expense and card posting amounts; `deleted` drops the transaction from the output.
+    """
 
     date: str
     payee: str
     amount: str
     category: str
+    new_amount: str | None = None
+    deleted: bool = False
 
 
 @dataclass(frozen=True)
@@ -85,7 +92,7 @@ class CreditCardImportRequest:
     importer_id: CardImporterId | None = None
     selected_account: str | None = None
     allow_uncommitted: bool | None = None
-    category_overrides: tuple[CategoryOverride, ...] = ()
+    transaction_edits: tuple[TransactionEdit, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -537,24 +544,46 @@ def _entry_category_key(txn: data.Transaction, posting_index: int) -> tuple[str,
     return _category_key(txn.date.isoformat(), txn.payee or "", str(posting.units.number))
 
 
-def _apply_category_overrides(
+def _rewrite_amount(posting: data.Posting, new_amount: str) -> data.Posting:
+    units = posting.units._replace(number=D(new_amount))
+    return posting._replace(units=units)
+
+
+def _apply_transaction_edits(
     entries: list[data.Directive],
-    overrides: tuple[CategoryOverride, ...],
-) -> None:
-    """Rewrite expense posting accounts in place for transactions a reviewer re-categorized."""
-    if not overrides:
-        return
-    override_by_key = {_category_key(o.date, o.payee, o.amount): o.category for o in overrides}
+    edits: tuple[TransactionEdit, ...],
+) -> list[data.Directive]:
+    """Apply reviewer edits (category, amount, deletion); returns the filtered entry list."""
+    if not edits:
+        return entries
+    edit_by_key = {_category_key(e.date, e.payee, e.amount): e for e in edits}
+    result: list[data.Directive] = []
     for txn in entries:
         if not isinstance(txn, data.Transaction):
+            result.append(txn)
             continue
         index = _expense_posting_index(txn)
         if index is None:
+            result.append(txn)
             continue
-        category = override_by_key.get(_entry_category_key(txn, index))
-        if category is None:
+        edit = edit_by_key.get(_entry_category_key(txn, index))
+        if edit is None:
+            result.append(txn)
             continue
-        txn.postings[index] = txn.postings[index]._replace(account=category)
+        if edit.deleted:
+            # Drop the transaction entirely.
+            continue
+        txn.postings[index] = txn.postings[index]._replace(account=edit.category)
+        if edit.new_amount is not None and edit.new_amount.strip():
+            new_amount = edit.new_amount.strip()
+            txn.postings[index] = _rewrite_amount(txn.postings[index], new_amount)
+            # Keep the transaction balanced: the card (non-expense) postings mirror the expense.
+            negated = str(-D(new_amount))
+            for other_index, posting in enumerate(txn.postings):
+                if other_index != index:
+                    txn.postings[other_index] = _rewrite_amount(posting, negated)
+        result.append(txn)
+    return result
 
 
 @dataclass(frozen=True)
@@ -696,7 +725,12 @@ def run_credit_card_import(request: CreditCardImportRequest) -> CreditCardImport
     card_account = prepared.card_account
     entries = prepared.entries
 
-    _apply_category_overrides(entries, request.category_overrides)
+    entries = _apply_transaction_edits(entries, request.transaction_edits)
+    if not entries:
+        return CreditCardImportResult(
+            status="error",
+            error="All transactions were deleted during review - nothing to import",
+        )
 
     output_buffer = io.StringIO()
     from beancount.parser import printer

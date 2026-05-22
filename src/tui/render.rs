@@ -1369,21 +1369,94 @@ pub(crate) fn render_cc_category_review_modal(
         .highlight_symbol(">> ");
     frame.render_stateful_widget(list, rows[0], &mut review.entries_state);
 
-    let help = Paragraph::new("Enter/c change category  |  a apply  |  Esc cancel  |  j/k move")
+    let help = Paragraph::new("Enter/e edit  |  x delete  |  a apply  |  Esc cancel  |  j/k move")
         .style(popup_style())
         .wrap(Wrap { trim: true });
     frame.render_widget(help, rows[1]);
 
-    // Inner category picker overlay.
-    if let Some(picker) = review.picker.as_mut() {
+    // Inner per-transaction editor overlay (fields → category picker / amount input).
+    render_cc_entry_editor_overlay(frame, review);
+}
+
+fn render_cc_entry_editor_overlay(
+    frame: &mut ratatui::Frame<'_>,
+    review: &mut CcCategoryReview,
+) {
+    let Some(entry_index) = review.editor_entry_index() else {
+        return;
+    };
+    let entry = match review.entries.get(entry_index) {
+        Some(entry) => entry.clone(),
+        None => return,
+    };
+    let candidate_categories = review.candidate_categories.clone();
+    let Some(editor) = review.editor.as_mut() else {
+        return;
+    };
+
+    let editor_rect = centered_rect(70, 14, frame.area());
+    frame.render_widget(Clear, editor_rect);
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(format!("Edit · {} {}", entry.date, entry.payee))
+            .style(popup_style()),
+        editor_rect,
+    );
+    let editor_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(2)])
+        .split(editor_rect);
+
+    let amount_display = match editor.amount_input.as_ref() {
+        Some(buffer) => format!("{buffer}_"),
+        None => entry.amount.clone(),
+    };
+    let delete_display = if entry.deleted { "[x] skip" } else { "[ ] keep" };
+    let field_items: Vec<ListItem> = CcEntryField::all()
+        .into_iter()
+        .map(|field| {
+            let value = match field {
+                CcEntryField::Category => entry.chosen_category.clone(),
+                CcEntryField::Amount => amount_display.clone(),
+                CcEntryField::Delete => delete_display.to_string(),
+            };
+            ListItem::new(Line::from(format!("{:<10} {}", field.label(), value))).style(popup_style())
+        })
+        .collect();
+    let field_list = List::new(field_items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Fields")
+                .style(popup_style()),
+        )
+        .style(popup_style())
+        .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+        .highlight_symbol(">> ");
+    frame.render_stateful_widget(field_list, editor_rows[0], &mut editor.field_state);
+
+    let editor_help = if editor.amount_input.is_some() {
+        "Type amount  |  Enter confirm  |  Esc cancel"
+    } else {
+        "Enter edit field  |  x toggle delete  |  Esc back"
+    };
+    frame.render_widget(
+        Paragraph::new(editor_help)
+            .style(popup_style())
+            .wrap(Wrap { trim: true }),
+        editor_rows[1],
+    );
+
+    // Innermost: category picker overlay.
+    if let Some(picker) = editor.picker.as_mut() {
         let inner = centered_rect(60, 18, frame.area());
         frame.render_widget(Clear, inner);
         let inner_rows = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(4), Constraint::Length(2)])
             .split(inner);
-        let candidate_items: Vec<ListItem> = review
-            .candidate_categories
+        let candidate_items: Vec<ListItem> = candidate_categories
             .iter()
             .map(|category| ListItem::new(Line::from(category.clone())).style(popup_style()))
             .collect();
@@ -1391,20 +1464,19 @@ pub(crate) fn render_cc_category_review_modal(
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(format!(
-                        "Pick category ({})",
-                        review.candidate_categories.len()
-                    ))
+                    .title(format!("Pick category ({})", candidate_categories.len()))
                     .style(popup_style()),
             )
             .style(popup_style())
             .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
             .highlight_symbol(">> ");
         frame.render_stateful_widget(candidate_list, inner_rows[0], &mut picker.category_state);
-        let inner_help = Paragraph::new("Enter confirm  |  Esc cancel  |  j/k · PgUp/PgDn move")
-            .style(popup_style())
-            .wrap(Wrap { trim: true });
-        frame.render_widget(inner_help, inner_rows[1]);
+        frame.render_widget(
+            Paragraph::new("Enter confirm  |  Esc cancel  |  j/k · PgUp/PgDn move")
+                .style(popup_style())
+                .wrap(Wrap { trim: true }),
+            inner_rows[1],
+        );
     }
 }
 

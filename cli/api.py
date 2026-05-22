@@ -488,6 +488,44 @@ def cmd_api_preflight_chequing_import(args: argparse.Namespace) -> None:
     )
 
 
+def _parse_transaction_edits(raw: object, *, field: str) -> tuple[Any, ...]:
+    from beanbeaver.application.imports.service import TransactionEditPayload
+
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ValueError(f"Import payload field '{field}' must be a JSON array")
+    parsed: list[TransactionEditPayload] = []
+    for index, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise ValueError(f"Import payload field '{field}[{index}]' must be a JSON object")
+        date = entry.get("date")
+        payee = entry.get("payee")
+        amount = entry.get("amount")
+        category = entry.get("category")
+        new_amount = entry.get("new_amount")
+        deleted = entry.get("deleted", False)
+        if not isinstance(date, str) or not isinstance(payee, str):
+            raise ValueError(f"Import payload field '{field}[{index}]' requires string date/payee")
+        if not isinstance(amount, str) or not isinstance(category, str):
+            raise ValueError(f"Import payload field '{field}[{index}]' requires string amount/category")
+        if new_amount is not None and not isinstance(new_amount, str):
+            raise ValueError(f"Import payload field '{field}[{index}].new_amount' must be a string")
+        if not isinstance(deleted, bool):
+            raise ValueError(f"Import payload field '{field}[{index}].deleted' must be a boolean")
+        parsed.append(
+            TransactionEditPayload(
+                date=date,
+                payee=payee,
+                amount=amount,
+                category=category,
+                new_amount=new_amount,
+                deleted=deleted,
+            )
+        )
+    return tuple(parsed)
+
+
 def cmd_api_preflight_cc_import(args: argparse.Namespace) -> None:
     """Run preflight on a credit-card CSV and surface per-transaction categories as JSON."""
     from beanbeaver.application.imports.service import preflight_credit_card_import
@@ -548,9 +586,9 @@ def cmd_api_import_apply(args: argparse.Namespace) -> None:
         payload.get("bank_transfer_overrides"),
         field="bank_transfer_overrides",
     )
-    category_overrides = _parse_override_payload(
-        payload.get("category_overrides"),
-        field="category_overrides",
+    transaction_edits = _parse_transaction_edits(
+        payload.get("transaction_edits"),
+        field="transaction_edits",
     )
 
     if import_type not in {"cc", "chequing"}:
@@ -579,7 +617,7 @@ def cmd_api_import_apply(args: argparse.Namespace) -> None:
             allow_uncommitted=allow_uncommitted,
             cc_payment_overrides=cc_payment_overrides,
             bank_transfer_overrides=bank_transfer_overrides,
-            category_overrides=category_overrides,
+            transaction_edits=transaction_edits,
         )
     )
     _print_json(

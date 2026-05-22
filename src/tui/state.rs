@@ -45,7 +45,7 @@ pub(crate) struct CcCategoryReview {
     pub(crate) entries: Vec<CcCategoryEntryView>,
     pub(crate) entries_state: ListState,
     pub(crate) candidate_categories: Vec<String>,
-    pub(crate) picker: Option<CategoryPickerState>,
+    pub(crate) editor: Option<CcEntryEditor>,
 }
 
 impl CcCategoryReview {
@@ -70,7 +70,7 @@ impl CcCategoryReview {
             entries,
             entries_state,
             candidate_categories: response.candidate_categories,
-            picker: None,
+            editor: None,
         }
     }
 
@@ -85,8 +85,27 @@ impl CcCategoryReview {
         self.entries_state.select(Some(next));
     }
 
-    pub(crate) fn open_picker(&mut self) {
+    pub(crate) fn open_editor(&mut self) {
         let Some(index) = self.entries_state.selected() else {
+            return;
+        };
+        if self.entries.get(index).is_none() {
+            return;
+        }
+        self.editor = Some(CcEntryEditor::new(index));
+    }
+
+    pub(crate) fn close_editor(&mut self) {
+        self.editor = None;
+    }
+
+    pub(crate) fn editor_entry_index(&self) -> Option<usize> {
+        self.editor.as_ref().map(|editor| editor.entry_index)
+    }
+
+    /// Open the category picker for the transaction currently in the editor.
+    pub(crate) fn open_picker(&mut self) {
+        let Some(index) = self.editor_entry_index() else {
             return;
         };
         let Some(entry) = self.entries.get(index) else {
@@ -100,15 +119,20 @@ impl CcCategoryReview {
             .iter()
             .position(|candidate| candidate == &entry.chosen_category)
             .unwrap_or(0);
-        self.picker = Some(CategoryPickerState::new(index, selected));
+        if let Some(editor) = self.editor.as_mut() {
+            editor.picker = Some(CategoryPickerState::new(index, selected));
+        }
     }
 
     pub(crate) fn close_picker(&mut self) {
-        self.picker = None;
+        if let Some(editor) = self.editor.as_mut() {
+            editor.picker = None;
+        }
     }
 
     pub(crate) fn confirm_picker(&mut self) -> Option<String> {
-        let picker = self.picker.take()?;
+        let editor = self.editor.as_mut()?;
+        let picker = editor.picker.take()?;
         let selection = picker.category_state.selected()?;
         let category = self.candidate_categories.get(selection)?.clone();
         let entry = self.entries.get_mut(picker.item_index)?;
@@ -116,19 +140,98 @@ impl CcCategoryReview {
         Some(category)
     }
 
+    /// Begin editing the amount of the transaction in the editor.
+    pub(crate) fn begin_amount_input(&mut self) {
+        let Some(index) = self.editor_entry_index() else {
+            return;
+        };
+        let value = self
+            .entries
+            .get(index)
+            .map(|entry| entry.amount.clone())
+            .unwrap_or_default();
+        if let Some(editor) = self.editor.as_mut() {
+            editor.amount_input = Some(value);
+        }
+    }
+
+    pub(crate) fn amount_input_push(&mut self, ch: char) {
+        if let Some(buffer) = self
+            .editor
+            .as_mut()
+            .and_then(|editor| editor.amount_input.as_mut())
+        {
+            buffer.push(ch);
+        }
+    }
+
+    pub(crate) fn amount_input_backspace(&mut self) {
+        if let Some(buffer) = self
+            .editor
+            .as_mut()
+            .and_then(|editor| editor.amount_input.as_mut())
+        {
+            buffer.pop();
+        }
+    }
+
+    pub(crate) fn cancel_amount_input(&mut self) {
+        if let Some(editor) = self.editor.as_mut() {
+            editor.amount_input = None;
+        }
+    }
+
+    pub(crate) fn commit_amount_input(&mut self) -> Option<String> {
+        let editor = self.editor.as_mut()?;
+        let buffer = editor.amount_input.take()?;
+        let entry_index = editor.entry_index;
+        let trimmed = buffer.trim().to_string();
+        let entry = self.entries.get_mut(entry_index)?;
+        if !trimmed.is_empty() {
+            entry.amount = trimmed;
+        }
+        Some(entry.amount.clone())
+    }
+
+    /// Toggle the deleted flag of the transaction in the editor; returns the new state.
+    pub(crate) fn toggle_editor_deleted(&mut self) -> Option<bool> {
+        let index = self.editor_entry_index()?;
+        let entry = self.entries.get_mut(index)?;
+        entry.deleted = !entry.deleted;
+        Some(entry.deleted)
+    }
+
+    /// Toggle deletion of the transaction highlighted in the list (no editor needed).
+    pub(crate) fn toggle_selected_deleted(&mut self) -> Option<bool> {
+        let index = self.entries_state.selected()?;
+        let entry = self.entries.get_mut(index)?;
+        entry.deleted = !entry.deleted;
+        Some(entry.deleted)
+    }
+
     pub(crate) fn changed_count(&self) -> usize {
         self.entries.iter().filter(|entry| entry.is_changed()).count()
     }
 
-    pub(crate) fn category_overrides(&self) -> Vec<ImportOverridePayload> {
+    pub(crate) fn deleted_count(&self) -> usize {
+        self.entries.iter().filter(|entry| entry.deleted).count()
+    }
+
+    pub(crate) fn transaction_edits(&self) -> Vec<CcTransactionEditPayload> {
         self.entries
             .iter()
             .filter(|entry| entry.is_changed())
-            .map(|entry| ImportOverridePayload {
+            .map(|entry| CcTransactionEditPayload {
                 date: entry.date.clone(),
-                description: entry.payee.clone(),
-                amount: entry.amount.clone(),
-                account: entry.chosen_category.clone(),
+                payee: entry.payee.clone(),
+                amount: entry.original_amount.clone(),
+                category: entry.chosen_category.clone(),
+                new_amount: if entry.amount_changed() {
+                    Some(entry.amount.clone())
+                } else {
+                    None
+                },
+                deleted: entry.deleted,
             })
             .collect()
     }

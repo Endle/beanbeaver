@@ -812,8 +812,9 @@ impl App {
         let Some(review) = self.imports_state.cc_review.take() else {
             return Ok(());
         };
-        let overrides = review.category_overrides();
-        let changed = overrides.len();
+        let edits = review.transaction_edits();
+        let changed = edits.len();
+        let deleted = review.deleted_count();
         let response = backend_apply_import(
             "cc",
             &review.csv_file,
@@ -822,11 +823,11 @@ impl App {
             self.imports_state.allow_uncommitted,
             &[],
             &[],
-            &overrides,
+            &edits,
         )?;
         let mut status = Self::import_status_message(&response, &review.csv_file);
         if response.status == "ok" && changed > 0 {
-            status = format!("{status} ({changed} category override(s) applied)");
+            status = format!("{status} ({changed} edit(s), {deleted} deleted)");
         }
         self.refresh_imports_page()?;
         self.set_status(status);

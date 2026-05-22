@@ -489,4 +489,101 @@ mod tests {
             Some("/tmp/Preferred_Package_foo.csv")
         );
     }
+
+    fn cc_review_fixture() -> CcCategoryReview {
+        let response = PreflightCcImportResponse {
+            status: "ok".to_string(),
+            card_account: Some("Liabilities:CreditCard:Amex:Gold".to_string()),
+            error: None,
+            candidate_categories: vec![
+                "Expenses:Food:Grocery".to_string(),
+                "Expenses:Shopping:Electronics".to_string(),
+            ],
+            entries: vec![
+                CcCategoryEntryPayload {
+                    date: "2026-05-02".to_string(),
+                    payee: "UNKNOWN SHOP".to_string(),
+                    amount: "42.00".to_string(),
+                    category: "Expenses:Uncategorized".to_string(),
+                    uncategorized: true,
+                },
+                CcCategoryEntryPayload {
+                    date: "2026-05-01".to_string(),
+                    payee: "STARBUCKS".to_string(),
+                    amount: "6.50".to_string(),
+                    category: "Expenses:Food:Coffee".to_string(),
+                    uncategorized: false,
+                },
+            ],
+        };
+        CcCategoryReview::new(
+            "amex.csv".to_string(),
+            "amex".to_string(),
+            Some("Liabilities:CreditCard:Amex:Gold".to_string()),
+            response,
+        )
+    }
+
+    #[test]
+    fn cc_review_edits_category_via_editor_and_picker() {
+        let mut review = cc_review_fixture();
+        review.entries_state.select(Some(0));
+        review.open_editor();
+        // Category is the first field; open its picker and pick "Electronics" (index 1).
+        review.open_picker();
+        if let Some(picker) = review
+            .editor
+            .as_mut()
+            .and_then(|editor| editor.picker.as_mut())
+        {
+            picker.category_state.select(Some(1));
+        }
+        let picked = review.confirm_picker();
+
+        assert_eq!(picked.as_deref(), Some("Expenses:Shopping:Electronics"));
+        let edits = review.transaction_edits();
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].category, "Expenses:Shopping:Electronics");
+        assert_eq!(edits[0].amount, "42.00");
+        assert!(edits[0].new_amount.is_none());
+        assert!(!edits[0].deleted);
+    }
+
+    #[test]
+    fn cc_review_edits_amount_through_input_buffer() {
+        let mut review = cc_review_fixture();
+        review.entries_state.select(Some(0));
+        review.open_editor();
+        review.begin_amount_input();
+        review.amount_input_backspace(); // "42.00" -> "42.0"
+        review.amount_input_push('5'); // -> "42.05"
+        let committed = review.commit_amount_input();
+
+        assert_eq!(committed.as_deref(), Some("42.05"));
+        let edits = review.transaction_edits();
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].new_amount.as_deref(), Some("42.05"));
+        // The override key remains the original amount.
+        assert_eq!(edits[0].amount, "42.00");
+    }
+
+    #[test]
+    fn cc_review_toggles_deletion_from_list() {
+        let mut review = cc_review_fixture();
+        review.entries_state.select(Some(1));
+        assert_eq!(review.toggle_selected_deleted(), Some(true));
+
+        assert_eq!(review.deleted_count(), 1);
+        let edits = review.transaction_edits();
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].payee, "STARBUCKS");
+        assert!(edits[0].deleted);
+    }
+
+    #[test]
+    fn cc_review_reports_no_edits_when_untouched() {
+        let review = cc_review_fixture();
+        assert_eq!(review.changed_count(), 0);
+        assert!(review.transaction_edits().is_empty());
+    }
 }
