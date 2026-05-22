@@ -8,6 +8,11 @@ image pipeline but at the bbox layer.
 Default ordering: filter_low_quality -> filter_bob_markers ->
 deskew_detections -> sort_reading_order.
 
+The numeric work (quality/marker filtering, RANSAC deskew, shear, reading-order
+sort) lives in the native ``beanbeaver._rust_matcher`` extension; this module is
+a thin orchestration layer that keeps the op-callable API stable, marshals
+detection dicts, and owns the optional debug-dump filesystem I/O.
+
 When ``BEANBEAVER_POSTOCR_DUMP_DIR`` points to a parent directory, every
 ``normalize_detections`` call writes a per-call subdir containing the input
 detections, each pass's output, and a ``trace.json`` of per-op metadata
@@ -18,42 +23,38 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
-import random
-import re
-import statistics
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ._rust import require_rust_matcher
+
 Detection = dict[str, Any]
 
 POSTOCR_DUMP_DIR_ENV = "BEANBEAVER_POSTOCR_DUMP_DIR"
 
-MIN_CONFIDENCE = 0.7
-MIN_TEXT_LENGTH = 2
-
-# Detection-level deskew via RANSAC over same-row item↔price slopes.
-# See docs/detection_deskew_plan.md for derivation.
-DESKEW_MIN_CONFIDENCE = 0.95
-DESKEW_MIN_ITEM_WIDTH = 0.08  # × image_width
-DESKEW_MIN_PRICE_WIDTH = 0.03
-DESKEW_MIN_X_DISTANCE = 0.50
-DESKEW_ITEM_X_MAX_FRAC = 0.40
-DESKEW_PRICE_X_MIN_FRAC = 0.60
-DESKEW_Y_WINDOW_PX = 200
-DESKEW_ANGLE_CAP_DEG = 5.0
-DESKEW_MIN_ANGLE_DEG = 0.3
-DESKEW_INLIER_TOL_DEG = 0.2
-DESKEW_MIN_INLIERS = 5
-DESKEW_MIN_CONSENSUS = 0.60
-DESKEW_RANSAC_ITERS = 50
-DESKEW_RANSAC_SEED = 0
-
-_PRICE_TEXT_RE = re.compile(r"^\s*[-$]?\d+\.\d{2}[A-Z]?\s*$")
+# Pipeline thresholds are owned by the Rust implementation and re-exported here
+# so callers and tests keep importing them from this module unchanged.
+_CONSTANTS = require_rust_matcher().detection_constants()
+MIN_CONFIDENCE: float = _CONSTANTS["MIN_CONFIDENCE"]
+MIN_TEXT_LENGTH: int = _CONSTANTS["MIN_TEXT_LENGTH"]
+DESKEW_MIN_CONFIDENCE: float = _CONSTANTS["DESKEW_MIN_CONFIDENCE"]
+DESKEW_MIN_ITEM_WIDTH: float = _CONSTANTS["DESKEW_MIN_ITEM_WIDTH"]
+DESKEW_MIN_PRICE_WIDTH: float = _CONSTANTS["DESKEW_MIN_PRICE_WIDTH"]
+DESKEW_MIN_X_DISTANCE: float = _CONSTANTS["DESKEW_MIN_X_DISTANCE"]
+DESKEW_ITEM_X_MAX_FRAC: float = _CONSTANTS["DESKEW_ITEM_X_MAX_FRAC"]
+DESKEW_PRICE_X_MIN_FRAC: float = _CONSTANTS["DESKEW_PRICE_X_MIN_FRAC"]
+DESKEW_Y_WINDOW_PX: int = _CONSTANTS["DESKEW_Y_WINDOW_PX"]
+DESKEW_ANGLE_CAP_DEG: float = _CONSTANTS["DESKEW_ANGLE_CAP_DEG"]
+DESKEW_MIN_ANGLE_DEG: float = _CONSTANTS["DESKEW_MIN_ANGLE_DEG"]
+DESKEW_INLIER_TOL_DEG: float = _CONSTANTS["DESKEW_INLIER_TOL_DEG"]
+DESKEW_MIN_INLIERS: int = _CONSTANTS["DESKEW_MIN_INLIERS"]
+DESKEW_MIN_CONSENSUS: float = _CONSTANTS["DESKEW_MIN_CONSENSUS"]
+DESKEW_RANSAC_ITERS: int = _CONSTANTS["DESKEW_RANSAC_ITERS"]
+DESKEW_RANSAC_SEED: int = _CONSTANTS["DESKEW_RANSAC_SEED"]
 
 
 @dataclass
@@ -74,41 +75,13 @@ class DetectionNormalizationContext:
 DetectionNormalizationOp = Callable[[list[Detection], DetectionNormalizationContext], list[Detection]]
 
 
-def _boxes_overlap_y(det1: Detection, det2: Detection, min_overlap_ratio: float = 0.3) -> bool:
-    """Check vertical overlap between two detections."""
-    y1_min, y1_max = det1["y_min"], det1["y_max"]
-    y2_min, y2_max = det2["y_min"], det2["y_max"]
-    overlap_start = max(y1_min, y2_min)
-    overlap_end = min(y1_max, y2_max)
-    if overlap_start >= overlap_end:
-        return False
-    overlap = overlap_end - overlap_start
-    smaller_height = min(y1_max - y1_min, y2_max - y2_min)
-    if smaller_height <= 0:
-        return False
-    return overlap / smaller_height >= min_overlap_ratio
-
-
-def _is_bob_marker_text(text: str) -> bool:
-    """Return True for Costco Bottom-Of-Basket marker rows."""
-    upper = text.upper()
-    has_bottom_banner = "BOTTOM OF BAS" in upper
-    has_bob_count_marker = "BOB COUNT" in upper and bool(re.search(r"[X*]{4,}", upper))
-    return has_bottom_banner or has_bob_count_marker
-
-
 def filter_low_quality_op(
     detections: list[Detection],
     ctx: DetectionNormalizationContext,
 ) -> list[Detection]:
     """Drop detections below the confidence floor or with too-short text."""
-    kept: list[Detection] = []
-    for det in detections:
-        if float(det.get("confidence", 0.0)) < MIN_CONFIDENCE:
-            continue
-        if len((det.get("text") or "").strip()) < MIN_TEXT_LENGTH:
-            continue
-        kept.append(det)
+    kept_indices = require_rust_matcher().detection_filter_low_quality(detections)
+    kept = [detections[index] for index in kept_indices]
     ctx.trace.append({"op": "filter_low_quality", "input": len(detections), "output": len(kept)})
     return kept
 
@@ -123,139 +96,10 @@ def filter_bob_markers_op(
     same Y band as a real item+price pair on Costco receipts. Keeping them
     hijacks line grouping; drop only when they overlap a non-marker.
     """
-    if not detections:
-        ctx.trace.append({"op": "filter_bob_markers", "input": 0, "output": 0})
-        return detections
-    filtered: list[Detection] = []
-    for det in detections:
-        if not _is_bob_marker_text(det["text"]):
-            filtered.append(det)
-            continue
-        overlaps_non_marker = any(
-            other is not det
-            and not _is_bob_marker_text(other["text"])
-            and _boxes_overlap_y(det, other, min_overlap_ratio=0.25)
-            for other in detections
-        )
-        if not overlaps_non_marker:
-            filtered.append(det)
-    ctx.trace.append({"op": "filter_bob_markers", "input": len(detections), "output": len(filtered)})
-    return filtered
-
-
-@dataclass(frozen=True)
-class _PairCandidate:
-    """A single (item bbox, price bbox) candidate with its implied tilt angle.
-
-    Same-row item↔price slopes are used (not individual bbox top/centerline
-    angles) because both sides have matched glyph patterns — the asymmetry
-    bias that derailed the prior centerline-median estimator cancels out.
-    """
-
-    item_center_y: float
-    price_center_y: float
-    item_center_x: float
-    price_center_x: float
-    angle_deg: float
-
-
-def _bbox_x_extent(bbox: list[list[float]]) -> tuple[float, float, float]:
-    xs = [p[0] for p in bbox]
-    return min(xs), max(xs), sum(xs) / len(xs)
-
-
-def _build_pair_candidates(detections: list[Detection], image_width: int) -> list[_PairCandidate]:
-    """Cross-product item/price candidates filtered by column/width/proximity.
-
-    Liberally generated; mispairings are expected to fall out as RANSAC
-    outliers rather than being filtered upfront (tightening here would
-    re-introduce a chicken-and-egg dependency on the matcher).
-    """
-    item_x_max_cap = image_width * DESKEW_ITEM_X_MAX_FRAC
-    price_x_min_floor = image_width * DESKEW_PRICE_X_MIN_FRAC
-    min_item_width = image_width * DESKEW_MIN_ITEM_WIDTH
-    min_price_width = image_width * DESKEW_MIN_PRICE_WIDTH
-    min_x_distance = image_width * DESKEW_MIN_X_DISTANCE
-
-    items: list[tuple[float, float, float]] = []  # (cx, cy, x_max)
-    prices: list[tuple[float, float, float]] = []  # (cx, cy, x_min)
-
-    for det in detections:
-        if float(det.get("confidence", 0.0)) < DESKEW_MIN_CONFIDENCE:
-            continue
-        bbox = det.get("bbox") or []
-        if len(bbox) < 4:
-            continue
-        x_min, x_max, x_center = _bbox_x_extent(bbox)
-        width = x_max - x_min
-        if width <= 0:
-            continue
-        cy = float(det["center_y"])
-        text = (det.get("text") or "").strip()
-
-        if x_max < item_x_max_cap and width >= min_item_width:
-            items.append((x_center, cy, x_max))
-        if x_min > price_x_min_floor and width >= min_price_width and _PRICE_TEXT_RE.match(text):
-            prices.append((x_center, cy, x_min))
-
-    candidates: list[_PairCandidate] = []
-    for icx, icy, _ in items:
-        for pcx, pcy, _ in prices:
-            dx = pcx - icx
-            if dx < min_x_distance:
-                continue
-            if abs(pcy - icy) > DESKEW_Y_WINDOW_PX:
-                continue
-            angle = math.degrees(math.atan2(pcy - icy, dx))
-            candidates.append(
-                _PairCandidate(
-                    item_center_y=icy,
-                    price_center_y=pcy,
-                    item_center_x=icx,
-                    price_center_x=pcx,
-                    angle_deg=angle,
-                )
-            )
-    return candidates
-
-
-def _ransac_consensus(candidates: list[_PairCandidate]) -> tuple[float, int]:
-    """Return (best_angle_deg, inlier_count). 0.0/0 when no consensus found.
-
-    Deterministic via DESKEW_RANSAC_SEED — same input always produces the
-    same output, matching the rest of the pipeline's reproducibility story.
-    """
-    if len(candidates) < 3:
-        return 0.0, 0
-    rng = random.Random(DESKEW_RANSAC_SEED)
-    best_angle = 0.0
-    best_inliers = 0
-    for _ in range(DESKEW_RANSAC_ITERS):
-        sample = rng.sample(candidates, k=3)
-        trial = statistics.median(c.angle_deg for c in sample)
-        if abs(trial) > DESKEW_ANGLE_CAP_DEG:
-            continue
-        inliers = [c for c in candidates if abs(c.angle_deg - trial) <= DESKEW_INLIER_TOL_DEG]
-        if len(inliers) > best_inliers:
-            best_inliers = len(inliers)
-            best_angle = statistics.fmean(c.angle_deg for c in inliers)
-    return best_angle, best_inliers
-
-
-def _apply_shear(detections: list[Detection], angle_deg: float, image_width: int) -> list[Detection]:
-    tan_angle = math.tan(math.radians(angle_deg))
-    x_ref = image_width / 2
-    corrected: list[Detection] = []
-    for det in detections:
-        bbox = det["bbox"]
-        x_center = sum(p[0] for p in bbox) / len(bbox)
-        delta = (x_center - x_ref) * tan_angle
-        new_det = dict(det)
-        new_det["center_y"] = det["center_y"] - delta
-        new_det["y_min"] = det["y_min"] - delta
-        new_det["y_max"] = det["y_max"] - delta
-        corrected.append(new_det)
-    return corrected
+    kept_indices = require_rust_matcher().detection_filter_bob_markers(detections)
+    kept = [detections[index] for index in kept_indices]
+    ctx.trace.append({"op": "filter_bob_markers", "input": len(detections), "output": len(kept)})
+    return kept
 
 
 def deskew_detections_op(
@@ -271,39 +115,14 @@ def deskew_detections_op(
     rows out of the matcher's y-band, the failure mode that killed the prior
     centerline-median estimator.
     """
-    candidates = _build_pair_candidates(detections, ctx.image_width)
-    angle, inliers = _ransac_consensus(candidates)
-    consensus_ratio = inliers / len(candidates) if candidates else 0.0
-    record: dict[str, Any] = {
-        "op": "deskew_detections",
-        "angle_deg": angle,
-        "applied": False,
-        "candidate_count": len(candidates),
-        "inlier_count": inliers,
-        "consensus_ratio": consensus_ratio,
-        "gate_reason": None,
-    }
-
-    gate_reason: str | None = None
-    if not candidates:
-        gate_reason = "no_candidates"
-    elif inliers < DESKEW_MIN_INLIERS:
-        gate_reason = "too_few_inliers"
-    elif abs(angle) > DESKEW_ANGLE_CAP_DEG:
-        gate_reason = "angle_too_large"
-    elif consensus_ratio < DESKEW_MIN_CONSENSUS:
-        gate_reason = "weak_consensus"
-    elif abs(angle) < DESKEW_MIN_ANGLE_DEG:
-        gate_reason = "angle_too_small"
-
-    if gate_reason is not None:
-        record["gate_reason"] = gate_reason
-        ctx.trace.append(record)
-        return detections
-
-    record["applied"] = True
+    record, new_y = require_rust_matcher().detection_deskew(detections, ctx.image_width)
     ctx.trace.append(record)
-    return _apply_shear(detections, angle, ctx.image_width)
+    if new_y is None:
+        return detections
+    return [
+        {**det, "center_y": center_y, "y_min": y_min, "y_max": y_max}
+        for det, (center_y, y_min, y_max) in zip(detections, new_y, strict=True)
+    ]
 
 
 def sort_reading_order_op(
@@ -311,7 +130,8 @@ def sort_reading_order_op(
     ctx: DetectionNormalizationContext,
 ) -> list[Detection]:
     """Sort by (center_y, min_x) for top-to-bottom, left-to-right order."""
-    out = sorted(detections, key=lambda d: (d["center_y"], d["min_x"]))
+    order = require_rust_matcher().detection_sort_reading_order(detections)
+    out = [detections[index] for index in order]
     ctx.trace.append({"op": "sort_reading_order", "count": len(out)})
     return out
 
