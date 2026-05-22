@@ -229,15 +229,15 @@ def resolve_import_accounts(
                 as_of=None if options.as_of is None else options.as_of.isoformat(),
             )
 
-        options = chequing_import.resolve_chequing_account_options(csv_file)
+        cheq_options = chequing_import.resolve_chequing_account_options(csv_file)
         return ResolveImportAccountsResult(
             status="ready",
             import_type=import_type,
             csv_file=csv_file,
-            importer_id=options.chequing_type,
-            account_label=options.account_label,
-            account_options=options.account_options,
-            as_of=None if options.as_of is None else options.as_of.isoformat(),
+            importer_id=cheq_options.chequing_type,
+            account_label=cheq_options.account_label,
+            account_options=cheq_options.account_options,
+            as_of=None if cheq_options.as_of is None else cheq_options.as_of.isoformat(),
         )
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         return ResolveImportAccountsResult(
@@ -306,7 +306,7 @@ def apply_import(request: ApplyImportRequest) -> ApplyImportResult:
             error=result.error,
         )
 
-    result = chequing_import.run_chequing_import(
+    cheq_result = chequing_import.run_chequing_import(
         chequing_import.ChequingImportRequest(
             csv_file=request.csv_file,
             selected_account=request.selected_account,
@@ -314,14 +314,14 @@ def apply_import(request: ApplyImportRequest) -> ApplyImportResult:
         )
     )
     return ApplyImportResult(
-        status=result.status,
+        status=cheq_result.status,
         import_type=request.import_type,
-        result_file_path=result.result_file_path,
-        result_file_name=result.result_file_name,
-        account=result.account,
-        start_date=result.start_date,
-        end_date=result.end_date,
-        error=result.error,
+        result_file_path=cheq_result.result_file_path,
+        result_file_name=cheq_result.result_file_name,
+        account=cheq_result.account,
+        start_date=cheq_result.start_date,
+        end_date=cheq_result.end_date,
+        error=cheq_result.error,
     )
 
 
@@ -395,7 +395,7 @@ def apply_import_machine_readable(request: ApplyImportRequest) -> ApplyImportRes
             summary=summary,
         )
 
-    result = chequing_import.run_chequing_import(
+    cheq_result = chequing_import.run_chequing_import(
         chequing_import.ChequingImportRequest(
             csv_file=request.csv_file,
             selected_account=request.selected_account,
@@ -406,17 +406,17 @@ def apply_import_machine_readable(request: ApplyImportRequest) -> ApplyImportRes
         ),
         emit_console_output=False,
     )
-    summary = None if result.result_file_path is None else f"Import complete: {result.result_file_path}"
+    summary = None if cheq_result.result_file_path is None else f"Import complete: {cheq_result.result_file_path}"
     return ApplyImportResult(
-        status=result.status,
+        status=cheq_result.status,
         import_type=request.import_type,
-        result_file_path=result.result_file_path,
-        result_file_name=result.result_file_name,
-        account=result.account,
-        start_date=result.start_date,
-        end_date=result.end_date,
-        error=result.error,
-        warnings=result.warnings,
-        validation_errors=result.validation_errors,
+        result_file_path=cheq_result.result_file_path,
+        result_file_name=cheq_result.result_file_name,
+        account=cheq_result.account,
+        start_date=cheq_result.start_date,
+        end_date=cheq_result.end_date,
+        error=cheq_result.error,
+        warnings=cheq_result.warnings,
+        validation_errors=cheq_result.validation_errors,
         summary=summary,
     )

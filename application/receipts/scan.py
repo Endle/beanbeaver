@@ -7,7 +7,7 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from beanbeaver.receipt.ocr_extraction import resize_image_bytes
 from beanbeaver.receipt.receipt_structuring import parse_receipt
@@ -81,7 +81,7 @@ def run_receipt_scan(request: ReceiptScanRequest) -> ReceiptScanResult:
     scanned_path = save_scanned_receipt(
         receipt,
         raw_ocr_payload=raw_ocr_result,
-        stage1_ocr_payload=ocr_result,
+        stage1_ocr_payload=cast(dict[str, Any], ocr_result),
         image_sha256=image_sha256,
         source_image_path=request.image_path,
         resized_image_bytes=resized_image_bytes,

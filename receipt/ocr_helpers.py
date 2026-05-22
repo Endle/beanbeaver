@@ -6,7 +6,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from PIL import Image
 
@@ -19,7 +19,7 @@ from .image_pipeline import (
     default_image_pipeline,
     run_image_pipeline,
 )
-from .ocr_schema import OCR_ENGINE_NAME_PADDLE, OCR_SCHEMA_VERSION, OcrBBox, OcrDocument
+from .ocr_schema import OCR_ENGINE_NAME_PADDLE, OCR_SCHEMA_VERSION, OcrBBox, OcrDocument, OcrLine
 
 PREOCR_DUMP_DIR_ENV = "BEANBEAVER_PREOCR_DUMP_DIR"
 
@@ -233,7 +233,7 @@ def transform_paddleocr_result(raw_result: dict[str, Any], padding: int = OCR_IM
                 "page_index": 0,
                 "width": image_width,
                 "height": image_height,
-                "lines": result_lines,
+                "lines": cast("list[OcrLine]", result_lines),
             }
         ],
     }

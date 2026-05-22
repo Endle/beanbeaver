@@ -7,7 +7,12 @@ from typing import Any
 
 import httpx
 
-from beanbeaver.receipt.ocr_extraction import OCR_IMAGE_PADDING, resize_image_bytes, transform_paddleocr_result
+from beanbeaver.receipt.ocr_extraction import (
+    OCR_IMAGE_PADDING,
+    OcrDocument,
+    resize_image_bytes,
+    transform_paddleocr_result,
+)
 from beanbeaver.runtime import get_logger
 from beanbeaver.runtime.receipt_storage import receipt_ocr_overlay_path, receipt_ocr_raw_path
 
@@ -18,7 +23,7 @@ class OCRServiceUnavailable(RuntimeError):
     """Raised when the OCR service cannot be reached or returns an error."""
 
 
-def call_ocr_service(receipt_path: Path, ocr_url: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def call_ocr_service(receipt_path: Path, ocr_url: str) -> tuple[dict[str, Any], OcrDocument]:
     """
     Call the OCR service and return both raw and transformed results.
 
@@ -102,6 +107,7 @@ def create_debug_overlay(
     img_width, img_height = img.size
     draw = ImageDraw.Draw(img)
 
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont
     try:
         font_size = max(14, int(img_height / 150))
         font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)

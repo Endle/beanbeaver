@@ -7,7 +7,7 @@ from pathlib import Path
 
 from _pytest.capture import CaptureFixture
 from _pytest.monkeypatch import MonkeyPatch
-from beanbeaver.application.receipts.review import ReEditApprovedReceiptResult
+from beanbeaver.application.receipts.review import ReEditApprovedReceiptRequest, ReEditApprovedReceiptResult
 from beanbeaver.cli import receipt as receipt_cli
 
 
@@ -50,7 +50,7 @@ def test_cmd_re_edit_accepts_direct_path(
         def isatty(self) -> bool:
             return True
 
-    def _fake_run(request: object) -> ReEditApprovedReceiptResult:
+    def _fake_run(request: ReEditApprovedReceiptRequest) -> ReEditApprovedReceiptResult:
         captured_path["target"] = request.target_path
         return ReEditApprovedReceiptResult(status="updated", updated_path=updated)
 

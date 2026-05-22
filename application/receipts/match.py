@@ -165,9 +165,9 @@ def _load_ledger_transactions(ledger_path: Path) -> tuple[object, list[str]]:
 
 def _resolve_receipt_match_candidates(
     receipt: Receipt,
-    transactions: Sequence[object],
+    transactions: Sequence[Any],
     *,
-    merchant_families: Sequence[object] | None,
+    merchant_families: Sequence[Any] | None,
 ) -> _ResolvedMatchCandidates:
     """Return strict matches, or weaker manual-review candidates when strict yields none."""
     from beanbeaver.receipt.matcher import (
