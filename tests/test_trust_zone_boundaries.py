@@ -9,7 +9,9 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
 _DOC = _ROOT / "docs" / "trust_zone.md"
+_RUST_SRC = _ROOT / "src"
 _ZONE_NAMES = {"Privileged", "Orchestrator", "Pure"}
+_RUST_ZONE_NAMES = {"Privileged", "Orchestrator", "Pure", "Excluded"}
 _ALLOWED_TARGET_ZONES = {
     "Privileged": {"Privileged", "Pure"},
     "Orchestrator": {"Privileged", "Orchestrator", "Pure"},
@@ -114,6 +116,87 @@ def test_trust_zone_doc_paths_exist() -> None:
                 missing.append(str(path.relative_to(_ROOT)))
 
     assert not missing, "Trust-zone paths in docs do not exist:\n" + "\n".join(sorted(missing))
+
+
+def _parse_rust_zone_mapping() -> tuple[dict[str, str], set[str]]:
+    """Parse the Native Extension Module Mapping into {filename: zone} + excluded.
+
+    Files not listed default to ``Pure`` (handled by callers), mirroring the
+    inheritance rule for directories.
+    """
+    text = _DOC.read_text(encoding="utf-8")
+    file_zone: dict[str, str] = {}
+    excluded: set[str] = set()
+
+    in_section = False
+    current_zone: str | None = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Native Extension Module Mapping"):
+            in_section = True
+            continue
+        if not in_section:
+            continue
+
+        token_match = re.match(r"^\s*-\s+`([^`]+)`", line)
+        if not token_match:
+            continue
+        token = token_match.group(1).strip()
+
+        if token in _RUST_ZONE_NAMES:
+            current_zone = token
+            continue
+        if current_zone is None or not token.endswith(".rs"):
+            continue
+        if current_zone == "Excluded":
+            excluded.add(token)
+        else:
+            file_zone[token] = current_zone
+
+    return file_zone, excluded
+
+
+def _rust_crate_edges() -> list[tuple[str, set[str]]]:
+    """Return ``(source_file, {target_file, ...})`` for every ``src/*.rs``.
+
+    Edges are the ``crate::<module>`` references in the source, regardless of
+    whether they appear in a ``use`` statement or an inline path.
+    """
+    edges: list[tuple[str, set[str]]] = []
+    for path in sorted(_RUST_SRC.glob("*.rs")):
+        text = path.read_text(encoding="utf-8")
+        targets = {f"{name}.rs" for name in re.findall(r"crate::([a-z_][a-z0-9_]*)", text)}
+        edges.append((path.name, targets))
+    return edges
+
+
+def test_trust_zone_rust_doc_modules_exist() -> None:
+    file_zone, excluded = _parse_rust_zone_mapping()
+    assert file_zone, f"Missing Native Extension Module Mapping in {_DOC}"
+
+    missing = [name for name in (set(file_zone) | excluded) if not (_RUST_SRC / name).exists()]
+    assert not missing, "Native-extension trust-zone files do not exist:\n" + "\n".join(sorted(missing))
+
+
+def test_trust_zone_rust_import_boundaries() -> None:
+    file_zone, excluded = _parse_rust_zone_mapping()
+    violations: list[str] = []
+
+    for source_name, targets in _rust_crate_edges():
+        if source_name in excluded:
+            continue
+        source_zone = file_zone.get(source_name, "Pure")
+
+        for target in sorted(targets):
+            if target == source_name or target in excluded:
+                continue
+            if not (_RUST_SRC / target).exists():
+                continue
+            target_zone = file_zone.get(target, "Pure")
+            if target_zone not in _ALLOWED_TARGET_ZONES[source_zone]:
+                violations.append(f"src/{source_name}: {source_zone} imports {target} ({target_zone})")
+
+    assert not violations, "Native-extension trust-zone violations:\n" + "\n".join(violations)
 
 
 def test_trust_zone_import_boundaries() -> None:
