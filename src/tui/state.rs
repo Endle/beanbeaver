@@ -29,6 +29,109 @@ pub(crate) struct ImportPageState {
     pub(crate) decisions_error: Option<String>,
     pub(crate) decisions_loaded_for: Option<(String, String)>,
     pub(crate) decision_picker: Option<DecisionPickerState>,
+    pub(crate) cc_review: Option<CcCategoryReview>,
+}
+
+/// Interactive post-import category review for one credit-card statement.
+///
+/// Built from `preflight-cc-import` (nothing is written yet); the user adjusts categories,
+/// then apply commits the statement with the collected overrides.
+#[derive(Clone, Debug)]
+pub(crate) struct CcCategoryReview {
+    pub(crate) csv_file: String,
+    pub(crate) importer_id: String,
+    pub(crate) selected_account: Option<String>,
+    pub(crate) card_account: Option<String>,
+    pub(crate) entries: Vec<CcCategoryEntryView>,
+    pub(crate) entries_state: ListState,
+    pub(crate) candidate_categories: Vec<String>,
+    pub(crate) picker: Option<CategoryPickerState>,
+}
+
+impl CcCategoryReview {
+    pub(crate) fn new(
+        csv_file: String,
+        importer_id: String,
+        selected_account: Option<String>,
+        response: PreflightCcImportResponse,
+    ) -> Self {
+        let entries: Vec<CcCategoryEntryView> = response
+            .entries
+            .into_iter()
+            .map(CcCategoryEntryView::from_payload)
+            .collect();
+        let mut entries_state = ListState::default();
+        entries_state.select(if entries.is_empty() { None } else { Some(0) });
+        Self {
+            csv_file,
+            importer_id,
+            selected_account,
+            card_account: response.card_account,
+            entries,
+            entries_state,
+            candidate_categories: response.candidate_categories,
+            picker: None,
+        }
+    }
+
+    pub(crate) fn move_selection(&mut self, delta: isize) {
+        let len = self.entries.len();
+        if len == 0 {
+            self.entries_state.select(None);
+            return;
+        }
+        let current = self.entries_state.selected().unwrap_or(0) as isize;
+        let next = (current + delta).clamp(0, (len - 1) as isize) as usize;
+        self.entries_state.select(Some(next));
+    }
+
+    pub(crate) fn open_picker(&mut self) {
+        let Some(index) = self.entries_state.selected() else {
+            return;
+        };
+        let Some(entry) = self.entries.get(index) else {
+            return;
+        };
+        if self.candidate_categories.is_empty() {
+            return;
+        }
+        let selected = self
+            .candidate_categories
+            .iter()
+            .position(|candidate| candidate == &entry.chosen_category)
+            .unwrap_or(0);
+        self.picker = Some(CategoryPickerState::new(index, selected));
+    }
+
+    pub(crate) fn close_picker(&mut self) {
+        self.picker = None;
+    }
+
+    pub(crate) fn confirm_picker(&mut self) -> Option<String> {
+        let picker = self.picker.take()?;
+        let selection = picker.category_state.selected()?;
+        let category = self.candidate_categories.get(selection)?.clone();
+        let entry = self.entries.get_mut(picker.item_index)?;
+        entry.chosen_category = category.clone();
+        Some(category)
+    }
+
+    pub(crate) fn changed_count(&self) -> usize {
+        self.entries.iter().filter(|entry| entry.is_changed()).count()
+    }
+
+    pub(crate) fn category_overrides(&self) -> Vec<ImportOverridePayload> {
+        self.entries
+            .iter()
+            .filter(|entry| entry.is_changed())
+            .map(|entry| ImportOverridePayload {
+                date: entry.date.clone(),
+                description: entry.payee.clone(),
+                amount: entry.amount.clone(),
+                account: entry.chosen_category.clone(),
+            })
+            .collect()
+    }
 }
 
 impl ImportPageState {
@@ -57,6 +160,7 @@ impl ImportPageState {
             decisions_error: None,
             decisions_loaded_for: None,
             decision_picker: None,
+            cc_review: None,
         }
     }
 
@@ -217,6 +321,7 @@ impl ImportPageState {
         self.account_as_of = None;
         self.account_error = None;
         self.clear_decisions();
+        self.cc_review = None;
     }
 
     pub(crate) fn apply_account_resolution(

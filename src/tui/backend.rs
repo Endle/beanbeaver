@@ -130,6 +130,7 @@ pub(crate) fn backend_apply_import(
     allow_uncommitted: bool,
     cc_payment_overrides: &[ImportOverridePayload],
     bank_transfer_overrides: &[ImportOverridePayload],
+    category_overrides: &[ImportOverridePayload],
 ) -> AppResult<ApplyImportResponse> {
     let payload = serde_json::json!({
         "import_type": import_type,
@@ -139,9 +140,27 @@ pub(crate) fn backend_apply_import(
         "allow_uncommitted": allow_uncommitted,
         "cc_payment_overrides": cc_payment_overrides,
         "bank_transfer_overrides": bank_transfer_overrides,
+        "category_overrides": category_overrides,
     });
     let stdout = run_backend_with_input(
         &["api", "import-apply"],
+        Some(&serde_json::to_string(&payload)?),
+    )?;
+    Ok(serde_json::from_str(&stdout)?)
+}
+
+pub(crate) fn backend_preflight_cc_import(
+    csv_file: &str,
+    importer_id: &str,
+    selected_account: Option<&str>,
+) -> AppResult<PreflightCcImportResponse> {
+    let payload = serde_json::json!({
+        "csv_file": csv_file,
+        "importer_id": importer_id,
+        "selected_account": selected_account,
+    });
+    let stdout = run_backend_with_input(
+        &["api", "preflight-cc-import"],
         Some(&serde_json::to_string(&payload)?),
     )?;
     Ok(serde_json::from_str(&stdout)?)

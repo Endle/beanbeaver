@@ -327,6 +327,108 @@ pub(crate) fn run_app(
             continue;
         }
 
+        if app.imports_state.cc_review.is_some() {
+            let picker_open = app
+                .imports_state
+                .cc_review
+                .as_ref()
+                .is_some_and(|review| review.picker.is_some());
+            if picker_open {
+                let candidates_len = app
+                    .imports_state
+                    .cc_review
+                    .as_ref()
+                    .map(|review| review.candidate_categories.len())
+                    .unwrap_or(0);
+                match key.code {
+                    KeyCode::Esc => {
+                        if let Some(review) = app.imports_state.cc_review.as_mut() {
+                            review.close_picker();
+                        }
+                        app.set_status("Cancelled category selection");
+                    }
+                    KeyCode::Enter => {
+                        let picked = app
+                            .imports_state
+                            .cc_review
+                            .as_mut()
+                            .and_then(|review| review.confirm_picker());
+                        if let Some(category) = picked {
+                            app.set_status(format!("Set category to {category}"));
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if let Some(picker) = app
+                            .imports_state
+                            .cc_review
+                            .as_mut()
+                            .and_then(|review| review.picker.as_mut())
+                        {
+                            picker.move_selection(1, candidates_len);
+                        }
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if let Some(picker) = app
+                            .imports_state
+                            .cc_review
+                            .as_mut()
+                            .and_then(|review| review.picker.as_mut())
+                        {
+                            picker.move_selection(-1, candidates_len);
+                        }
+                    }
+                    KeyCode::PageDown => {
+                        if let Some(picker) = app
+                            .imports_state
+                            .cc_review
+                            .as_mut()
+                            .and_then(|review| review.picker.as_mut())
+                        {
+                            picker.move_selection(CategoryPickerState::PAGE_STEP, candidates_len);
+                        }
+                    }
+                    KeyCode::PageUp => {
+                        if let Some(picker) = app
+                            .imports_state
+                            .cc_review
+                            .as_mut()
+                            .and_then(|review| review.picker.as_mut())
+                        {
+                            picker.move_selection(-CategoryPickerState::PAGE_STEP, candidates_len);
+                        }
+                    }
+                    _ => {}
+                }
+            } else {
+                match key.code {
+                    KeyCode::Esc => app.cancel_cc_category_review(),
+                    KeyCode::Char('a') => {
+                        if let Err(error) = app.finalize_cc_category_review() {
+                            app.set_error(error.to_string());
+                        }
+                    }
+                    KeyCode::Enter | KeyCode::Char('c') => {
+                        if let Some(review) = app.imports_state.cc_review.as_mut() {
+                            review.open_picker();
+                        }
+                        app.set_status("Select a category (↑↓ · PgUp/PgDn · Enter confirm · Esc cancel)");
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if let Some(review) = app.imports_state.cc_review.as_mut() {
+                            review.move_selection(1);
+                        }
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if let Some(review) = app.imports_state.cc_review.as_mut() {
+                            review.move_selection(-1);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            continue;
+        }
+
         if app.imports_state.decision_picker.is_some() {
             let candidates_len = app
                 .imports_state

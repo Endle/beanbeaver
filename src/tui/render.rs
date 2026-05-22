@@ -361,6 +361,9 @@ pub(crate) fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
     if app.imports_state.decision_picker.is_some() {
         render_decision_picker_modal(frame, &mut app.imports_state);
     }
+    if app.imports_state.cc_review.is_some() {
+        render_cc_category_review_modal(frame, &mut app.imports_state);
+    }
 }
 
 pub(crate) fn render_receipts_page(
@@ -1318,6 +1321,91 @@ pub(crate) fn render_decision_picker_modal(
         .style(popup_style())
         .wrap(Wrap { trim: true });
     frame.render_widget(help, rows[2]);
+}
+
+pub(crate) fn render_cc_category_review_modal(
+    frame: &mut ratatui::Frame<'_>,
+    imports_state: &mut ImportPageState,
+) {
+    let Some(review) = imports_state.cc_review.as_mut() else {
+        return;
+    };
+
+    let popup = centered_rect(88, 24, frame.area());
+    frame.render_widget(Clear, popup);
+
+    let card = review.card_account.as_deref().unwrap_or("(unknown card)");
+    let changed = review.changed_count();
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(format!(
+                "Review categories — {card} ({} txns · {changed} changed)",
+                review.entries.len()
+            ))
+            .style(popup_style()),
+        popup,
+    );
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(4), Constraint::Length(2)])
+        .split(popup);
+
+    let items: Vec<ListItem> = review
+        .entries
+        .iter()
+        .map(|entry| ListItem::new(Line::from(entry.display_label())).style(popup_style()))
+        .collect();
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Transactions (! uncategorized · * changed)")
+                .style(popup_style()),
+        )
+        .style(popup_style())
+        .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+        .highlight_symbol(">> ");
+    frame.render_stateful_widget(list, rows[0], &mut review.entries_state);
+
+    let help = Paragraph::new("Enter/c change category  |  a apply  |  Esc cancel  |  j/k move")
+        .style(popup_style())
+        .wrap(Wrap { trim: true });
+    frame.render_widget(help, rows[1]);
+
+    // Inner category picker overlay.
+    if let Some(picker) = review.picker.as_mut() {
+        let inner = centered_rect(60, 18, frame.area());
+        frame.render_widget(Clear, inner);
+        let inner_rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(4), Constraint::Length(2)])
+            .split(inner);
+        let candidate_items: Vec<ListItem> = review
+            .candidate_categories
+            .iter()
+            .map(|category| ListItem::new(Line::from(category.clone())).style(popup_style()))
+            .collect();
+        let candidate_list = List::new(candidate_items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(format!(
+                        "Pick category ({})",
+                        review.candidate_categories.len()
+                    ))
+                    .style(popup_style()),
+            )
+            .style(popup_style())
+            .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+            .highlight_symbol(">> ");
+        frame.render_stateful_widget(candidate_list, inner_rows[0], &mut picker.category_state);
+        let inner_help = Paragraph::new("Enter confirm  |  Esc cancel  |  j/k · PgUp/PgDn move")
+            .style(popup_style())
+            .wrap(Wrap { trim: true });
+        frame.render_widget(inner_help, inner_rows[1]);
+    }
 }
 
 pub(crate) fn centered_rect(

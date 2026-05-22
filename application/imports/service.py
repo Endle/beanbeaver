@@ -79,6 +79,7 @@ class ApplyImportRequest:
     allow_uncommitted: bool | None = None
     cc_payment_overrides: tuple[TransactionOverridePayload, ...] = ()
     bank_transfer_overrides: tuple[TransactionOverridePayload, ...] = ()
+    category_overrides: tuple[TransactionOverridePayload, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -99,6 +100,26 @@ class PreflightChequingImportResult:
     chequing_type: str | None = None
     account: str | None = None
     decisions: tuple[ImportDecisionPayload, ...] = ()
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class CategoryReviewEntryPayload:
+    """Plain-data transaction surfaced by CC preflight for category review."""
+
+    date: str
+    payee: str
+    amount: str
+    category: str
+    uncategorized: bool
+
+
+@dataclass(frozen=True)
+class PreflightCreditCardImportResult:
+    status: Literal["ok", "error"]
+    card_account: str | None = None
+    entries: tuple[CategoryReviewEntryPayload, ...] = ()
+    candidate_categories: tuple[str, ...] = ()
     error: str | None = None
 
 
@@ -368,6 +389,50 @@ def preflight_chequing_import(
     )
 
 
+def _convert_category_overrides(
+    overrides: tuple[TransactionOverridePayload, ...],
+) -> tuple[credit_card_import.CategoryOverride, ...]:
+    return tuple(
+        credit_card_import.CategoryOverride(
+            date=item.date,
+            payee=item.description,
+            amount=item.amount,
+            category=item.account,
+        )
+        for item in overrides
+    )
+
+
+def preflight_credit_card_import(
+    *,
+    csv_file: str,
+    importer_id: str | None = None,
+    selected_account: str | None = None,
+) -> PreflightCreditCardImportResult:
+    result = credit_card_import.preflight_credit_card_categories(
+        csv_file=csv_file,
+        importer_id=None if importer_id is None else importer_id,  # type: ignore[arg-type]
+        selected_account=selected_account,
+    )
+    entries = tuple(
+        CategoryReviewEntryPayload(
+            date=entry.date,
+            payee=entry.payee,
+            amount=entry.amount,
+            category=entry.category,
+            uncategorized=entry.uncategorized,
+        )
+        for entry in result.entries
+    )
+    return PreflightCreditCardImportResult(
+        status=result.status,
+        card_account=result.card_account,
+        entries=entries,
+        candidate_categories=result.candidate_categories,
+        error=result.error,
+    )
+
+
 def apply_import_machine_readable(request: ApplyImportRequest) -> ApplyImportResult:
     if request.import_type == "cc":
         result = credit_card_import.run_credit_card_import(
@@ -378,6 +443,7 @@ def apply_import_machine_readable(request: ApplyImportRequest) -> ApplyImportRes
                 importer_id=None if request.importer_id is None else request.importer_id,  # type: ignore[arg-type]
                 selected_account=request.selected_account,
                 allow_uncommitted=request.allow_uncommitted,
+                category_overrides=_convert_category_overrides(request.category_overrides),
             )
         )
         summary = None if result.result_file_path is None else f"Import complete: {result.result_file_path}"

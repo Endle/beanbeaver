@@ -350,6 +350,68 @@ pub(crate) struct ApplyImportResponse {
     pub(crate) summary: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct CcCategoryEntryPayload {
+    pub(crate) date: String,
+    pub(crate) payee: String,
+    pub(crate) amount: String,
+    pub(crate) category: String,
+    #[serde(default)]
+    pub(crate) uncategorized: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct PreflightCcImportResponse {
+    pub(crate) status: String,
+    pub(crate) card_account: Option<String>,
+    pub(crate) error: Option<String>,
+    #[serde(default)]
+    pub(crate) candidate_categories: Vec<String>,
+    #[serde(default)]
+    pub(crate) entries: Vec<CcCategoryEntryPayload>,
+}
+
+/// One imported transaction whose category the user is reviewing before the ledger is written.
+#[derive(Clone, Debug)]
+pub(crate) struct CcCategoryEntryView {
+    pub(crate) date: String,
+    pub(crate) payee: String,
+    pub(crate) amount: String,
+    pub(crate) original_category: String,
+    pub(crate) chosen_category: String,
+    pub(crate) uncategorized: bool,
+}
+
+impl CcCategoryEntryView {
+    pub(crate) fn from_payload(payload: CcCategoryEntryPayload) -> Self {
+        Self {
+            date: payload.date,
+            payee: payload.payee,
+            amount: payload.amount,
+            original_category: payload.category.clone(),
+            chosen_category: payload.category,
+            uncategorized: payload.uncategorized,
+        }
+    }
+
+    pub(crate) fn is_changed(&self) -> bool {
+        self.chosen_category != self.original_category
+    }
+
+    pub(crate) fn display_label(&self) -> String {
+        let marker = if self.is_changed() { "*" } else { " " };
+        let flag = if self.uncategorized && !self.is_changed() {
+            "!"
+        } else {
+            " "
+        };
+        format!(
+            "{marker}{flag} {} {:>10}  {}  →  {}",
+            self.date, self.amount, self.payee, self.chosen_category
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ReviewPane {
     Items,
