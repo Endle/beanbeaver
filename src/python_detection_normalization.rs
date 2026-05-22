@@ -8,7 +8,7 @@ use crate::detection_normalization as logic;
 /// Numeric view of a Python detection dict. Missing numeric fields default to
 /// 0.0 and a missing/blank text to the empty string so the noop and partial
 /// fixtures used by the test suite extract without error.
-struct PyDetection(logic::Detection);
+pub(crate) struct PyDetection(pub(crate) logic::Detection);
 
 fn get_f64(dict: &Bound<'_, PyDict>, key: &str, default: f64) -> PyResult<f64> {
     Ok(match dict.get_item(key)? {
@@ -53,7 +53,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for PyDetection {
     }
 }
 
-fn to_logic(detections: Vec<PyDetection>) -> Vec<logic::Detection> {
+pub(crate) fn to_logic(detections: Vec<PyDetection>) -> Vec<logic::Detection> {
     detections.into_iter().map(|det| det.0).collect()
 }
 
