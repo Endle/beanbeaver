@@ -54,6 +54,22 @@ fn extract_formatter_receipt_input(
         });
     }
 
+    let mut tenders = Vec::new();
+    if let Ok(tenders_any) = receipt.getattr("tenders") {
+        for tender in tenders_any.try_iter()? {
+            let tender = tender?;
+            let account = match tender.getattr("account") {
+                Ok(value) if !value.is_none() => Some(value.extract::<String>()?),
+                _ => None,
+            };
+            tenders.push(receipt_formatter::FormatterTenderInput {
+                amount: fixed_decimal_string(&tender.getattr("amount")?)?,
+                account,
+                kind: required_string_attr(&tender, "kind")?,
+            });
+        }
+    }
+
     Ok(receipt_formatter::FormatterReceiptInput {
         merchant: required_string_attr(receipt, "merchant")?,
         date_iso: receipt.getattr("date")?.str()?.extract::<String>()?,
@@ -64,6 +80,7 @@ fn extract_formatter_receipt_input(
         raw_text: required_string_attr(receipt, "raw_text")?,
         items,
         warnings,
+        tenders,
     })
 }
 

@@ -214,6 +214,20 @@ fn extract_receipt_input(
         });
     }
 
+    let mut tenders = Vec::new();
+    if let Ok(tenders_any) = receipt.getattr("tenders") {
+        for tender in tenders_any.try_iter()? {
+            let tender = tender?;
+            tenders.push(receipt_staged_json::TenderInput {
+                amount: fixed_decimal_string(&tender.getattr("amount")?)?
+                    .unwrap_or_else(|| "0.00".to_string()),
+                account: optional_string_attr(&tender, "account")?,
+                kind: required_string_attr(&tender, "kind")?,
+                raw_label: required_string_attr(&tender, "raw_label")?,
+            });
+        }
+    }
+
     Ok(receipt_staged_json::ReceiptInput {
         merchant: required_string_attr(receipt, "merchant")?,
         date_iso: receipt.getattr("date")?.str()?.extract::<String>()?,
@@ -226,6 +240,7 @@ fn extract_receipt_input(
         raw_text: required_string_attr(receipt, "raw_text")?,
         image_filename: required_string_attr(receipt, "image_filename")?,
         warnings,
+        tenders,
     })
 }
 
@@ -478,6 +493,60 @@ fn extract_stage_document_input(
 
     let top_level_warning_messages = extract_warning_messages(document.get_item("warnings")?)?;
 
+    let mut tenders = Vec::new();
+    if let Some(tenders_any) = document.get_item("tenders")? {
+        if let Ok(iter) = tenders_any.try_iter() {
+            for tender in iter {
+                let tender = tender?;
+                let Ok(tender_dict) = tender.cast::<PyDict>() else {
+                    continue;
+                };
+
+                let removed = if let Some(review_any) = tender_dict.get_item("review")? {
+                    if let Ok(review) = review_any.cast::<PyDict>() {
+                        match review.get_item("removed")? {
+                            Some(value) => value.is_truthy()?,
+                            None => false,
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                let amount = match effective_item_value(tender_dict, "amount")? {
+                    Some(value) => decimalish_to_string(py, &value)?,
+                    None => None,
+                };
+                let account = match effective_item_value(tender_dict, "account")? {
+                    Some(value) if !value.is_none() => {
+                        let raw = value.str()?.extract::<String>()?;
+                        let trimmed = raw.trim();
+                        (!trimmed.is_empty()).then(|| trimmed.to_string())
+                    }
+                    _ => None,
+                };
+                let kind = match effective_item_value(tender_dict, "kind")? {
+                    Some(value) if !value.is_none() => Some(value.str()?.extract::<String>()?),
+                    _ => None,
+                };
+                let raw_label = match tender_dict.get_item("raw_label")? {
+                    Some(value) if !value.is_none() => Some(value.str()?.extract::<String>()?),
+                    _ => None,
+                };
+
+                tenders.push(receipt_staged_json::StageDocumentTenderInput {
+                    amount,
+                    account,
+                    kind,
+                    raw_label,
+                    removed,
+                });
+            }
+        }
+    }
+
     Ok(receipt_staged_json::StageDocumentInput {
         merchant,
         date_iso,
@@ -488,6 +557,7 @@ fn extract_stage_document_input(
         image_filename,
         items,
         top_level_warning_messages,
+        tenders,
     })
 }
 
@@ -672,11 +742,25 @@ fn receipt_build_parsed_receipt_stage(
         None
     };
 
+    let tenders = stage
+        .tenders
+        .iter()
+        .map(|tender| -> PyResult<Py<PyDict>> {
+            let dict = PyDict::new(py);
+            dict.set_item("amount", &tender.amount)?;
+            dict.set_item("account", &tender.account)?;
+            dict.set_item("kind", &tender.kind)?;
+            dict.set_item("raw_label", &tender.raw_label)?;
+            Ok(dict.unbind())
+        })
+        .collect::<PyResult<Vec<_>>>()?;
+
     let document = PyDict::new(py);
     document.set_item("meta", meta)?;
     document.set_item("receipt", receipt_dict)?;
     document.set_item("items", items)?;
     document.set_item("warnings", warnings)?;
+    document.set_item("tenders", tenders)?;
     document.set_item("raw_text", stage.raw_text)?;
     document.set_item("debug", debug)?;
     Ok(document.unbind())
@@ -721,6 +805,19 @@ fn receipt_resolve_stage_document(
         .map(|warning| (warning.message.clone(), warning.after_item_index))
         .collect::<Vec<_>>();
 
+    let tenders = resolved
+        .tenders
+        .iter()
+        .map(|tender| {
+            (
+                tender.amount.clone(),
+                tender.account.clone(),
+                tender.kind.clone(),
+                tender.raw_label.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+
     let document = PyDict::new(py);
     document.set_item("merchant", resolved.merchant)?;
     document.set_item("date", resolved.date_iso)?;
@@ -732,6 +829,7 @@ fn receipt_resolve_stage_document(
     document.set_item("image_filename", resolved.image_filename)?;
     document.set_item("items", items)?;
     document.set_item("warnings", warnings)?;
+    document.set_item("tenders", tenders)?;
     Ok(document.unbind())
 }
 

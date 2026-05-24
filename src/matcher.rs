@@ -17,6 +17,13 @@ pub(crate) struct ReceiptInput {
     total_scaled: i64,
     merchant: String,
     date_is_placeholder: bool,
+    /// Sum of card-typed tender amounts when present; matcher compares against
+    /// this instead of `total_scaled` so split-tender receipts (e.g., a Costco
+    /// run with a Shop Card paying part of the bill) still auto-match.
+    card_amount_scaled: Option<i64>,
+    /// Sum of non-card tender amounts (gift card / cash / store credit), used
+    /// only for the explanatory match-details string.
+    non_card_amount_scaled: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -81,6 +88,26 @@ impl ReceiptInput {
             total_scaled,
             merchant,
             date_is_placeholder,
+            card_amount_scaled: None,
+            non_card_amount_scaled: 0,
+        }
+    }
+
+    pub(crate) fn with_split_tender(
+        date_ordinal: i32,
+        total_scaled: i64,
+        merchant: String,
+        date_is_placeholder: bool,
+        card_amount_scaled: Option<i64>,
+        non_card_amount_scaled: i64,
+    ) -> Self {
+        Self {
+            date_ordinal,
+            total_scaled,
+            merchant,
+            date_is_placeholder,
+            card_amount_scaled,
+            non_card_amount_scaled,
         }
     }
 }
@@ -376,18 +403,27 @@ fn match_receipt_to_transaction_impl(
         .flatten()
         .find_map(|value| if *value < 0 { Some(value.abs()) } else { None })?;
 
-    let amount_diff_scaled = (txn_amount_scaled - receipt.total_scaled).abs();
-    let amount_tolerance_scaled = amount_tolerance_scaled(receipt.total_scaled, config);
+    let receipt_amount_scaled = receipt.card_amount_scaled.unwrap_or(receipt.total_scaled);
+    let amount_diff_scaled = (txn_amount_scaled - receipt_amount_scaled).abs();
+    let amount_tolerance_scaled = amount_tolerance_scaled(receipt_amount_scaled, config);
     if amount_diff_scaled > amount_tolerance_scaled {
         return None;
     }
+    let amount_label = if receipt.card_amount_scaled.is_some() && receipt.non_card_amount_scaled > 0 {
+        format!(
+            " (after ${} non-card tender)",
+            format_scaled_currency(receipt.non_card_amount_scaled)
+        )
+    } else {
+        String::new()
+    };
     if amount_diff_scaled == 0 {
         confidence += 0.4;
-        details.push("amount: exact match".to_string());
+        details.push(format!("amount: exact match{amount_label}"));
     } else {
         confidence += 0.4 * (1.0 - (amount_diff_scaled as f64) / (amount_tolerance_scaled as f64));
         details.push(format!(
-            "amount: ${} off",
+            "amount: ${} off{amount_label}",
             format_scaled_currency(amount_diff_scaled)
         ));
     }
@@ -444,18 +480,27 @@ fn match_transaction_to_receipt_impl(
         }
     }
 
-    let amount_diff_scaled = (txn_amount_scaled - receipt.total_scaled).abs();
-    let amount_tolerance_scaled = amount_tolerance_scaled(receipt.total_scaled, config);
+    let receipt_amount_scaled = receipt.card_amount_scaled.unwrap_or(receipt.total_scaled);
+    let amount_diff_scaled = (txn_amount_scaled - receipt_amount_scaled).abs();
+    let amount_tolerance_scaled = amount_tolerance_scaled(receipt_amount_scaled, config);
     if amount_diff_scaled > amount_tolerance_scaled {
         return None;
     }
+    let amount_label = if receipt.card_amount_scaled.is_some() && receipt.non_card_amount_scaled > 0 {
+        format!(
+            " (after ${} non-card tender)",
+            format_scaled_currency(receipt.non_card_amount_scaled)
+        )
+    } else {
+        String::new()
+    };
     if amount_diff_scaled == 0 {
         confidence += 0.4;
-        details.push("amount: exact match".to_string());
+        details.push(format!("amount: exact match{amount_label}"));
     } else {
         confidence += 0.4 * (1.0 - (amount_diff_scaled as f64) / (amount_tolerance_scaled as f64));
         details.push(format!(
-            "amount: ${} off",
+            "amount: ${} off{amount_label}",
             format_scaled_currency(amount_diff_scaled)
         ));
     }
@@ -596,12 +641,12 @@ mod tests {
 
     #[test]
     fn receipt_transaction_matching_returns_none_for_positive_amounts() {
-        let receipt = ReceiptInput {
-            date_ordinal: 738_900,
-            total_scaled: 1_000_000,
-            merchant: "T&T".to_string(),
-            date_is_placeholder: false,
-        };
+        let receipt = ReceiptInput::new(
+            738_900,
+            1_000_000,
+            "T&T".to_string(),
+            false,
+        );
         let txn = TransactionInput {
             date_ordinal: 738_900,
             payee: Some("T&T SUPERMARKET".to_string()),

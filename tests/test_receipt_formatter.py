@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from beanbeaver.domain.receipt import Receipt, ReceiptItem, ReceiptWarning
+from beanbeaver.domain.receipt import Receipt, ReceiptItem, ReceiptWarning, Tender
 from beanbeaver.ledger_access import LedgerAmount, LedgerPosting, LedgerTransaction
 from beanbeaver.receipt.beancount_rendering import (
     format_draft_beancount,
@@ -145,3 +145,106 @@ def test_format_enriched_transaction_keeps_original_card_posting_and_reference()
     assert "Expenses:Food:Grocery:Dairy" in output
     assert "; --- Original Transaction (to be replaced) ---" in output
     assert ";   Expenses:Food:Grocery  12.75 CAD" in output
+
+
+def test_format_parsed_receipt_emits_one_posting_per_tender() -> None:
+    receipt = Receipt(
+        merchant="COSTCO",
+        date=date(2026, 3, 7),
+        total=Decimal("466.68"),
+        items=[ReceiptItem(description="CHICKEN", price=Decimal("7.99"))],
+        tax=Decimal("5.72"),
+        raw_text="",
+        image_filename="costco.jpg",
+        tenders=[
+            Tender(amount=Decimal("441.68"), kind="card", raw_label="MasterCard"),
+            Tender(amount=Decimal("25.00"), kind="gift_card", raw_label="Shop Card"),
+        ],
+    )
+
+    output = format_parsed_receipt(receipt, credit_card_account="Liabilities:CreditCard:Costco:MC")
+
+    # Both payment postings present.
+    assert "Liabilities:CreditCard:PENDING" in output
+    assert "-441.68 CAD" in output
+    assert "Assets:GiftCards:PENDING" in output
+    assert "-25.00 CAD" in output
+    assert "; gift card" in output
+
+
+def test_format_parsed_receipt_uses_assigned_tender_account() -> None:
+    receipt = Receipt(
+        merchant="COSTCO",
+        date=date(2026, 3, 7),
+        total=Decimal("466.68"),
+        items=[ReceiptItem(description="CHICKEN", price=Decimal("7.99"))],
+        tax=Decimal("5.72"),
+        raw_text="",
+        image_filename="costco.jpg",
+        tenders=[
+            Tender(
+                amount=Decimal("441.68"),
+                account="Liabilities:CreditCard:Costco:Mastercard",
+                kind="card",
+                raw_label="MasterCard",
+            ),
+            Tender(
+                amount=Decimal("25.00"),
+                account="Assets:GiftCards:Costco",
+                kind="gift_card",
+                raw_label="Shop Card",
+            ),
+        ],
+    )
+
+    output = format_parsed_receipt(receipt)
+    assert "Liabilities:CreditCard:Costco:Mastercard  -441.68 CAD" in output
+    assert "Assets:GiftCards:Costco                    -25.00 CAD" in output
+    # No PENDING placeholder when the user has assigned accounts.
+    assert "PENDING" not in output
+
+
+def test_format_enriched_transaction_splits_card_and_gift_card() -> None:
+    receipt = Receipt(
+        merchant="COSTCO",
+        date=date(2026, 3, 7),
+        total=Decimal("466.68"),
+        items=[ReceiptItem(description="CHICKEN", price=Decimal("466.68"))],
+        raw_text="",
+        image_filename="costco.jpg",
+        tenders=[
+            Tender(amount=Decimal("441.68"), kind="card", raw_label="MasterCard"),
+            Tender(amount=Decimal("25.00"), kind="gift_card", raw_label="Shop Card"),
+        ],
+    )
+
+    txn = LedgerTransaction(
+        date=date(2026, 3, 7),
+        payee="COSTCO MARKHAM",
+        narration="",
+        postings=[
+            LedgerPosting(
+                account="Liabilities:CreditCard:Costco:Mastercard",
+                units=LedgerAmount(number=Decimal("-441.68"), currency="CAD"),
+            ),
+            LedgerPosting(
+                account="Expenses:Uncategorized",
+                units=LedgerAmount(number=Decimal("441.68"), currency="CAD"),
+            ),
+        ],
+        file_path="/tmp/ledger.beancount",
+        line_number=10,
+    )
+    match = MatchResult(
+        transaction=txn,
+        file_path=txn.file_path,
+        line_number=txn.line_number,
+        confidence=0.95,
+        match_details="amount: exact match (after $25.00 non-card tender)",
+    )
+
+    output = format_enriched_transaction(receipt, match)
+
+    # Card posting reuses the matched txn's CC account; gift card uses PENDING.
+    assert "Liabilities:CreditCard:Costco:Mastercard  -441.68 CAD" in output
+    assert "Assets:GiftCards:PENDING                   -25.00 CAD" in output

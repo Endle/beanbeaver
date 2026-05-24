@@ -27,6 +27,14 @@ pub(crate) struct ParsedReceiptWarning {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct ParsedReceiptTender {
+    pub(crate) amount: String,
+    pub(crate) account: Option<String>,
+    pub(crate) kind: String,
+    pub(crate) raw_label: String,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct ParsedReceiptData {
     pub(crate) merchant: String,
     pub(crate) date: Option<(i32, u32, u32)>,
@@ -38,6 +46,7 @@ pub(crate) struct ParsedReceiptData {
     pub(crate) raw_text: String,
     pub(crate) image_filename: String,
     pub(crate) warnings: Vec<ParsedReceiptWarning>,
+    pub(crate) tenders: Vec<ParsedReceiptTender>,
 }
 
 /// Some merchants print a line-item discount with NO sign — e.g. FreshCo's
@@ -237,6 +246,16 @@ pub(crate) fn parse_receipt(
         })
         .collect();
 
+    let tenders = receipt_fields::extract_tenders(&lines, total_cents)
+        .into_iter()
+        .map(|tender| ParsedReceiptTender {
+            amount: cents_to_fixed(tender.amount_cents),
+            account: None,
+            kind: tender.kind.to_string(),
+            raw_label: tender.raw_label,
+        })
+        .collect();
+
     ParsedReceiptData {
         merchant,
         date,
@@ -248,6 +267,7 @@ pub(crate) fn parse_receipt(
         raw_text: full_text.to_string(),
         image_filename: image_filename.to_string(),
         warnings,
+        tenders,
     }
 }
 

@@ -7,7 +7,7 @@ from datetime import date
 from decimal import Decimal
 from unittest.mock import MagicMock
 
-from beanbeaver.domain.receipt import Receipt, ReceiptItem
+from beanbeaver.domain.receipt import Receipt, ReceiptItem, Tender
 from beanbeaver.receipt.matcher import (
     MatchConfig,
     MerchantFamily,
@@ -146,6 +146,30 @@ class TestMatchReceiptToTransactions:
 
         assert strict_matches == []
         assert len(relaxed_matches) == 1
+
+    def test_split_tender_receipt_matches_card_amount_not_total(self) -> None:
+        """Costco receipt with $25 Shop Card matches the $441.68 CC txn, not $466.68."""
+        receipt = Receipt(
+            merchant="COSTCO",
+            date=date(2026, 3, 7),
+            total=Decimal("466.68"),
+            items=[],
+            tenders=[
+                Tender(amount=Decimal("441.68"), kind="card", raw_label="MasterCard"),
+                Tender(amount=Decimal("25.00"), kind="gift_card", raw_label="Shop Card"),
+            ],
+        )
+        txn = make_transaction(
+            payee="COSTCO MARKHAM",
+            txn_date=date(2026, 3, 7),
+            amount=Decimal("-441.68"),
+        )
+
+        matches = match_receipt_to_transactions(receipt, [txn])
+
+        assert len(matches) == 1
+        assert matches[0].confidence > 0.9
+        assert "non-card tender" in matches[0].match_details
 
 
 class TestMerchantSimilarity:

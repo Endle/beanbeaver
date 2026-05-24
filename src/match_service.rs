@@ -30,6 +30,14 @@ struct NativeReceiptWarning {
 }
 
 #[derive(Clone, Debug)]
+struct NativeReceiptTender {
+    amount: String,
+    #[allow(dead_code)]
+    account: Option<String>,
+    kind: String,
+}
+
+#[derive(Clone, Debug)]
 struct NativeReceipt {
     merchant: String,
     date_iso: String,
@@ -41,6 +49,7 @@ struct NativeReceipt {
     raw_text: String,
     image_filename: String,
     warnings: Vec<NativeReceiptWarning>,
+    tenders: Vec<NativeReceiptTender>,
 }
 
 #[derive(Clone, Debug)]
@@ -122,6 +131,20 @@ fn extract_receipt(py: Python<'_>, approved_receipt_path: &str) -> PyResult<Nati
         });
     }
 
+    let mut tenders = Vec::new();
+    if let Ok(tenders_any) = receipt.getattr("tenders") {
+        for tender in tenders_any.try_iter()? {
+            let tender = tender?;
+            tenders.push(NativeReceiptTender {
+                amount: tender.getattr("amount")?.str()?.extract::<String>()?,
+                account: tender
+                    .getattr("account")?
+                    .extract::<Option<String>>()?,
+                kind: tender.getattr("kind")?.extract::<String>()?,
+            });
+        }
+    }
+
     let date = receipt.getattr("date")?;
     Ok(NativeReceipt {
         merchant: receipt.getattr("merchant")?.extract::<String>()?,
@@ -134,6 +157,7 @@ fn extract_receipt(py: Python<'_>, approved_receipt_path: &str) -> PyResult<Nati
         raw_text: receipt.getattr("raw_text")?.extract::<String>()?,
         image_filename: receipt.getattr("image_filename")?.extract::<String>()?,
         warnings,
+        tenders,
     })
 }
 
@@ -180,11 +204,33 @@ fn scaled_to_currency(value: i64) -> String {
 }
 
 fn receipt_input(receipt: &NativeReceipt) -> matcher::ReceiptInput {
-    matcher::ReceiptInput::new(
+    let total_scaled = decimal_to_scaled(&receipt.total);
+    if receipt.tenders.is_empty() {
+        return matcher::ReceiptInput::new(
+            receipt.date_ordinal,
+            total_scaled,
+            receipt.merchant.clone(),
+            receipt.date_is_placeholder,
+        );
+    }
+    let mut card_total: i64 = 0;
+    let mut non_card_total: i64 = 0;
+    for tender in &receipt.tenders {
+        let scaled = decimal_to_scaled(&tender.amount);
+        if tender.kind == "card" {
+            card_total += scaled;
+        } else {
+            non_card_total += scaled;
+        }
+    }
+    let card_amount = (card_total > 0).then_some(card_total);
+    matcher::ReceiptInput::with_split_tender(
         receipt.date_ordinal,
-        decimal_to_scaled(&receipt.total),
+        total_scaled,
         receipt.merchant.clone(),
         receipt.date_is_placeholder,
+        card_amount,
+        non_card_total,
     )
 }
 
@@ -507,6 +553,15 @@ fn formatter_receipt_input(receipt: &NativeReceipt) -> FormatterReceiptInput {
                 after_item_index: warning.after_item_index,
             })
             .collect(),
+        tenders: receipt
+            .tenders
+            .iter()
+            .map(|tender| crate::receipt_formatter::FormatterTenderInput {
+                amount: tender.amount.clone(),
+                account: tender.account.clone(),
+                kind: tender.kind.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -778,6 +833,7 @@ mod tests {
             raw_text: String::new(),
             image_filename: String::new(),
             warnings: Vec::new(),
+            tenders: Vec::new(),
         };
         let snapshot = NativeLedgerSnapshot {
             path: "/tmp/main.beancount".to_string(),

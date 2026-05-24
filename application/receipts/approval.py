@@ -92,6 +92,58 @@ def _normalize_item_category(value: object) -> str | None:
     return text
 
 
+_VALID_TENDER_KINDS = {"card", "gift_card", "cash", "store_credit"}
+
+
+def _validate_tender_review_patches(
+    tender_review_patches: list[dict[str, Any]],
+    *,
+    tender_count: int,
+) -> list[dict[str, Any]]:
+    """Validate per-tender review patches keyed by index.
+
+    Accepts entries of shape `{"index": int, "review": {"account": str | None,
+    "kind": str, "removed": bool}}`. Returns normalized patches in the original
+    order, with at most one patch per index (later entries clobber earlier).
+    """
+    normalized: dict[int, dict[str, Any]] = {}
+    for ordinal, patch in enumerate(tender_review_patches, start=1):
+        if not isinstance(patch, dict):
+            raise ValueError(f"Tender review patch #{ordinal} must be a JSON object")
+
+        raw_index = patch.get("index")
+        if not isinstance(raw_index, int):
+            raise ValueError(f"Tender review patch #{ordinal} is missing integer 'index'")
+        if raw_index < 0 or raw_index >= tender_count:
+            raise ValueError(
+                f"Tender review patch #{ordinal} index {raw_index} out of range (tenders: {tender_count})"
+            )
+
+        review_patch = patch.get("review", {})
+        if not isinstance(review_patch, dict):
+            raise ValueError(f"Tender review patch #{ordinal} field 'review' must be a JSON object")
+
+        tender_review: dict[str, Any] = {}
+        if "account" in review_patch:
+            tender_review["account"] = _normalize_optional_text(review_patch.get("account"))
+        if "kind" in review_patch:
+            kind_value = _normalize_optional_text(review_patch.get("kind"))
+            if kind_value is not None and kind_value not in _VALID_TENDER_KINDS:
+                raise ValueError(
+                    f"Tender review patch #{ordinal} kind '{kind_value}' is not one of {sorted(_VALID_TENDER_KINDS)}"
+                )
+            tender_review["kind"] = kind_value
+        if "removed" in review_patch:
+            removed = review_patch.get("removed")
+            if not isinstance(removed, bool):
+                raise ValueError(f"Tender review patch #{ordinal} field 'removed' must be a boolean")
+            tender_review["removed"] = removed
+
+        normalized[raw_index] = {"index": raw_index, "review": tender_review}
+
+    return list(normalized.values())
+
+
 def _validate_item_review_patches(
     item_review_patches: list[dict[str, Any]],
     *,
@@ -149,11 +201,22 @@ def _apply_review_patches(
     *,
     review_patch: dict[str, str | None],
     item_review_patches: list[dict[str, Any]],
+    tender_review_patches: list[dict[str, Any]] | None = None,
 ) -> None:
     if review_patch:
         review = dict(document.get("review") or {})
         review.update(review_patch)
         document["review"] = review
+
+    if tender_review_patches:
+        tenders = document.get("tenders")
+        if isinstance(tenders, list):
+            for patch in tender_review_patches:
+                index = patch["index"]
+                if 0 <= index < len(tenders) and isinstance(tenders[index], dict):
+                    existing = dict(tenders[index].get("review") or {})
+                    existing.update(patch["review"])
+                    tenders[index]["review"] = existing
 
     if not item_review_patches:
         return
@@ -222,6 +285,7 @@ def run_approve_scanned_receipt_with_review(
     *,
     review_patch: dict[str, Any],
     item_review_patches: list[dict[str, Any]] | None = None,
+    tender_review_patches: list[dict[str, Any]] | None = None,
 ) -> ApproveScannedReceiptResult:
     """Create a review stage, apply receipt-level review overrides, and move to approved."""
     review_stage_path = create_next_review_stage(
@@ -240,11 +304,17 @@ def run_approve_scanned_receipt_with_review(
         item_review_patches or [],
         known_item_ids=known_item_ids,
     )
-    if normalized_patch or normalized_item_patches:
+    tender_count = len(document.get("tenders") or [])
+    normalized_tender_patches = _validate_tender_review_patches(
+        tender_review_patches or [],
+        tender_count=tender_count,
+    )
+    if normalized_patch or normalized_item_patches or normalized_tender_patches:
         _apply_review_patches(
             document,
             review_patch=normalized_patch,
             item_review_patches=normalized_item_patches,
+            tender_review_patches=normalized_tender_patches,
         )
         save_stage_document(review_stage_path, document)
 

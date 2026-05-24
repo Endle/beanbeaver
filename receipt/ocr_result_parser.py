@@ -4,7 +4,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from beanbeaver.domain.receipt import Receipt, ReceiptItem, ReceiptWarning
+from beanbeaver.domain.receipt import Receipt, ReceiptItem, ReceiptWarning, Tender, TenderKind
 
 from ._rust import require_rust_matcher
 from .date_utils import placeholder_receipt_date
@@ -32,6 +32,19 @@ def parse_receipt(
         if resolved_date is not None
         else placeholder_receipt_date()
     )
+    valid_tender_kinds = {"card", "gift_card", "cash", "store_credit"}
+    tenders: list[Tender] = []
+    for amount_str, account, kind, raw_label in native.get("tenders", []):
+        normalized_kind: TenderKind = kind if kind in valid_tender_kinds else "card"
+        tenders.append(
+            Tender(
+                amount=Decimal(str(amount_str)),
+                account=account if account else None,
+                kind=normalized_kind,
+                raw_label=str(raw_label or ""),
+            )
+        )
+
     return Receipt(
         merchant=str(native.get("merchant") or "UNKNOWN_MERCHANT"),
         date=receipt_date,
@@ -54,4 +67,5 @@ def parse_receipt(
             ReceiptWarning(message=message, after_item_index=after_item_index)
             for message, after_item_index in native.get("warnings", [])
         ],
+        tenders=tenders,
     )

@@ -111,13 +111,36 @@ def _config_payload(config: MatchConfig) -> dict[str, int]:
     }
 
 
+def _split_tender_amounts(receipt: Receipt) -> tuple[Decimal | None, Decimal]:
+    """Return (card-typed sum, non-card sum) from receipt.tenders.
+
+    First slot is None when there are no tenders at all (matcher then falls back
+    to receipt.total). Second slot is 0 when no non-card tenders are present.
+    """
+    if not receipt.tenders:
+        return None, Decimal("0")
+    card_total = Decimal("0")
+    non_card_total = Decimal("0")
+    for tender in receipt.tenders:
+        if tender.kind == "card":
+            card_total += tender.amount
+        else:
+            non_card_total += tender.amount
+    return (card_total if card_total > 0 else None), non_card_total
+
+
 def _receipt_payload(receipt: Receipt) -> dict[str, object]:
-    return {
+    card_amount, non_card_amount = _split_tender_amounts(receipt)
+    payload: dict[str, object] = {
         "date_ordinal": receipt.date.toordinal(),
         "total_scaled": _decimal_to_scaled(receipt.total),
         "merchant": receipt.merchant,
         "date_is_placeholder": receipt.date_is_placeholder,
+        "non_card_amount_scaled": _decimal_to_scaled(non_card_amount),
     }
+    if card_amount is not None:
+        payload["card_amount_scaled"] = _decimal_to_scaled(card_amount)
+    return payload
 
 
 def _posting_amount_to_scaled(posting: PostingLike) -> int | None:
@@ -196,15 +219,7 @@ def _match_transaction_to_receipts_rust(
     config: MatchConfig,
     merchant_families: Sequence[MerchantFamily] | None,
 ) -> list[tuple[int, float, str]]:
-    payload = [
-        {
-            "date_ordinal": receipt.date.toordinal(),
-            "total_scaled": _decimal_to_scaled(receipt.total),
-            "merchant": receipt.merchant,
-            "date_is_placeholder": receipt.date_is_placeholder,
-        }
-        for _, receipt in candidates
-    ]
+    payload = [_receipt_payload(receipt) for _, receipt in candidates]
     return list(
         _rust_matcher.match_transaction_to_receipts(
             {

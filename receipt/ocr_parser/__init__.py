@@ -7,6 +7,7 @@ from .fields_parser import (
     _extract_price_from_line,
     _extract_subtotal,
     _extract_tax,
+    _extract_tenders,
     _extract_total,
 )
 from .items_spatial_parser import _extract_items_with_bbox
@@ -20,6 +21,7 @@ __all__ = [
     "_extract_price_from_line",
     "_extract_subtotal",
     "_extract_tax",
+    "_extract_tenders",
     "_extract_total",
     "_has_useful_bbox_data",
     "_is_section_header_text",

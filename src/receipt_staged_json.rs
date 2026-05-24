@@ -1,6 +1,6 @@
 use crate::receipt_categories;
 
-const SCHEMA_VERSION: &str = "1";
+const SCHEMA_VERSION: &str = "2";
 const STAGE_PARSED: &str = "parsed";
 
 #[derive(Clone, Debug)]
@@ -24,6 +24,14 @@ pub(crate) struct ReceiptWarningInput {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct TenderInput {
+    pub(crate) amount: String,
+    pub(crate) account: Option<String>,
+    pub(crate) kind: String,
+    pub(crate) raw_label: String,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct ReceiptInput {
     pub(crate) merchant: String,
     pub(crate) date_iso: String,
@@ -35,6 +43,7 @@ pub(crate) struct ReceiptInput {
     pub(crate) raw_text: String,
     pub(crate) image_filename: String,
     pub(crate) warnings: Vec<ReceiptWarningInput>,
+    pub(crate) tenders: Vec<TenderInput>,
 }
 
 #[derive(Clone, Debug)]
@@ -86,12 +95,21 @@ pub(crate) struct BuiltStageReceipt {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct BuiltStageTender {
+    pub(crate) amount: String,
+    pub(crate) account: Option<String>,
+    pub(crate) kind: String,
+    pub(crate) raw_label: String,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct BuiltStageDocument {
     pub(crate) meta: BuiltStageMeta,
     pub(crate) receipt: BuiltStageReceipt,
     pub(crate) items: Vec<BuiltStageItem>,
     pub(crate) warnings: Vec<StructuredWarning>,
     pub(crate) raw_text: Option<String>,
+    pub(crate) tenders: Vec<BuiltStageTender>,
 }
 
 #[derive(Clone, Debug)]
@@ -105,6 +123,15 @@ pub(crate) struct StageDocumentItemInput {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct StageDocumentTenderInput {
+    pub(crate) amount: Option<String>,
+    pub(crate) account: Option<String>,
+    pub(crate) kind: Option<String>,
+    pub(crate) raw_label: Option<String>,
+    pub(crate) removed: bool,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct StageDocumentInput {
     pub(crate) merchant: Option<String>,
     pub(crate) date_iso: Option<String>,
@@ -115,6 +142,7 @@ pub(crate) struct StageDocumentInput {
     pub(crate) image_filename: String,
     pub(crate) items: Vec<StageDocumentItemInput>,
     pub(crate) top_level_warning_messages: Vec<String>,
+    pub(crate) tenders: Vec<StageDocumentTenderInput>,
 }
 
 #[derive(Clone, Debug)]
@@ -132,6 +160,14 @@ pub(crate) struct ResolvedReceiptWarning {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct ResolvedTender {
+    pub(crate) amount: String,
+    pub(crate) account: Option<String>,
+    pub(crate) kind: String,
+    pub(crate) raw_label: String,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct ResolvedReceiptData {
     pub(crate) merchant: String,
     pub(crate) date_iso: Option<String>,
@@ -143,6 +179,7 @@ pub(crate) struct ResolvedReceiptData {
     pub(crate) image_filename: String,
     pub(crate) items: Vec<ResolvedReceiptItem>,
     pub(crate) warnings: Vec<ResolvedReceiptWarning>,
+    pub(crate) tenders: Vec<ResolvedTender>,
 }
 
 fn legacy_account_alias(target: &str) -> Option<&'static str> {
@@ -272,6 +309,17 @@ pub(crate) fn build_parsed_receipt_stage(
         top_level_warnings.push(structured);
     }
 
+    let tenders = receipt
+        .tenders
+        .iter()
+        .map(|tender| BuiltStageTender {
+            amount: tender.amount.clone(),
+            account: tender.account.clone(),
+            kind: tender.kind.clone(),
+            raw_label: tender.raw_label.clone(),
+        })
+        .collect();
+
     BuiltStageDocument {
         meta: BuiltStageMeta {
             schema_version: SCHEMA_VERSION.to_string(),
@@ -301,6 +349,7 @@ pub(crate) fn build_parsed_receipt_stage(
         items: item_docs,
         warnings: top_level_warnings,
         raw_text: (!receipt.raw_text.is_empty()).then(|| receipt.raw_text.clone()),
+        tenders,
     }
 }
 
@@ -387,6 +436,25 @@ pub(crate) fn resolve_stage_document(
         });
     }
 
+    let tenders = document
+        .tenders
+        .iter()
+        .filter(|tender| !tender.removed)
+        .map(|tender| ResolvedTender {
+            amount: tender.amount.clone().unwrap_or_else(|| "0".to_string()),
+            account: tender
+                .account
+                .clone()
+                .filter(|value| !value.trim().is_empty()),
+            kind: tender
+                .kind
+                .clone()
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "card".to_string()),
+            raw_label: tender.raw_label.clone().unwrap_or_default(),
+        })
+        .collect();
+
     ResolvedReceiptData {
         merchant: document
             .merchant
@@ -401,5 +469,6 @@ pub(crate) fn resolve_stage_document(
         image_filename: document.image_filename.clone(),
         items,
         warnings,
+        tenders,
     }
 }

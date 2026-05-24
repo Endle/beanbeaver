@@ -3,6 +3,9 @@
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
+from typing import Literal
+
+TenderKind = Literal["card", "gift_card", "cash", "store_credit"]
 
 
 @dataclass
@@ -31,6 +34,16 @@ class ReceiptWarning:
 
 
 @dataclass
+class Tender:
+    """One payment tender on a receipt (e.g., $25 on a gift card)."""
+
+    amount: Decimal
+    account: str | None = None
+    kind: TenderKind = "card"
+    raw_label: str = ""  # Original OCR label, e.g. "Shop Card"
+
+
+@dataclass
 class Receipt:
     """Parsed receipt data."""
 
@@ -44,3 +57,6 @@ class Receipt:
     raw_text: str = ""  # Original OCR text for reference
     image_filename: str = ""  # Source image filename
     warnings: list[ReceiptWarning] = field(default_factory=list)
+    # When non-empty, the renderer emits one payment posting per tender.
+    # When empty, a single payment posting for -total is emitted (legacy shape).
+    tenders: list[Tender] = field(default_factory=list)
