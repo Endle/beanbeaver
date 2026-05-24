@@ -327,6 +327,11 @@ pub(crate) fn run_app(
             continue;
         }
 
+        if app.imports_state.cc_review.is_some() {
+            handle_cc_review_key(app, key.code);
+            continue;
+        }
+
         if app.imports_state.decision_picker.is_some() {
             let candidates_len = app
                 .imports_state
@@ -729,7 +734,7 @@ pub(crate) fn run_app(
                             Err(error) => app.set_error(error.to_string()),
                         }
                     }
-                    (KeyCode::Char('x'), KeyModifiers::NONE) => {
+                    (KeyCode::Char('d'), KeyModifiers::NONE) => {
                         if let Err(error) = app.trash_selected_import_csv() {
                             app.set_error(error.to_string());
                         }
@@ -738,6 +743,211 @@ pub(crate) fn run_app(
                 },
             },
         }
+    }
+}
+
+/// Drive the credit-card category review modal, including its per-transaction editor.
+///
+/// Precedence of sub-modes (innermost first): amount text input → category picker →
+/// editor field navigation → the transaction list.
+fn handle_cc_review_key(app: &mut App, code: KeyCode) {
+    let Some((amount_open, picker_open, editor_open)) =
+        app.imports_state.cc_review.as_ref().map(|review| {
+            review.editor.as_ref().map_or((false, false, false), |editor| {
+                (editor.amount_input.is_some(), editor.picker.is_some(), true)
+            })
+        })
+    else {
+        return;
+    };
+
+    if amount_open {
+        match code {
+            KeyCode::Esc => {
+                if let Some(review) = app.imports_state.cc_review.as_mut() {
+                    review.cancel_amount_input();
+                }
+                app.set_status("Cancelled amount edit");
+            }
+            KeyCode::Enter => {
+                let value = app
+                    .imports_state
+                    .cc_review
+                    .as_mut()
+                    .and_then(|review| review.commit_amount_input());
+                if let Some(amount) = value {
+                    app.set_status(format!("Amount set to {amount}"));
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(review) = app.imports_state.cc_review.as_mut() {
+                    review.amount_input_backspace();
+                }
+            }
+            KeyCode::Char(ch) => {
+                if let Some(review) = app.imports_state.cc_review.as_mut() {
+                    review.amount_input_push(ch);
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    if picker_open {
+        let candidates_len = app
+            .imports_state
+            .cc_review
+            .as_ref()
+            .map(|review| review.candidate_categories.len())
+            .unwrap_or(0);
+        let mut move_picker = |delta: isize| {
+            if let Some(picker) = app
+                .imports_state
+                .cc_review
+                .as_mut()
+                .and_then(|review| review.editor.as_mut())
+                .and_then(|editor| editor.picker.as_mut())
+            {
+                picker.move_selection(delta, candidates_len);
+            }
+        };
+        match code {
+            KeyCode::Esc => {
+                if let Some(review) = app.imports_state.cc_review.as_mut() {
+                    review.close_picker();
+                }
+                app.set_status("Cancelled category selection");
+            }
+            KeyCode::Enter => {
+                let picked = app
+                    .imports_state
+                    .cc_review
+                    .as_mut()
+                    .and_then(|review| review.confirm_picker());
+                if let Some(category) = picked {
+                    app.set_status(format!("Set category to {category}"));
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => move_picker(1),
+            KeyCode::Up | KeyCode::Char('k') => move_picker(-1),
+            KeyCode::PageDown => move_picker(CategoryPickerState::PAGE_STEP),
+            KeyCode::PageUp => move_picker(-CategoryPickerState::PAGE_STEP),
+            _ => {}
+        }
+        return;
+    }
+
+    if editor_open {
+        let field = app
+            .imports_state
+            .cc_review
+            .as_ref()
+            .and_then(|review| review.editor.as_ref())
+            .map(|editor| editor.selected_field());
+        match code {
+            KeyCode::Esc => {
+                if let Some(review) = app.imports_state.cc_review.as_mut() {
+                    review.close_editor();
+                }
+                app.set_status("Closed transaction editor");
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if let Some(editor) = app
+                    .imports_state
+                    .cc_review
+                    .as_mut()
+                    .and_then(|review| review.editor.as_mut())
+                {
+                    editor.move_field(1);
+                }
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if let Some(editor) = app
+                    .imports_state
+                    .cc_review
+                    .as_mut()
+                    .and_then(|review| review.editor.as_mut())
+                {
+                    editor.move_field(-1);
+                }
+            }
+            KeyCode::Enter => match field {
+                Some(CcEntryField::Category) => {
+                    if let Some(review) = app.imports_state.cc_review.as_mut() {
+                        review.open_picker();
+                    }
+                    app.set_status("Select a category (↑↓ · PgUp/PgDn · Enter confirm · Esc cancel)");
+                }
+                Some(CcEntryField::Amount) => {
+                    if let Some(review) = app.imports_state.cc_review.as_mut() {
+                        review.begin_amount_input();
+                    }
+                    app.set_status("Edit amount, then Enter to confirm (Esc to cancel)");
+                }
+                Some(CcEntryField::Delete) | None => {
+                    toggle_cc_editor_deleted(app);
+                }
+            },
+            KeyCode::Char('x') | KeyCode::Char(' ') => toggle_cc_editor_deleted(app),
+            _ => {}
+        }
+        return;
+    }
+
+    match code {
+        KeyCode::Esc => app.cancel_cc_category_review(),
+        KeyCode::Char('a') => {
+            if let Err(error) = app.finalize_cc_category_review() {
+                app.set_error(error.to_string());
+            }
+        }
+        KeyCode::Enter | KeyCode::Char('e') => {
+            if let Some(review) = app.imports_state.cc_review.as_mut() {
+                review.open_editor();
+            }
+            app.set_status("Editing transaction: ↑↓ field · Enter change · Esc back");
+        }
+        KeyCode::Char('x') => {
+            if let Some(deleted) = app
+                .imports_state
+                .cc_review
+                .as_mut()
+                .and_then(|review| review.toggle_selected_deleted())
+            {
+                app.set_status(if deleted {
+                    "Marked transaction for deletion"
+                } else {
+                    "Restored transaction"
+                });
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Some(review) = app.imports_state.cc_review.as_mut() {
+                review.move_selection(1);
+            }
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Some(review) = app.imports_state.cc_review.as_mut() {
+                review.move_selection(-1);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn toggle_cc_editor_deleted(app: &mut App) {
+    if let Some(deleted) = app
+        .imports_state
+        .cc_review
+        .as_mut()
+        .and_then(|review| review.toggle_editor_deleted())
+    {
+        app.set_status(if deleted {
+            "Marked transaction for deletion"
+        } else {
+            "Restored transaction"
+        });
     }
 }
 

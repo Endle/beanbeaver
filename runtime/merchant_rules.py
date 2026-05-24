@@ -26,20 +26,6 @@ def _load_keywords_from_path(path: Path) -> list[str]:
     return keywords
 
 
-def _unique_existing_paths(paths: list[Path | None]) -> list[Path]:
-    resolved_seen: set[Path] = set()
-    result: list[Path] = []
-    for path in paths:
-        if path is None:
-            continue
-        resolved = path.resolve()
-        if resolved in resolved_seen:
-            continue
-        resolved_seen.add(resolved)
-        result.append(path)
-    return result
-
-
 @lru_cache(maxsize=4)
 def load_known_merchant_keywords(config_path: str | None = None) -> tuple[str, ...]:
     """
@@ -47,7 +33,7 @@ def load_known_merchant_keywords(config_path: str | None = None) -> tuple[str, .
 
     Args:
         config_path: Optional TOML path override. If None, merges
-            project-local and vendor default merchant rules.
+            project-local and bundled default merchant rules.
 
     Returns:
         Tuple of merchant keywords from all rules, preserving file order.
@@ -58,13 +44,6 @@ def load_known_merchant_keywords(config_path: str | None = None) -> tuple[str, .
         return tuple(keywords)
 
     p = get_paths()
-    default_legacy = getattr(p, "legacy_default_merchant_rules", None)
-    for path in _unique_existing_paths(
-        [
-            p.merchant_rules,
-            p.default_merchant_rules,
-            default_legacy if isinstance(default_legacy, Path) else None,
-        ]
-    ):
+    for path in (p.merchant_rules, p.default_merchant_rules):
         keywords.extend(_load_keywords_from_path(path))
     return tuple(keywords)

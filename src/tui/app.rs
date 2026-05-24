@@ -105,7 +105,7 @@ impl App {
                 "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | s start/create container | x stop container | R restart container | r refresh container status/logs | q quit"
             }
             Page::Imports => {
-                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | r load routes | h/l or Tab cycle Routes/Accounts/Decisions | j/k move | Enter opens picker (Routes: reload accounts) | v view csv | x trash csv | a apply import | u toggle allow-uncommitted | q quit"
+                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | r load routes | h/l or Tab cycle Routes/Accounts/Decisions | j/k move | Enter opens picker (Routes: reload accounts) | v view csv | d trash csv | a apply import | u toggle allow-uncommitted | q quit"
             }
         }
     }
@@ -704,6 +704,11 @@ impl App {
             return Ok(());
         };
         let selected_account = self.imports_state.selected_account().map(ToOwned::to_owned);
+        // Credit-card statements route through an interactive category review before anything
+        // is written; the review then finalizes the apply with the collected overrides.
+        if route.import_type == "cc" {
+            return self.start_cc_category_review(&route, selected_account);
+        }
         let unresolved = self.imports_state.unresolved_decisions();
         if unresolved > 0 {
             self.set_status(format!(
@@ -739,12 +744,21 @@ impl App {
             self.imports_state.allow_uncommitted,
             &cc_overrides,
             &bank_overrides,
+            &[],
         )?;
-        let status = match response.status.as_str() {
+        let status = Self::import_status_message(&response, &route.csv_file);
+        let _ = response;
+        self.refresh_imports_page()?;
+        self.set_status(status);
+        Ok(())
+    }
+
+    fn import_status_message(response: &ApplyImportResponse, csv_file: &str) -> String {
+        match response.status.as_str() {
             "ok" => response
                 .summary
                 .clone()
-                .unwrap_or_else(|| format!("Imported {}", route.csv_file)),
+                .unwrap_or_else(|| format!("Imported {csv_file}")),
             "aborted" => response
                 .error
                 .clone()
@@ -753,11 +767,77 @@ impl App {
                 .error
                 .clone()
                 .unwrap_or_else(|| format!("Import failed: {}", response.status)),
+        }
+    }
+
+    fn start_cc_category_review(
+        &mut self,
+        route: &ImportRouteOption,
+        selected_account: Option<String>,
+    ) -> AppResult<()> {
+        let response = backend_preflight_cc_import(
+            &route.csv_file,
+            &route.importer_id,
+            selected_account.as_deref(),
+        )?;
+        if response.status != "ok" {
+            self.set_error(
+                response
+                    .error
+                    .unwrap_or_else(|| format!("Category preflight failed for {}", route.csv_file)),
+            );
+            return Ok(());
+        }
+        let review = CcCategoryReview::new(
+            route.csv_file.clone(),
+            route.importer_id.clone(),
+            selected_account,
+            response,
+        );
+        let total = review.entries.len();
+        let uncategorized = review
+            .entries
+            .iter()
+            .filter(|entry| entry.uncategorized)
+            .count();
+        self.imports_state.cc_review = Some(review);
+        self.set_status(format!(
+            "Review categories for {total} transaction(s) ({uncategorized} uncategorized): \
+             ↑↓ select · Enter change · a apply · Esc cancel"
+        ));
+        Ok(())
+    }
+
+    pub(crate) fn finalize_cc_category_review(&mut self) -> AppResult<()> {
+        let Some(review) = self.imports_state.cc_review.take() else {
+            return Ok(());
         };
-        let _ = response;
+        let edits = review.transaction_edits();
+        let changed = edits.len();
+        let deleted = review.deleted_count();
+        let response = backend_apply_import(
+            "cc",
+            &review.csv_file,
+            &review.importer_id,
+            review.selected_account.as_deref(),
+            self.imports_state.allow_uncommitted,
+            &[],
+            &[],
+            &edits,
+        )?;
+        let mut status = Self::import_status_message(&response, &review.csv_file);
+        if response.status == "ok" && changed > 0 {
+            status = format!("{status} ({changed} edit(s), {deleted} deleted)");
+        }
         self.refresh_imports_page()?;
         self.set_status(status);
         Ok(())
+    }
+
+    pub(crate) fn cancel_cc_category_review(&mut self) {
+        if self.imports_state.cc_review.take().is_some() {
+            self.set_status("Cancelled category review — nothing was written");
+        }
     }
 
     pub(crate) fn selected_import_source_path(&mut self) -> AppResult<Option<String>> {

@@ -11,7 +11,9 @@ keywords = ["T&T SUPERMARKET", "T&T Supermarket"]
 category = "Expenses:Food:Grocery"
 
 [[rules]]
-keywords = ["NO FRILLS", "NOFRILLS"]
+# No Frills franchises print as "<OWNER>'S NO FR <CITY>" (truncated), sometimes
+# further shortened to "<OWNER>'S NF <CITY>", so match those franchise forms too.
+keywords = ["NO FRILLS", "NOFRILLS", "DAVE & ANNETTE'S NO FR", "PETER & SUZI'S NF"]
 category = "Expenses:Food:Grocery"
 
 [[rules]]
@@ -28,6 +30,11 @@ category = "Expenses:Food:Grocery"
 
 [[rules]]
 keywords = ["TREDISH GROCERIES"]
+category = "Expenses:Food:Grocery"
+
+[[rules]]
+# Walmart Supercenter purchases are predominantly groceries.
+keywords = ["WALMART", "WAL-MART"]
 category = "Expenses:Food:Grocery"
 
 [[rules]]

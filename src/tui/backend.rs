@@ -130,6 +130,7 @@ pub(crate) fn backend_apply_import(
     allow_uncommitted: bool,
     cc_payment_overrides: &[ImportOverridePayload],
     bank_transfer_overrides: &[ImportOverridePayload],
+    transaction_edits: &[CcTransactionEditPayload],
 ) -> AppResult<ApplyImportResponse> {
     let payload = serde_json::json!({
         "import_type": import_type,
@@ -139,9 +140,27 @@ pub(crate) fn backend_apply_import(
         "allow_uncommitted": allow_uncommitted,
         "cc_payment_overrides": cc_payment_overrides,
         "bank_transfer_overrides": bank_transfer_overrides,
+        "transaction_edits": transaction_edits,
     });
     let stdout = run_backend_with_input(
         &["api", "import-apply"],
+        Some(&serde_json::to_string(&payload)?),
+    )?;
+    Ok(serde_json::from_str(&stdout)?)
+}
+
+pub(crate) fn backend_preflight_cc_import(
+    csv_file: &str,
+    importer_id: &str,
+    selected_account: Option<&str>,
+) -> AppResult<PreflightCcImportResponse> {
+    let payload = serde_json::json!({
+        "csv_file": csv_file,
+        "importer_id": importer_id,
+        "selected_account": selected_account,
+    });
+    let stdout = run_backend_with_input(
+        &["api", "preflight-cc-import"],
         Some(&serde_json::to_string(&payload)?),
     )?;
     Ok(serde_json::from_str(&stdout)?)
@@ -168,6 +187,18 @@ pub(crate) struct ImportOverridePayload {
     pub(crate) description: String,
     pub(crate) amount: String,
     pub(crate) account: String,
+}
+
+/// A reviewer's edit to one imported credit-card transaction, keyed by date/payee/amount.
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct CcTransactionEditPayload {
+    pub(crate) date: String,
+    pub(crate) payee: String,
+    pub(crate) amount: String,
+    pub(crate) category: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) new_amount: Option<String>,
+    pub(crate) deleted: bool,
 }
 
 pub(crate) fn backend_set_config(project_root: &str) -> AppResult<ConfigResponse> {

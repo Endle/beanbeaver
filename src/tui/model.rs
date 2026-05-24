@@ -350,6 +350,151 @@ pub(crate) struct ApplyImportResponse {
     pub(crate) summary: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct CcCategoryEntryPayload {
+    pub(crate) date: String,
+    pub(crate) payee: String,
+    pub(crate) amount: String,
+    pub(crate) category: String,
+    #[serde(default)]
+    pub(crate) uncategorized: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct PreflightCcImportResponse {
+    pub(crate) status: String,
+    pub(crate) card_account: Option<String>,
+    pub(crate) error: Option<String>,
+    #[serde(default)]
+    pub(crate) candidate_categories: Vec<String>,
+    #[serde(default)]
+    pub(crate) entries: Vec<CcCategoryEntryPayload>,
+    #[serde(default)]
+    pub(crate) has_uncommitted_changes: bool,
+}
+
+/// One imported transaction the user is reviewing before the ledger is written.
+///
+/// The reviewer may re-categorize it, change its amount, or mark it deleted (skipped).
+#[derive(Clone, Debug)]
+pub(crate) struct CcCategoryEntryView {
+    pub(crate) date: String,
+    pub(crate) payee: String,
+    /// Original expense amount; used as the override key, never edited.
+    pub(crate) original_amount: String,
+    pub(crate) amount: String,
+    pub(crate) original_category: String,
+    pub(crate) chosen_category: String,
+    pub(crate) uncategorized: bool,
+    pub(crate) deleted: bool,
+}
+
+impl CcCategoryEntryView {
+    pub(crate) fn from_payload(payload: CcCategoryEntryPayload) -> Self {
+        Self {
+            date: payload.date,
+            payee: payload.payee,
+            original_amount: payload.amount.clone(),
+            amount: payload.amount,
+            original_category: payload.category.clone(),
+            chosen_category: payload.category,
+            uncategorized: payload.uncategorized,
+            deleted: false,
+        }
+    }
+
+    pub(crate) fn category_changed(&self) -> bool {
+        self.chosen_category != self.original_category
+    }
+
+    pub(crate) fn amount_changed(&self) -> bool {
+        self.amount.trim() != self.original_amount.trim()
+    }
+
+    pub(crate) fn is_changed(&self) -> bool {
+        self.deleted || self.category_changed() || self.amount_changed()
+    }
+
+    pub(crate) fn display_label(&self) -> String {
+        let marker = if self.deleted {
+            "✗"
+        } else if self.category_changed() || self.amount_changed() {
+            "*"
+        } else if self.uncategorized {
+            "!"
+        } else {
+            " "
+        };
+        format!(
+            "{marker} {} {:>10}  {}  →  {}",
+            self.date, self.amount, self.payee, self.chosen_category
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CcEntryField {
+    Category,
+    Amount,
+    Delete,
+}
+
+impl CcEntryField {
+    pub(crate) fn all() -> [Self; 3] {
+        [
+            CcEntryField::Category,
+            CcEntryField::Amount,
+            CcEntryField::Delete,
+        ]
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            CcEntryField::Category => "Category",
+            CcEntryField::Amount => "Amount",
+            CcEntryField::Delete => "Delete",
+        }
+    }
+}
+
+/// Sub-editor for one transaction in the CC category review.
+#[derive(Clone, Debug)]
+pub(crate) struct CcEntryEditor {
+    pub(crate) entry_index: usize,
+    pub(crate) field_state: ListState,
+    pub(crate) picker: Option<CategoryPickerState>,
+    /// `Some` while the amount field is being typed; holds the in-progress value.
+    pub(crate) amount_input: Option<String>,
+}
+
+impl CcEntryEditor {
+    pub(crate) fn new(entry_index: usize) -> Self {
+        let mut field_state = ListState::default();
+        field_state.select(Some(0));
+        Self {
+            entry_index,
+            field_state,
+            picker: None,
+            amount_input: None,
+        }
+    }
+
+    pub(crate) fn selected_field(&self) -> CcEntryField {
+        let fields = CcEntryField::all();
+        self.field_state
+            .selected()
+            .and_then(|index| fields.get(index).copied())
+            .unwrap_or(CcEntryField::Category)
+    }
+
+    pub(crate) fn move_field(&mut self, delta: isize) {
+        let len = CcEntryField::all().len();
+        let current = self.field_state.selected().unwrap_or(0) as isize;
+        let next = (current + delta).clamp(0, (len - 1) as isize) as usize;
+        self.field_state.select(Some(next));
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ReviewPane {
     Items,

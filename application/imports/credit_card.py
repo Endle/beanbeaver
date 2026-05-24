@@ -9,6 +9,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from beancount.core import data
+from beancount.core.number import D
+
 from beanbeaver.application.imports.account_discovery import find_open_accounts
 from beanbeaver.application.imports.csv_routing import (
     CardImporterId,
@@ -58,6 +61,26 @@ AMEX_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:Amex*", "Liabilities:CreditCard
 
 CreditCardImportStatus = Literal["ok", "aborted", "error"]
 
+# Categories assigned when no rule matched; surfaced first during review.
+UNCATEGORIZED_CATEGORIES = ("Expenses:Uncategorized", "Expenses:Shopping:NotAssigned")
+EXPENSE_ACCOUNT_PATTERNS = ["Expenses:*"]
+
+
+@dataclass(frozen=True)
+class TransactionEdit:
+    """A reviewer's edit to one imported transaction, keyed by date/payee/amount.
+
+    `category` re-points the expense posting; `new_amount` (when set) rewrites both the
+    expense and card posting amounts; `deleted` drops the transaction from the output.
+    """
+
+    date: str
+    payee: str
+    amount: str
+    category: str
+    new_amount: str | None = None
+    deleted: bool = False
+
 
 @dataclass(frozen=True)
 class CreditCardImportRequest:
@@ -69,6 +92,29 @@ class CreditCardImportRequest:
     importer_id: CardImporterId | None = None
     selected_account: str | None = None
     allow_uncommitted: bool | None = None
+    transaction_edits: tuple[TransactionEdit, ...] = ()
+
+
+@dataclass(frozen=True)
+class CreditCardCategoryEntry:
+    """One imported transaction surfaced for category review."""
+
+    date: str
+    payee: str
+    amount: str
+    category: str
+    uncategorized: bool
+
+
+@dataclass(frozen=True)
+class CreditCardCategoryPreflight:
+    """Result of preflighting a credit-card import for interactive category review."""
+
+    status: CreditCardImportStatus
+    card_account: str | None = None
+    entries: tuple[CreditCardCategoryEntry, ...] = ()
+    candidate_categories: tuple[str, ...] = ()
+    error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -481,32 +527,96 @@ def parse_credit_card_request(argv: Sequence[str] | None = None) -> CreditCardIm
     )
 
 
-def run_credit_card_import(request: CreditCardImportRequest) -> CreditCardImportResult:
-    """Run credit-card import workflow and return structured result."""
-    if (request.start_date is None) != (request.end_date is None):
-        return CreditCardImportResult(
-            status="error",
-            error="Provide both start_date and end_date together, or neither.",
-        )
+def _expense_posting_index(txn: data.Transaction) -> int | None:
+    """Return the index of the single expense posting, or None when absent."""
+    for index, posting in enumerate(txn.postings):
+        if posting.account.startswith("Expenses"):
+            return index
+    return None
 
-    if not confirm_uncommitted_changes(request.allow_uncommitted):
-        return CreditCardImportResult(status="aborted")
 
-    csv_file = request.csv_file
+def _category_key(date: str, payee: str, amount: str) -> tuple[str, str, str]:
+    return (date, payee, amount)
+
+
+def _entry_category_key(txn: data.Transaction, posting_index: int) -> tuple[str, str, str]:
+    posting = txn.postings[posting_index]
+    return _category_key(txn.date.isoformat(), txn.payee or "", str(posting.units.number))
+
+
+def _rewrite_amount(posting: data.Posting, new_amount: str) -> data.Posting:
+    units = posting.units._replace(number=D(new_amount))
+    return posting._replace(units=units)
+
+
+def _apply_transaction_edits(
+    entries: list[data.Directive],
+    edits: tuple[TransactionEdit, ...],
+) -> list[data.Directive]:
+    """Apply reviewer edits (category, amount, deletion); returns the filtered entry list."""
+    if not edits:
+        return entries
+    edit_by_key = {_category_key(e.date, e.payee, e.amount): e for e in edits}
+    result: list[data.Directive] = []
+    for txn in entries:
+        if not isinstance(txn, data.Transaction):
+            result.append(txn)
+            continue
+        index = _expense_posting_index(txn)
+        if index is None:
+            result.append(txn)
+            continue
+        edit = edit_by_key.get(_entry_category_key(txn, index))
+        if edit is None:
+            result.append(txn)
+            continue
+        if edit.deleted:
+            # Drop the transaction entirely.
+            continue
+        txn.postings[index] = txn.postings[index]._replace(account=edit.category)
+        if edit.new_amount is not None and edit.new_amount.strip():
+            new_amount = edit.new_amount.strip()
+            txn.postings[index] = _rewrite_amount(txn.postings[index], new_amount)
+            # Keep the transaction balanced: the card (non-expense) postings mirror the expense.
+            negated = str(-D(new_amount))
+            for other_index, posting in enumerate(txn.postings):
+                if other_index != index:
+                    txn.postings[other_index] = _rewrite_amount(posting, negated)
+        result.append(txn)
+    return result
+
+
+@dataclass(frozen=True)
+class _PreparedEntries:
+    entries: list[data.Directive]
+    card_account: str
+    as_of: datetime.date | None
+
+
+def _prepare_card_entries(
+    *,
+    csv_file: str | None,
+    importer_id: CardImporterId | None,
+    selected_account: str | None,
+) -> tuple[CreditCardImportResult | None, _PreparedEntries | None]:
+    """Resolve the CSV/importer/account and extract beancount entries (no file written)."""
     if not csv_file:
         try:
             csv_file = detect_credit_card_csv()
         except RuntimeError as exc:
-            return CreditCardImportResult(status="error", error=str(exc))
+            return CreditCardImportResult(status="error", error=str(exc)), None
         if csv_file is None:
-            return CreditCardImportResult(
-                status="error",
-                error=(
-                    f"No credit card CSV file found in {downloads_display_path(DOWNLOADED_CSV_BASE_PATH)}\n"
-                    "Supported files: CIBC.csv, statement.csv, report.csv, Transactions.csv, "
-                    "activity.csv, plat.csv, *AMEX*.csv, SIMPLII*.csv, *Scotiabank*.csv, "
-                    "Transaction History_*.csv, *MBNA*.csv"
+            return (
+                CreditCardImportResult(
+                    status="error",
+                    error=(
+                        f"No credit card CSV file found in {downloads_display_path(DOWNLOADED_CSV_BASE_PATH)}\n"
+                        "Supported files: CIBC.csv, statement.csv, report.csv, Transactions.csv, "
+                        "activity.csv, plat.csv, *AMEX*.csv, SIMPLII*.csv, *Scotiabank*.csv, "
+                        "Transaction History_*.csv, *MBNA*.csv"
+                    ),
                 ),
+                None,
             )
 
     target_file_name = TMPDIR / os.path.basename(csv_file)
@@ -518,23 +628,110 @@ def run_credit_card_import(request: CreditCardImportRequest) -> CreditCardImport
             allow_absolute=False,
         )
     except FileNotFoundError:
-        return CreditCardImportResult(status="error", error=f"File not found: {csv_file}")
+        return CreditCardImportResult(status="error", error=f"File not found: {csv_file}"), None
 
     try:
         importer, card_account, as_of = _resolve_importer(
             target_file_name,
             csv_file,
-            importer_id=request.importer_id,
-            selected_account=request.selected_account,
+            importer_id=importer_id,
+            selected_account=selected_account,
         )
     except RuntimeError as exc:
-        return CreditCardImportResult(status="error", error=str(exc))
+        return CreditCardImportResult(status="error", error=str(exc)), None
 
     logger.info("Importing for %s", card_account)
     if as_of is not None:
         logger.info("Using account discovery as-of date: %s", as_of.isoformat())
 
     entries = importer.extract(_FileMemo(str(target_file_name)))
+    return None, _PreparedEntries(entries=entries, card_account=card_account, as_of=as_of)
+
+
+def preflight_credit_card_categories(
+    *,
+    csv_file: str | None = None,
+    importer_id: CardImporterId | None = None,
+    selected_account: str | None = None,
+) -> CreditCardCategoryPreflight:
+    """Extract a CC statement and surface each transaction's category for interactive review.
+
+    No ledger file is written; this only reports what the importer would assign so the TUI
+    can collect overrides before :func:`run_credit_card_import` commits them.
+    """
+    error, prepared = _prepare_card_entries(
+        csv_file=csv_file,
+        importer_id=importer_id,
+        selected_account=selected_account,
+    )
+    if error is not None:
+        return CreditCardCategoryPreflight(status=error.status, error=error.error)
+    assert prepared is not None
+
+    review_entries: list[CreditCardCategoryEntry] = []
+    for txn in prepared.entries:
+        if not isinstance(txn, data.Transaction):
+            continue
+        index = _expense_posting_index(txn)
+        if index is None:
+            continue
+        posting = txn.postings[index]
+        review_entries.append(
+            CreditCardCategoryEntry(
+                date=txn.date.isoformat(),
+                payee=txn.payee or "",
+                amount=str(posting.units.number),
+                category=posting.account,
+                uncategorized=posting.account in UNCATEGORIZED_CATEGORIES,
+            )
+        )
+
+    # Uncategorized first, otherwise preserve importer order (stable sort).
+    review_entries.sort(key=lambda entry: not entry.uncategorized)
+
+    candidates = find_open_accounts(EXPENSE_ACCOUNT_PATTERNS, as_of=prepared.as_of)
+    # Always offer the categories already in use, even if the account list is filtered.
+    for entry in review_entries:
+        if entry.category not in candidates:
+            candidates.append(entry.category)
+
+    return CreditCardCategoryPreflight(
+        status="ok",
+        card_account=prepared.card_account,
+        entries=tuple(review_entries),
+        candidate_categories=tuple(candidates),
+    )
+
+
+def run_credit_card_import(request: CreditCardImportRequest) -> CreditCardImportResult:
+    """Run credit-card import workflow and return structured result."""
+    if (request.start_date is None) != (request.end_date is None):
+        return CreditCardImportResult(
+            status="error",
+            error="Provide both start_date and end_date together, or neither.",
+        )
+
+    if not confirm_uncommitted_changes(request.allow_uncommitted):
+        return CreditCardImportResult(status="aborted")
+
+    error, prepared = _prepare_card_entries(
+        csv_file=request.csv_file,
+        importer_id=request.importer_id,
+        selected_account=request.selected_account,
+    )
+    if error is not None:
+        return error
+    assert prepared is not None
+    card_account = prepared.card_account
+    entries = prepared.entries
+
+    entries = _apply_transaction_edits(entries, request.transaction_edits)
+    if not entries:
+        return CreditCardImportResult(
+            status="error",
+            error="All transactions were deleted during review - nothing to import",
+        )
+
     output_buffer = io.StringIO()
     from beancount.parser import printer
 

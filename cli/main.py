@@ -113,6 +113,10 @@ Notes:
         "preflight-chequing-import",
         help="Preflight a chequing CSV and surface ambiguous account decisions as JSON",
     )
+    api_subparsers.add_parser(
+        "preflight-cc-import",
+        help="Preflight a credit-card CSV and surface per-transaction categories as JSON",
+    )
 
     show_receipt_parser = api_subparsers.add_parser("show-receipt", help="Show one staged receipt document as JSON")
     show_receipt_parser.add_argument("path", help="Path to a staged receipt JSON file")
@@ -254,6 +258,8 @@ Notes:
             return _run_legacy_command(cli_api.cmd_api_import_apply, args)
         if args.api_command == "preflight-chequing-import":
             return _run_legacy_command(cli_api.cmd_api_preflight_chequing_import, args)
+        if args.api_command == "preflight-cc-import":
+            return _run_legacy_command(cli_api.cmd_api_preflight_cc_import, args)
         if args.api_command == "get-config":
             return _run_legacy_command(cli_api.cmd_api_get_config, args)
         if args.api_command == "set-config":

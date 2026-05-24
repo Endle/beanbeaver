@@ -361,6 +361,9 @@ pub(crate) fn render_app(frame: &mut ratatui::Frame<'_>, app: &mut App) {
     if app.imports_state.decision_picker.is_some() {
         render_decision_picker_modal(frame, &mut app.imports_state);
     }
+    if app.imports_state.cc_review.is_some() {
+        render_cc_category_review_modal(frame, &mut app.imports_state);
+    }
 }
 
 pub(crate) fn render_receipts_page(
@@ -1318,6 +1321,177 @@ pub(crate) fn render_decision_picker_modal(
         .style(popup_style())
         .wrap(Wrap { trim: true });
     frame.render_widget(help, rows[2]);
+}
+
+pub(crate) fn render_cc_category_review_modal(
+    frame: &mut ratatui::Frame<'_>,
+    imports_state: &mut ImportPageState,
+) {
+    let Some(review) = imports_state.cc_review.as_mut() else {
+        return;
+    };
+
+    let popup = centered_rect(88, 24, frame.area());
+    frame.render_widget(Clear, popup);
+
+    let card = review.card_account.as_deref().unwrap_or("(unknown card)");
+    let changed = review.changed_count();
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(format!(
+                "Review categories — {card} ({} txns · {changed} changed)",
+                review.entries.len()
+            ))
+            .style(popup_style()),
+        popup,
+    );
+
+    let warning_height: u16 = if review.has_uncommitted_changes { 1 } else { 0 };
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(warning_height),
+            Constraint::Min(4),
+            Constraint::Length(2),
+        ])
+        .split(popup);
+
+    if review.has_uncommitted_changes {
+        let warning = Paragraph::new(
+            "⚠ Ledger has uncommitted changes — commit before applying to keep history clean",
+        )
+        .style(popup_style().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        .wrap(Wrap { trim: true });
+        frame.render_widget(warning, rows[0]);
+    }
+
+    let items: Vec<ListItem> = review
+        .entries
+        .iter()
+        .map(|entry| ListItem::new(Line::from(entry.display_label())).style(popup_style()))
+        .collect();
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Transactions (! uncategorized · * changed)")
+                .style(popup_style()),
+        )
+        .style(popup_style())
+        .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+        .highlight_symbol(">> ");
+    frame.render_stateful_widget(list, rows[1], &mut review.entries_state);
+
+    let help = Paragraph::new("Enter/e edit  |  x delete  |  a apply  |  Esc cancel  |  j/k move")
+        .style(popup_style())
+        .wrap(Wrap { trim: true });
+    frame.render_widget(help, rows[2]);
+
+    // Inner per-transaction editor overlay (fields → category picker / amount input).
+    render_cc_entry_editor_overlay(frame, review);
+}
+
+fn render_cc_entry_editor_overlay(
+    frame: &mut ratatui::Frame<'_>,
+    review: &mut CcCategoryReview,
+) {
+    let Some(entry_index) = review.editor_entry_index() else {
+        return;
+    };
+    let entry = match review.entries.get(entry_index) {
+        Some(entry) => entry.clone(),
+        None => return,
+    };
+    let candidate_categories = review.candidate_categories.clone();
+    let Some(editor) = review.editor.as_mut() else {
+        return;
+    };
+
+    let editor_rect = centered_rect(70, 14, frame.area());
+    frame.render_widget(Clear, editor_rect);
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(format!("Edit · {} {}", entry.date, entry.payee))
+            .style(popup_style()),
+        editor_rect,
+    );
+    let editor_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(3), Constraint::Length(2)])
+        .split(editor_rect);
+
+    let amount_display = match editor.amount_input.as_ref() {
+        Some(buffer) => format!("{buffer}_"),
+        None => entry.amount.clone(),
+    };
+    let delete_display = if entry.deleted { "[x] skip" } else { "[ ] keep" };
+    let field_items: Vec<ListItem> = CcEntryField::all()
+        .into_iter()
+        .map(|field| {
+            let value = match field {
+                CcEntryField::Category => entry.chosen_category.clone(),
+                CcEntryField::Amount => amount_display.clone(),
+                CcEntryField::Delete => delete_display.to_string(),
+            };
+            ListItem::new(Line::from(format!("{:<10} {}", field.label(), value))).style(popup_style())
+        })
+        .collect();
+    let field_list = List::new(field_items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Fields")
+                .style(popup_style()),
+        )
+        .style(popup_style())
+        .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+        .highlight_symbol(">> ");
+    frame.render_stateful_widget(field_list, editor_rows[0], &mut editor.field_state);
+
+    let editor_help = if editor.amount_input.is_some() {
+        "Type amount  |  Enter confirm  |  Esc cancel"
+    } else {
+        "Enter edit field  |  x toggle delete  |  Esc back"
+    };
+    frame.render_widget(
+        Paragraph::new(editor_help)
+            .style(popup_style())
+            .wrap(Wrap { trim: true }),
+        editor_rows[1],
+    );
+
+    // Innermost: category picker overlay.
+    if let Some(picker) = editor.picker.as_mut() {
+        let inner = centered_rect(60, 18, frame.area());
+        frame.render_widget(Clear, inner);
+        let inner_rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(4), Constraint::Length(2)])
+            .split(inner);
+        let candidate_items: Vec<ListItem> = candidate_categories
+            .iter()
+            .map(|category| ListItem::new(Line::from(category.clone())).style(popup_style()))
+            .collect();
+        let candidate_list = List::new(candidate_items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(format!("Pick category ({})", candidate_categories.len()))
+                    .style(popup_style()),
+            )
+            .style(popup_style())
+            .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+            .highlight_symbol(">> ");
+        frame.render_stateful_widget(candidate_list, inner_rows[0], &mut picker.category_state);
+        frame.render_widget(
+            Paragraph::new("Enter confirm  |  Esc cancel  |  j/k · PgUp/PgDn move")
+                .style(popup_style())
+                .wrap(Wrap { trim: true }),
+            inner_rows[1],
+        );
+    }
 }
 
 pub(crate) fn centered_rect(
