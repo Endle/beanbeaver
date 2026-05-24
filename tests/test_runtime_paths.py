@@ -29,15 +29,7 @@ def test_project_root_detects_host_project_from_cwd(tmp_path: Path, monkeypatch:
     assert runtime_paths._get_project_root() == project_root.resolve()
 
 
-def test_project_paths_src_prefers_vendored_checkout(tmp_path: Path) -> None:
-    host_root = tmp_path / "host"
-    vendored_src = host_root / "vendor" / "beanbeaver"
-    vendored_src.mkdir(parents=True)
-
-    assert runtime_paths.ProjectPaths(root=host_root).src == vendored_src.resolve()
-
-
-def test_project_paths_src_falls_back_to_package_root(tmp_path: Path) -> None:
+def test_project_paths_src_is_package_root(tmp_path: Path) -> None:
     paths = runtime_paths.ProjectPaths(root=tmp_path / "host")
 
     assert paths.src == Path(runtime_paths.__file__).resolve().parents[1]

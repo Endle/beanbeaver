@@ -123,10 +123,6 @@ def _get_project_root() -> Path:
     if configured_root is not None:
         return configured_root
 
-    # Vendored layout: <project>/vendor/beanbeaver/runtime/paths.py
-    if _PACKAGE_ROOT.parent.name == "vendor":
-        return _PACKAGE_ROOT.parent.parent.resolve()
-
     cwd_root = _search_upwards(Path.cwd())
     if cwd_root is not None:
         return cwd_root
@@ -155,15 +151,7 @@ class ProjectPaths:
     # --- Source code paths ---
     @property
     def src(self) -> Path:
-        """Bean Beaver code directory.
-
-        Supports both:
-        - host project layout: <root>/vendor/beanbeaver/
-        - standalone beanbeaver layout: <root>/
-        """
-        vendored = self.root / "vendor" / "beanbeaver"
-        if vendored.exists():
-            return vendored
+        """Bean Beaver code directory."""
         return _PACKAGE_ROOT
 
     # --- Configuration paths ---
@@ -193,19 +181,9 @@ class ProjectPaths:
         return self.rules / "default_merchant_families.toml"
 
     @property
-    def legacy_default_merchant_families(self) -> Path:
-        """Legacy default merchant family rules path."""
-        return self.src / "runtime" / "rules" / "default_merchant_families.toml"
-
-    @property
     def default_merchant_rules(self) -> Path:
         """Default merchant categorization rules TOML file (canonical)."""
         return self.rules / "default_merchant_rules.toml"
-
-    @property
-    def legacy_default_merchant_rules(self) -> Path:
-        """Legacy default merchant rules path."""
-        return self.src / "runtime" / "rules" / "default_merchant_rules.toml"
 
     @property
     def chequing_rules(self) -> Path:
@@ -226,11 +204,6 @@ class ProjectPaths:
     def default_item_classifier_rules(self) -> Path:
         """Default receipt item classifier rules TOML file (canonical)."""
         return self.rules / "default_item_classifier.toml"
-
-    @property
-    def legacy_default_item_classifier_rules(self) -> Path:
-        """Legacy default receipt item classifier rules path."""
-        return self.src / "receipt" / "rules" / "default_item_classifier.toml"
 
     # --- Records/ledger paths ---
     @property

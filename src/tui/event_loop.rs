@@ -734,7 +734,7 @@ pub(crate) fn run_app(
                             Err(error) => app.set_error(error.to_string()),
                         }
                     }
-                    (KeyCode::Char('x'), KeyModifiers::NONE) => {
+                    (KeyCode::Char('d'), KeyModifiers::NONE) => {
                         if let Err(error) = app.trash_selected_import_csv() {
                             app.set_error(error.to_string());
                         }

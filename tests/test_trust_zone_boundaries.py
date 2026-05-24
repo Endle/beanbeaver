@@ -21,7 +21,6 @@ _ALLOWED_TARGET_ZONES = {
 
 def _normalize_zone_path(raw: str) -> tuple[str, ...]:
     cleaned = raw.strip().strip("/")
-    cleaned = re.sub(r"^vendor/beanbeaver/", "", cleaned)
     return tuple(part for part in cleaned.split("/") if part)
 
 

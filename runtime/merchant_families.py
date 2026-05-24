@@ -8,8 +8,6 @@ from pathlib import Path
 
 from beanbeaver.runtime.paths import get_paths
 
-_PACKAGE_DEFAULT_MERCHANT_FAMILIES = Path(__file__).resolve().parents[1] / "rules" / "default_merchant_families.toml"
-
 
 @dataclass(frozen=True)
 class MerchantFamily:
@@ -41,39 +39,14 @@ def _load_families_from_path(path: Path) -> list[MerchantFamily]:
     return families
 
 
-def _unique_existing_paths(paths: list[Path | None]) -> list[Path]:
-    resolved_seen: set[Path] = set()
-    result: list[Path] = []
-    for path in paths:
-        if path is None:
-            continue
-        resolved = path.resolve()
-        if resolved in resolved_seen:
-            continue
-        resolved_seen.add(resolved)
-        result.append(path)
-    return result
-
-
 @lru_cache(maxsize=4)
 def load_merchant_families(config_path: str | None = None) -> tuple[MerchantFamily, ...]:
     """Load layered merchant-family rules from project-local and public defaults."""
-    families: list[MerchantFamily] = []
     if config_path is not None:
         return tuple(_load_families_from_path(Path(config_path)))
 
     paths = get_paths()
-    package_default = None
-    if not paths.default_merchant_families.exists():
-        package_default = _PACKAGE_DEFAULT_MERCHANT_FAMILIES
-    legacy_default = getattr(paths, "legacy_default_merchant_families", None)
-    for path in _unique_existing_paths(
-        [
-            paths.merchant_families,
-            paths.default_merchant_families,
-            package_default,
-            legacy_default if isinstance(legacy_default, Path) else None,
-        ]
-    ):
+    families: list[MerchantFamily] = []
+    for path in (paths.merchant_families, paths.default_merchant_families):
         families.extend(_load_families_from_path(path))
     return tuple(families)

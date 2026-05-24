@@ -105,7 +105,7 @@ impl App {
                 "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | s start/create container | x stop container | R restart container | r refresh container status/logs | q quit"
             }
             Page::Imports => {
-                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | r load routes | h/l or Tab cycle Routes/Accounts/Decisions | j/k move | Enter opens picker (Routes: reload accounts) | v view csv | x trash csv | a apply import | u toggle allow-uncommitted | q quit"
+                "1 receipts | 2 serve | 3 fava | 4 OCR | 5 imports | r load routes | h/l or Tab cycle Routes/Accounts/Decisions | j/k move | Enter opens picker (Routes: reload accounts) | v view csv | d trash csv | a apply import | u toggle allow-uncommitted | q quit"
             }
         }
     }
