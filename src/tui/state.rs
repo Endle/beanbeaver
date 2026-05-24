@@ -46,6 +46,7 @@ pub(crate) struct CcCategoryReview {
     pub(crate) entries_state: ListState,
     pub(crate) candidate_categories: Vec<String>,
     pub(crate) editor: Option<CcEntryEditor>,
+    pub(crate) has_uncommitted_changes: bool,
 }
 
 impl CcCategoryReview {
@@ -71,6 +72,7 @@ impl CcCategoryReview {
             entries_state,
             candidate_categories: response.candidate_categories,
             editor: None,
+            has_uncommitted_changes: response.has_uncommitted_changes,
         }
     }
 

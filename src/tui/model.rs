@@ -369,6 +369,8 @@ pub(crate) struct PreflightCcImportResponse {
     pub(crate) candidate_categories: Vec<String>,
     #[serde(default)]
     pub(crate) entries: Vec<CcCategoryEntryPayload>,
+    #[serde(default)]
+    pub(crate) has_uncommitted_changes: bool,
 }
 
 /// One imported transaction the user is reviewing before the ledger is written.

@@ -65,6 +65,8 @@ class CardTransaction:
             return True
         if "PAYMENT RECEIVED" in self.raw_merchant_name:
             return True
+        if self.raw_merchant_name.strip().upper() == "PAYMENT":
+            return True
         return False
 
     def is_amex_offer(self) -> bool:

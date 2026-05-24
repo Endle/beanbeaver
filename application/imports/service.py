@@ -133,6 +133,7 @@ class PreflightCreditCardImportResult:
     entries: tuple[CategoryReviewEntryPayload, ...] = ()
     candidate_categories: tuple[str, ...] = ()
     error: str | None = None
+    has_uncommitted_changes: bool = False
 
 
 @dataclass(frozen=True)
@@ -446,6 +447,7 @@ def preflight_credit_card_import(
         entries=entries,
         candidate_categories=result.candidate_categories,
         error=result.error,
+        has_uncommitted_changes=check_uncommitted_changes(),
     )
 
 

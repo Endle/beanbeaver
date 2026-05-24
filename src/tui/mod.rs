@@ -515,6 +515,7 @@ mod tests {
                     uncategorized: false,
                 },
             ],
+            has_uncommitted_changes: false,
         };
         CcCategoryReview::new(
             "amex.csv".to_string(),

@@ -552,6 +552,7 @@ def cmd_api_preflight_cc_import(args: argparse.Namespace) -> None:
             "card_account": result.card_account,
             "error": result.error,
             "candidate_categories": list(result.candidate_categories),
+            "has_uncommitted_changes": result.has_uncommitted_changes,
             "entries": [
                 {
                     "date": entry.date,

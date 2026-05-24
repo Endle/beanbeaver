@@ -1347,10 +1347,24 @@ pub(crate) fn render_cc_category_review_modal(
         popup,
     );
 
+    let warning_height: u16 = if review.has_uncommitted_changes { 1 } else { 0 };
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(4), Constraint::Length(2)])
+        .constraints([
+            Constraint::Length(warning_height),
+            Constraint::Min(4),
+            Constraint::Length(2),
+        ])
         .split(popup);
+
+    if review.has_uncommitted_changes {
+        let warning = Paragraph::new(
+            "⚠ Ledger has uncommitted changes — commit before applying to keep history clean",
+        )
+        .style(popup_style().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        .wrap(Wrap { trim: true });
+        frame.render_widget(warning, rows[0]);
+    }
 
     let items: Vec<ListItem> = review
         .entries
@@ -1367,12 +1381,12 @@ pub(crate) fn render_cc_category_review_modal(
         .style(popup_style())
         .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
         .highlight_symbol(">> ");
-    frame.render_stateful_widget(list, rows[0], &mut review.entries_state);
+    frame.render_stateful_widget(list, rows[1], &mut review.entries_state);
 
     let help = Paragraph::new("Enter/e edit  |  x delete  |  a apply  |  Esc cancel  |  j/k move")
         .style(popup_style())
         .wrap(Wrap { trim: true });
-    frame.render_widget(help, rows[1]);
+    frame.render_widget(help, rows[2]);
 
     // Inner per-transaction editor overlay (fields → category picker / amount input).
     render_cc_entry_editor_overlay(frame, review);
