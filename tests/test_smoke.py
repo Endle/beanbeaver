@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import importlib
 import importlib.abc
+import importlib.machinery
 import sys
+from collections.abc import Sequence
+from types import ModuleType
 
 import pytest
 
@@ -27,7 +30,12 @@ def test_imports() -> None:
 
 
 class _BlockCsvRoutingFinder(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname: str, path: object = None, target: object = None) -> object:
+    def find_spec(
+        self,
+        fullname: str,
+        path: Sequence[str] | None,
+        target: ModuleType | None = None,
+    ) -> importlib.machinery.ModuleSpec | None:
         if fullname == "beanbeaver.application.imports.csv_routing":
             raise ImportError("csv_routing import blocked for smoke test")
         return None

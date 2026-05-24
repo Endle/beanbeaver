@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 from beanbeaver.ledger_access._native import _native_backend
 
@@ -44,7 +45,7 @@ class ApplyMatchResult:
     message: str | None = None
 
 
-def _candidate_from_payload(payload: dict[str, object]) -> MatchCandidate:
+def _candidate_from_payload(payload: dict[str, Any]) -> MatchCandidate:
     amount = payload.get("amount")
     return MatchCandidate(
         file_path=str(payload["file_path"]),
@@ -60,7 +61,7 @@ def _candidate_from_payload(payload: dict[str, object]) -> MatchCandidate:
     )
 
 
-def _plan_from_payload(payload: dict[str, object]) -> ReceiptMatchPlan:
+def _plan_from_payload(payload: dict[str, Any]) -> ReceiptMatchPlan:
     return ReceiptMatchPlan(
         path=Path(str(payload["path"])),
         ledger_path=Path(str(payload["ledger_path"])),

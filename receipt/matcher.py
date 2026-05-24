@@ -18,20 +18,28 @@ _rust_matcher = require_rust_matcher()
 
 
 class AmountLike(Protocol):
-    number: Decimal
-    currency: str
+    @property
+    def number(self) -> Decimal: ...
+    @property
+    def currency(self) -> str: ...
 
 
 class PostingLike(Protocol):
-    account: str
-    units: AmountLike | None
+    @property
+    def account(self) -> str: ...
+    @property
+    def units(self) -> AmountLike | None: ...
 
 
 class TransactionLike(Protocol):
-    date: date
-    payee: str | None
-    narration: str | None
-    postings: Sequence[PostingLike]
+    @property
+    def date(self) -> date: ...
+    @property
+    def payee(self) -> str | None: ...
+    @property
+    def narration(self) -> str | None: ...
+    @property
+    def postings(self) -> Sequence[PostingLike]: ...
 
 
 @dataclass

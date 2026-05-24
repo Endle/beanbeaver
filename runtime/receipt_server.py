@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from fastapi import FastAPI, Request
@@ -252,7 +252,7 @@ async def upload_receipt(request: Request) -> JSONResponse:
                     output_path = save_scanned_receipt(
                         receipt,
                         raw_ocr_payload=raw_ocr_result,
-                        stage1_ocr_payload=ocr_result,
+                        stage1_ocr_payload=cast(dict[str, Any], ocr_result),
                         image_sha256=image_sha256,
                         source_image_path=filepath,
                         resized_image_bytes=resized_contents,

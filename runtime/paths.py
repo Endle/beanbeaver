@@ -287,7 +287,6 @@ class ProjectPaths:
         """Canonical per-receipt rendered-artifact directory name."""
         return "rendered"
 
-    @property
     def receipt_stage_dir(self, receipt_dir: Path) -> Path:
         """Return the canonical stage directory for one receipt chain."""
         return receipt_dir / self.receipts_stages_dirname

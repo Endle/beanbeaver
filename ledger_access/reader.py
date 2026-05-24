@@ -32,7 +32,7 @@ class LedgerReader:
 
     def list_transactions_payload(
         self, ledger_path: Path | str | None = None
-    ) -> tuple[Path, list[dict[str, object]], list[str], dict[str, object]]:
+    ) -> tuple[Path, list[dict[str, Any]], list[str], dict[str, object]]:
         result = list_transactions(ledger_path=self._resolve_path(ledger_path))
         payload = [
             {

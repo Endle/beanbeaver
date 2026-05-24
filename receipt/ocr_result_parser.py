@@ -2,16 +2,18 @@
 
 from datetime import date
 from decimal import Decimal
+from typing import Any
 
 from beanbeaver.domain.receipt import Receipt, ReceiptItem, ReceiptWarning
 
 from ._rust import require_rust_matcher
 from .date_utils import placeholder_receipt_date
 from .item_categories import ItemCategoryRuleLayers
+from .ocr_schema import OcrDocument
 
 
 def parse_receipt(
-    ocr_result: dict,
+    ocr_result: OcrDocument | dict[str, Any],
     item_category_rule_layers: ItemCategoryRuleLayers,
     image_filename: str = "",
     known_merchants: list[str] | tuple[str, ...] | None = None,

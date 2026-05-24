@@ -34,7 +34,7 @@ def _rotate_jpeg(src: Path, dst: Path, angle_deg: int) -> None:
     with Image.open(src) as img:
         rotated = img.rotate(
             angle_deg,
-            resample=Image.BICUBIC,
+            resample=Image.Resampling.BICUBIC,
             expand=True,
             fillcolor=(255, 255, 255),
         )
