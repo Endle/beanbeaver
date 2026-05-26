@@ -943,7 +943,7 @@ pub(crate) fn render_review_screen(
     frame.render_widget(preview, right[2]);
 
     let help = Paragraph::new(format!(
-        "h/l pane  |  j/k move  |  Enter open editor  |  i add (item/tender)  |  T add tender  |  v price  |  n notes  |  c category  |  x toggle removed  |  p preview tab  |  a {}  |  Esc cancel",
+        "h/l pane  |  j/k move  |  Enter open editor  |  i add (item/tender)  |  T add tender  |  f fill remaining  |  v price  |  n notes  |  c category  |  x toggle removed  |  p preview tab  |  a {}  |  Esc cancel",
         review_state.submit_label()
     ))
     .wrap(Wrap { trim: true });
@@ -1044,7 +1044,7 @@ pub(crate) fn render_tender_editor_modal(
     }
 
     let help = Paragraph::new(
-        "Up/Down select  |  Enter edit / cycle kind / toggle removed  |  Left/Right cycle kind  |  x toggle removed  |  Esc close",
+        "Up/Down select  |  Enter edit / cycle kind / toggle removed  |  Left/Right cycle kind  |  f fill remaining  |  x toggle removed  |  Esc close",
     )
     .style(popup_style())
     .wrap(Wrap { trim: true });

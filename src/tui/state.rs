@@ -1062,6 +1062,30 @@ impl ReviewState {
         }
     }
 
+    pub(crate) fn fill_remaining_tender(&mut self, index: usize) -> Option<String> {
+        let total_scaled = self.receipt_total_scaled();
+        if total_scaled <= 0 {
+            return Some("Set a receipt Total before filling a tender amount".to_string());
+        }
+        let target_is_new = self.tenders.get(index).map(|tender| tender.is_new)?;
+        if !target_is_new {
+            return Some("Fill-remaining only applies to manually added tenders".to_string());
+        }
+        let others_sum: i64 = self
+            .tenders
+            .iter()
+            .enumerate()
+            .filter(|(other_index, tender)| *other_index != index && !tender.removed)
+            .map(|(other_index, _)| review_decimal_to_scaled(self.preview_tender_amount(other_index)))
+            .sum();
+        let remaining = (total_scaled - others_sum).max(0);
+        let amount_text = review_scaled_to_currency(remaining);
+        self.text_input = None;
+        let tender = self.tenders.get_mut(index)?;
+        tender.amount = amount_text.clone();
+        Some(format!("Filled {} to ${}", tender.id, amount_text))
+    }
+
     pub(crate) fn cycle_tender_kind(&mut self, index: usize, delta: isize) -> Option<String> {
         let tender = self.tenders.get_mut(index)?;
         let next = next_tender_kind(&tender.kind, delta);

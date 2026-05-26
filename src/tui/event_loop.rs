@@ -208,6 +208,15 @@ pub(crate) fn run_app(
                                 status_message = review_state.cycle_tender_kind(index, 1);
                             }
                         }
+                        KeyCode::Char('f') => {
+                            let tender_index = review_state
+                                .tender_editor
+                                .as_ref()
+                                .map(|editor| editor.tender_index);
+                            if let Some(index) = tender_index {
+                                status_message = review_state.fill_remaining_tender(index);
+                            }
+                        }
                         _ => {}
                     }
                 } else {
@@ -369,6 +378,13 @@ pub(crate) fn run_app(
                             }
                             _ => {}
                         },
+                        (KeyCode::Char('f'), _) => {
+                            if review_state.pane == ReviewPane::Tenders {
+                                if let Some(index) = review_state.selected_tender_index() {
+                                    status_message = review_state.fill_remaining_tender(index);
+                                }
+                            }
+                        }
                         _ => {}
                     }
                 }

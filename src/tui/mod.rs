@@ -400,6 +400,51 @@ mod tests {
     }
 
     #[test]
+    fn fill_remaining_tender_sets_amount_to_total_minus_others() {
+        let mut detail = sample_review_detail();
+        detail.document["receipt"]["total"] = serde_json::json!("466.68");
+        let mut review_state = ReviewState::from_detail(Queue::Approved, &detail, Vec::new());
+        let total_field = review_state
+            .fields
+            .iter_mut()
+            .find(|field| field.field == ReceiptReviewField::Total)
+            .expect("total field");
+        total_field.value = "466.68".to_string();
+
+        review_state.add_tender();
+        review_state.tenders[0].amount = "25.00".to_string();
+        review_state.tenders[0].kind = "gift_card".to_string();
+        review_state.add_tender();
+
+        let message = review_state.fill_remaining_tender(1).expect("filled");
+        assert_eq!(message, "Filled tender-added-0002 to $441.68");
+        assert_eq!(review_state.tenders[1].amount, "441.68");
+
+        let (_sum, _total, status) = review_state.tender_balance();
+        assert_eq!(status, "balanced");
+    }
+
+    #[test]
+    fn fill_remaining_tender_refuses_existing_tender() {
+        let mut detail = sample_review_detail();
+        detail.document["receipt"]["total"] = serde_json::json!("466.68");
+        detail.document["tenders"] = serde_json::json!([{"amount": "441.68", "kind": "card"}]);
+        let mut review_state = ReviewState::from_detail(Queue::Approved, &detail, Vec::new());
+        let total_field = review_state
+            .fields
+            .iter_mut()
+            .find(|field| field.field == ReceiptReviewField::Total)
+            .expect("total field");
+        total_field.value = "466.68".to_string();
+
+        let message = review_state
+            .fill_remaining_tender(0)
+            .expect("status message");
+        assert!(message.contains("only applies to manually added"));
+        assert_eq!(review_state.tenders[0].amount, "441.68");
+    }
+
+    #[test]
     fn tender_balance_reports_balanced_when_two_tenders_cover_total() {
         let mut detail = sample_review_detail();
         detail.document["receipt"]["total"] = serde_json::json!("466.68");
