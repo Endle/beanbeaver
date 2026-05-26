@@ -1356,6 +1356,42 @@ impl ReviewState {
             .unwrap_or("")
     }
 
+    pub(crate) fn tender_sum_scaled(&self) -> i64 {
+        self.tenders
+            .iter()
+            .enumerate()
+            .filter(|(_, tender)| !tender.removed)
+            .map(|(index, _)| review_decimal_to_scaled(self.preview_tender_amount(index)))
+            .sum()
+    }
+
+    pub(crate) fn receipt_total_scaled(&self) -> i64 {
+        self.fields
+            .iter()
+            .position(|field| field.field == ReceiptReviewField::Total)
+            .map(|index| review_decimal_to_scaled(self.preview_receipt_field_value(index)))
+            .unwrap_or(0)
+    }
+
+    /// Sum-vs-total verdict for the Tenders pane.
+    /// Returns (sum_scaled, total_scaled, status_label).
+    pub(crate) fn tender_balance(&self) -> (i64, i64, String) {
+        let sum = self.tender_sum_scaled();
+        let total = self.receipt_total_scaled();
+        let status = if self.tenders.iter().all(|tender| tender.removed) {
+            "no tenders".to_string()
+        } else if total == 0 {
+            "no total".to_string()
+        } else if sum == total {
+            "balanced".to_string()
+        } else if sum < total {
+            format!("short ${}", review_scaled_to_currency(total - sum))
+        } else {
+            format!("over ${}", review_scaled_to_currency(sum - total))
+        };
+        (sum, total, status)
+    }
+
     pub(crate) fn itemized_total_scaled(&self) -> i64 {
         let item_total: i64 = self
             .items
@@ -1444,7 +1480,14 @@ impl ReviewState {
 
         let active_tender_count = self.tenders.iter().filter(|tender| !tender.removed).count();
         lines.push(String::new());
-        lines.push(format!("Tenders ({})", active_tender_count));
+        let (tender_sum, total_scaled, balance_status) = self.tender_balance();
+        lines.push(format!(
+            "Tenders ({})  sum ${} / total ${}  [{}]",
+            active_tender_count,
+            review_scaled_to_currency(tender_sum),
+            review_scaled_to_currency(total_scaled),
+            balance_status,
+        ));
         if active_tender_count == 0 {
             lines.push("  (none; renders as single PENDING posting for total)".to_string());
         } else {

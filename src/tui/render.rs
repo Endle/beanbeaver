@@ -897,7 +897,14 @@ pub(crate) fn render_review_screen(
     let tender_title = if review_state.tenders.is_empty() {
         "Tenders (none — press i to add)".to_string()
     } else {
-        format!("Tenders ({})", review_state.tenders.len())
+        let (sum, total, status) = review_state.tender_balance();
+        format!(
+            "Tenders ({})  ${} / ${}  [{}]",
+            review_state.tenders.len(),
+            review_scaled_to_currency(sum),
+            review_scaled_to_currency(total),
+            status,
+        )
     };
     let tenders_widget = List::new(tender_lines)
         .block(

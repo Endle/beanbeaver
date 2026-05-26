@@ -379,6 +379,50 @@ mod tests {
     }
 
     #[test]
+    fn tender_balance_reports_short_when_only_gift_card_set() {
+        let mut detail = sample_review_detail();
+        detail.document["receipt"]["total"] = serde_json::json!("466.68");
+        let mut review_state = ReviewState::from_detail(Queue::Approved, &detail, Vec::new());
+        let total_field = review_state
+            .fields
+            .iter_mut()
+            .find(|field| field.field == ReceiptReviewField::Total)
+            .expect("total field");
+        total_field.value = "466.68".to_string();
+
+        review_state.add_tender();
+        let tender = review_state.tenders.get_mut(0).expect("new tender");
+        tender.amount = "25.00".to_string();
+        tender.kind = "gift_card".to_string();
+
+        let (_sum, _total, status) = review_state.tender_balance();
+        assert_eq!(status, "short $441.68");
+    }
+
+    #[test]
+    fn tender_balance_reports_balanced_when_two_tenders_cover_total() {
+        let mut detail = sample_review_detail();
+        detail.document["receipt"]["total"] = serde_json::json!("466.68");
+        let mut review_state = ReviewState::from_detail(Queue::Approved, &detail, Vec::new());
+        let total_field = review_state
+            .fields
+            .iter_mut()
+            .find(|field| field.field == ReceiptReviewField::Total)
+            .expect("total field");
+        total_field.value = "466.68".to_string();
+
+        review_state.add_tender();
+        review_state.tenders[0].amount = "25.00".to_string();
+        review_state.tenders[0].kind = "gift_card".to_string();
+        review_state.add_tender();
+        review_state.tenders[1].amount = "441.68".to_string();
+        review_state.tenders[1].kind = "card".to_string();
+
+        let (_sum, _total, status) = review_state.tender_balance();
+        assert_eq!(status, "balanced");
+    }
+
+    #[test]
     fn review_payload_emits_edit_patch_for_existing_tender_kind_change() {
         let mut detail = sample_review_detail();
         detail.document["tenders"] =
