@@ -12,6 +12,7 @@ from beanbeaver.application.receipts.approval import (
     _apply_review_patches,
     _validate_item_review_patches,
     _validate_review_patch,
+    _validate_tender_review_patches,
 )
 from beanbeaver.receipt.receipt_structuring import load_stage_document, save_stage_document
 from beanbeaver.runtime.receipt_storage import (
@@ -150,6 +151,7 @@ def run_re_edit_approved_receipt_with_review(
     *,
     review_patch: dict[str, object],
     item_review_patches: list[dict[str, object]] | None = None,
+    tender_review_patches: list[dict[str, object]] | None = None,
 ) -> ReEditApprovedReceiptResult:
     """Create a new approved review stage and apply structured review overrides."""
     review_stage_path = create_next_review_stage(
@@ -168,11 +170,17 @@ def run_re_edit_approved_receipt_with_review(
         item_review_patches or [],
         known_item_ids=known_item_ids,
     )
-    if normalized_patch or normalized_item_patches:
+    tender_count = len(document.get("tenders") or [])
+    normalized_tender_patches = _validate_tender_review_patches(
+        tender_review_patches or [],
+        tender_count=tender_count,
+    )
+    if normalized_patch or normalized_item_patches or normalized_tender_patches:
         _apply_review_patches(
             document,
             review_patch=normalized_patch,
             item_review_patches=normalized_item_patches,
+            tender_review_patches=normalized_tender_patches,
         )
         save_stage_document(review_stage_path, document)
 

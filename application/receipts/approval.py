@@ -100,28 +100,60 @@ def _validate_tender_review_patches(
     *,
     tender_count: int,
 ) -> list[dict[str, Any]]:
-    """Validate per-tender review patches keyed by index.
+    """Validate per-tender review patches.
 
-    Accepts entries of shape `{"index": int, "review": {"account": str | None,
-    "kind": str, "removed": bool}}`. Returns normalized patches in the original
-    order, with at most one patch per index (later entries clobber earlier).
+    Edit patches: `{"index": int, "review": {"account"?, "kind"?, "removed"?}}`.
+    Create patches: `{"create": True, "review": {"amount", "kind", "account"?, "raw_label"?}}`.
+    Edit patches are deduped by index (later entries clobber earlier); create
+    patches preserve their relative order.
     """
-    normalized: dict[int, dict[str, Any]] = {}
+    edit_by_index: dict[int, dict[str, Any]] = {}
+    creates: list[dict[str, Any]] = []
     for ordinal, patch in enumerate(tender_review_patches, start=1):
         if not isinstance(patch, dict):
             raise ValueError(f"Tender review patch #{ordinal} must be a JSON object")
+
+        create = patch.get("create", False)
+        if not isinstance(create, bool):
+            raise ValueError(f"Tender review patch #{ordinal} field 'create' must be a boolean")
+
+        review_patch = patch.get("review", {})
+        if not isinstance(review_patch, dict):
+            raise ValueError(f"Tender review patch #{ordinal} field 'review' must be a JSON object")
+
+        if create:
+            amount = _normalize_decimal_text(
+                review_patch.get("amount"),
+                label=f"tender amount (patch #{ordinal})",
+            )
+            if amount is None:
+                raise ValueError(f"Tender review patch #{ordinal} is missing required 'amount'")
+            kind_value = _normalize_optional_text(review_patch.get("kind"))
+            if kind_value is None:
+                raise ValueError(f"Tender review patch #{ordinal} is missing required 'kind'")
+            if kind_value not in _VALID_TENDER_KINDS:
+                raise ValueError(
+                    f"Tender review patch #{ordinal} kind '{kind_value}' is not one of {sorted(_VALID_TENDER_KINDS)}"
+                )
+
+            new_tender: dict[str, Any] = {"amount": amount, "kind": kind_value}
+            if "account" in review_patch:
+                account = _normalize_optional_text(review_patch.get("account"))
+                if account is not None:
+                    new_tender["account"] = account
+            if "raw_label" in review_patch:
+                raw_label = _normalize_optional_text(review_patch.get("raw_label"))
+                if raw_label is not None:
+                    new_tender["raw_label"] = raw_label
+
+            creates.append({"create": True, "tender": new_tender})
+            continue
 
         raw_index = patch.get("index")
         if not isinstance(raw_index, int):
             raise ValueError(f"Tender review patch #{ordinal} is missing integer 'index'")
         if raw_index < 0 or raw_index >= tender_count:
-            raise ValueError(
-                f"Tender review patch #{ordinal} index {raw_index} out of range (tenders: {tender_count})"
-            )
-
-        review_patch = patch.get("review", {})
-        if not isinstance(review_patch, dict):
-            raise ValueError(f"Tender review patch #{ordinal} field 'review' must be a JSON object")
+            raise ValueError(f"Tender review patch #{ordinal} index {raw_index} out of range (tenders: {tender_count})")
 
         tender_review: dict[str, Any] = {}
         if "account" in review_patch:
@@ -139,9 +171,9 @@ def _validate_tender_review_patches(
                 raise ValueError(f"Tender review patch #{ordinal} field 'removed' must be a boolean")
             tender_review["removed"] = removed
 
-        normalized[raw_index] = {"index": raw_index, "review": tender_review}
+        edit_by_index[raw_index] = {"index": raw_index, "review": tender_review}
 
-    return list(normalized.values())
+    return list(edit_by_index.values()) + creates
 
 
 def _validate_item_review_patches(
@@ -210,13 +242,18 @@ def _apply_review_patches(
 
     if tender_review_patches:
         tenders = document.get("tenders")
-        if isinstance(tenders, list):
-            for patch in tender_review_patches:
-                index = patch["index"]
-                if 0 <= index < len(tenders) and isinstance(tenders[index], dict):
-                    existing = dict(tenders[index].get("review") or {})
-                    existing.update(patch["review"])
-                    tenders[index]["review"] = existing
+        if not isinstance(tenders, list):
+            tenders = []
+            document["tenders"] = tenders
+        for patch in tender_review_patches:
+            if patch.get("create"):
+                tenders.append({**patch["tender"], "meta": {"source": "tui_review"}})
+                continue
+            index = patch["index"]
+            if 0 <= index < len(tenders) and isinstance(tenders[index], dict):
+                existing = dict(tenders[index].get("review") or {})
+                existing.update(patch["review"])
+                tenders[index]["review"] = existing
 
     if not item_review_patches:
         return

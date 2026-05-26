@@ -308,7 +308,8 @@ mod tests {
                             "notes": "manual add",
                         }
                     }
-                ]
+                ],
+                "tenders": [],
             })
         );
     }
@@ -324,9 +325,81 @@ mod tests {
             review_state.payload(),
             serde_json::json!({
                 "review": {},
-                "items": []
+                "items": [],
+                "tenders": [],
             })
         );
+    }
+
+    #[test]
+    fn review_payload_includes_create_patch_for_added_tender() {
+        let detail = sample_review_detail();
+        let mut review_state = ReviewState::from_detail(Queue::Approved, &detail, Vec::new());
+
+        let tender_id = review_state.add_tender();
+        assert_eq!(tender_id, "tender-added-0001");
+        let tender = review_state.tenders.get_mut(0).expect("new tender");
+        tender.amount = "25.00".to_string();
+        tender.account = "Assets:Costco:ShopCard".to_string();
+
+        assert_eq!(
+            review_state.payload(),
+            serde_json::json!({
+                "review": {},
+                "items": [],
+                "tenders": [
+                    {
+                        "create": true,
+                        "review": {
+                            "amount": "25.00",
+                            "kind": "gift_card",
+                            "account": "Assets:Costco:ShopCard",
+                        }
+                    }
+                ],
+            })
+        );
+    }
+
+    #[test]
+    fn review_payload_ignores_added_tender_without_amount() {
+        let detail = sample_review_detail();
+        let mut review_state = ReviewState::from_detail(Queue::Approved, &detail, Vec::new());
+
+        review_state.add_tender();
+
+        assert_eq!(
+            review_state.payload(),
+            serde_json::json!({
+                "review": {},
+                "items": [],
+                "tenders": [],
+            })
+        );
+    }
+
+    #[test]
+    fn review_payload_emits_edit_patch_for_existing_tender_kind_change() {
+        let mut detail = sample_review_detail();
+        detail.document["tenders"] =
+            serde_json::json!([{"amount": "441.68", "kind": "card"}]);
+        let mut review_state = ReviewState::from_detail(Queue::Approved, &detail, Vec::new());
+
+        let tender = review_state
+            .tenders
+            .get_mut(0)
+            .expect("existing tender loaded");
+        tender.kind = "gift_card".to_string();
+
+        let payload = review_state.payload();
+        let tenders = payload
+            .get("tenders")
+            .and_then(serde_json::Value::as_array)
+            .expect("tenders array");
+        assert_eq!(tenders.len(), 1);
+        assert_eq!(tenders[0]["index"], 0);
+        assert_eq!(tenders[0]["review"]["kind"], "gift_card");
+        assert!(tenders[0]["review"].get("amount").is_none());
     }
 
     #[test]
