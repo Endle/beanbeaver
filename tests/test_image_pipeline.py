@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
 
+from _pytest.monkeypatch import MonkeyPatch
 from beanbeaver.receipt.image_pipeline import (
     MAX_IMAGE_DIMENSION,
     OCR_IMAGE_PADDING,
@@ -141,7 +143,7 @@ def test_resize_image_bytes_respects_max_dimension() -> None:
     assert out_img.size == (expected_w, expected_h)
 
 
-def test_env_var_triggers_per_pass_dump(tmp_path, monkeypatch) -> None:
+def test_env_var_triggers_per_pass_dump(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     import json
 
     from beanbeaver.receipt.ocr_helpers import PREOCR_DUMP_DIR_ENV

@@ -22,6 +22,7 @@ from beanbeaver.receipt.receipt_structuring import (
     save_stage_document,
 )
 from beanbeaver.runtime import (
+    ProjectPaths,
     get_logger,
     get_paths,
     load_item_category_rule_layers,
@@ -31,7 +32,7 @@ from beanbeaver.runtime import (
 logger = get_logger(__name__)
 
 
-def _project_paths():
+def _project_paths() -> ProjectPaths:
     return get_paths()
 
 
