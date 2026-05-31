@@ -308,6 +308,130 @@ fn re_subtotal_label() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"SUB\s*T[OCQDG0]TAL").unwrap())
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct TenderLine {
+    pub(crate) raw_label: String,
+    pub(crate) amount_cents: i64,
+    pub(crate) kind: &'static str,
+}
+
+fn classify_tender_line(line_upper: &str) -> Option<&'static str> {
+    // Reject noise lines that contain price-paired keywords but aren't tenders.
+    if line_upper.contains("REMAINING BALANCE") {
+        return None;
+    }
+    if line_upper.contains("CASH BACK") {
+        return None;
+    }
+    if line_upper.contains("CHANGE") {
+        return None;
+    }
+    if line_upper.contains("AMOUNT:") {
+        // Costco prints "AMOUNT: $25.00" as the *card-charge* echo of the next
+        // Shop Card line; ignore the echo and let the labelled line classify.
+        return None;
+    }
+    if line_upper.contains("GIFT CARD")
+        || line_upper.contains("GIFTCARD")
+        || line_upper.contains("GIFT CRD")
+        || line_upper.contains("SHOP CARD")
+    {
+        return Some("gift_card");
+    }
+    if line_upper.contains("MERCH CRED")
+        || line_upper.contains("MERCH CREDIT")
+        || line_upper.contains("STORE CREDIT")
+    {
+        return Some("store_credit");
+    }
+    if line_upper.contains("MASTERCARD")
+        || line_upper.contains("VISA")
+        || line_upper.contains("AMEX")
+        || line_upper.contains("AMERICAN EXPRESS")
+        || line_upper.contains("DEBIT")
+    {
+        return Some("card");
+    }
+    if line_upper.contains("CASH") {
+        return Some("cash");
+    }
+    None
+}
+
+fn tender_amount_for_line(lines: &[String], idx: usize) -> Option<i64> {
+    if let Some(amount) = extract_price_from_line(&lines[idx]) {
+        return Some(amount);
+    }
+    if idx + 1 < lines.len() && re_standalone_amount().is_match(&lines[idx + 1]) {
+        return extract_price_from_line(&lines[idx + 1]);
+    }
+    None
+}
+
+fn trim_tender_label(line: &str) -> String {
+    let mut text = line.trim().to_string();
+    // Strip trailing currency token like "$25.00" so the label reads cleanly.
+    if let Some(captures) = re_price_anywhere().captures(&text) {
+        if let Some(matched) = captures.get(0) {
+            let start = matched.start();
+            text = text[..start].trim_end_matches(['$', ' ', ':', '-', '\t']).to_string();
+        }
+    }
+    text
+}
+
+/// Scan OCR lines for explicit tender lines (gift card / store credit / cash / card).
+///
+/// Two-pass behavior: each candidate line picks an amount from the same line or the
+/// next standalone-amount line. Reconcile against `total_cents`: if the sum of
+/// detected tenders is within $0.05 of the total, return them; otherwise return
+/// an empty vec so the caller falls back to the single-payment shape.
+pub(crate) fn extract_tenders(lines: &[String], total_cents: i64) -> Vec<TenderLine> {
+    if total_cents <= 0 || lines.is_empty() {
+        return Vec::new();
+    }
+
+    let mut tenders: Vec<TenderLine> = Vec::new();
+    let mut consumed_next = false;
+    for (idx, line) in lines.iter().enumerate() {
+        if consumed_next {
+            consumed_next = false;
+            continue;
+        }
+        let line_upper = line.to_ascii_uppercase();
+        let Some(kind) = classify_tender_line(&line_upper) else {
+            continue;
+        };
+        let Some(amount_cents) = tender_amount_for_line(lines, idx) else {
+            continue;
+        };
+        if amount_cents <= 0 {
+            continue;
+        }
+        // If the amount came from the next standalone-amount line, skip it next iter.
+        if extract_price_from_line(line).is_none()
+            && idx + 1 < lines.len()
+            && re_standalone_amount().is_match(&lines[idx + 1])
+        {
+            consumed_next = true;
+        }
+        tenders.push(TenderLine {
+            raw_label: trim_tender_label(line),
+            amount_cents,
+            kind,
+        });
+    }
+
+    if tenders.is_empty() {
+        return tenders;
+    }
+    let sum: i64 = tenders.iter().map(|t| t.amount_cents).sum();
+    if (sum - total_cents).abs() > 5 {
+        return Vec::new();
+    }
+    tenders
+}
+
 pub(crate) fn extract_subtotal(lines: &[String]) -> Option<i64> {
     for (idx, line) in lines.iter().enumerate() {
         let line_upper = line.to_ascii_uppercase();
@@ -327,7 +451,7 @@ pub(crate) fn extract_subtotal(lines: &[String]) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_subtotal, extract_total};
+    use super::{extract_subtotal, extract_tenders, extract_total};
 
     #[test]
     fn subtotal_tolerates_costco_subtctal_ocr_typo() {
@@ -368,6 +492,55 @@ mod tests {
         ];
 
         assert_eq!(extract_total(&lines), 15_355);
+    }
+
+    #[test]
+    fn tenders_split_costco_shop_card_and_mastercard() {
+        // Costco prints: AMOUNT: $25.00 / REMAINING BALANCE: $0.00 / Shop Card 25.00
+        // / XXXXXXXXXXXX4385 / ACCT: MASTERCARD / (next line) 441.68.
+        let lines = vec![
+            "TOTAL".to_string(),
+            "466.68".to_string(),
+            "AMOUNT: $25.00".to_string(),
+            "REMAINING BALANCE: $0.00".to_string(),
+            "Shop Card".to_string(),
+            "25.00".to_string(),
+            "XXXXXXXXXXXX4385".to_string(),
+            "MASTERCARD".to_string(),
+            "441.68".to_string(),
+        ];
+
+        let tenders = extract_tenders(&lines, 46_668);
+        assert_eq!(tenders.len(), 2);
+        assert_eq!(tenders[0].kind, "gift_card");
+        assert_eq!(tenders[0].amount_cents, 2_500);
+        assert_eq!(tenders[0].raw_label, "Shop Card");
+        assert_eq!(tenders[1].kind, "card");
+        assert_eq!(tenders[1].amount_cents, 44_168);
+        assert_eq!(tenders[1].raw_label, "MASTERCARD");
+    }
+
+    #[test]
+    fn tenders_returns_empty_when_sum_does_not_reconcile() {
+        let lines = vec![
+            "TOTAL 50.00".to_string(),
+            "MASTERCARD 30.00".to_string(),
+        ];
+        // Only 30 of 50 covered → reconciliation fails, drop tenders.
+        assert!(extract_tenders(&lines, 5_000).is_empty());
+    }
+
+    #[test]
+    fn tenders_ignores_change_and_cash_back_lines() {
+        let lines = vec![
+            "TOTAL 20.00".to_string(),
+            "CASH 25.00".to_string(),
+            "CASH BACK 0.00".to_string(),
+            "CHANGE 5.00".to_string(),
+        ];
+        let tenders = extract_tenders(&lines, 2_000);
+        // 25 vs total 20 → 5 off, reconciliation fails → empty.
+        assert!(tenders.is_empty());
     }
 }
 

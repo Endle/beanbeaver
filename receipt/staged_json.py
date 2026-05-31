@@ -9,13 +9,14 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from beanbeaver.domain.receipt import Receipt, ReceiptItem, ReceiptWarning
+from beanbeaver.domain.receipt import Receipt, ReceiptItem, ReceiptWarning, Tender
 
 from ._rust import require_rust_matcher
 from .date_utils import placeholder_receipt_date
 from .item_categories import ItemCategoryRuleLayers
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
+_VALID_TENDER_KINDS = {"card", "gift_card", "cash", "store_credit"}
 
 
 def _utc_now_iso() -> str:
@@ -169,6 +170,20 @@ def receipt_from_stage_document(
         )
         for message, after_item_index in resolved.get("warnings", [])
     ]
+    tenders: list[Tender] = []
+    for amount_str, account, kind, raw_label in resolved.get("tenders", []):
+        amount = _str_to_decimal(amount_str)
+        if amount is None:
+            continue
+        tender_kind = kind if kind in _VALID_TENDER_KINDS else "card"
+        tenders.append(
+            Tender(
+                amount=amount,
+                account=account or None,
+                kind=tender_kind,  # type: ignore[arg-type]
+                raw_label=str(raw_label or ""),
+            )
+        )
 
     return Receipt(
         merchant=str(resolved.get("merchant") or "UNKNOWN_MERCHANT"),
@@ -181,4 +196,5 @@ def receipt_from_stage_document(
         raw_text=str(resolved.get("raw_text") or ""),
         image_filename=str(resolved.get("image_filename") or ""),
         warnings=warnings,
+        tenders=tenders,
     )

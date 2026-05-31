@@ -13,6 +13,13 @@ pub(crate) struct FormatterWarningInput {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct FormatterTenderInput {
+    pub(crate) amount: String,
+    pub(crate) account: Option<String>,
+    pub(crate) kind: String,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct FormatterReceiptInput {
     pub(crate) merchant: String,
     pub(crate) date_iso: String,
@@ -23,6 +30,59 @@ pub(crate) struct FormatterReceiptInput {
     pub(crate) raw_text: String,
     pub(crate) items: Vec<FormatterItemInput>,
     pub(crate) warnings: Vec<FormatterWarningInput>,
+    pub(crate) tenders: Vec<FormatterTenderInput>,
+}
+
+fn pending_account_for_kind(kind: &str) -> &'static str {
+    match kind {
+        "gift_card" => "Assets:GiftCards:PENDING",
+        "cash" => "Assets:Cash:PENDING",
+        "store_credit" => "Assets:StoreCredit:PENDING",
+        _ => "Liabilities:CreditCard:PENDING",
+    }
+}
+
+/// Build payment postings for the receipt. Returns one posting per tender when
+/// `receipt.tenders` is non-empty, otherwise a single posting for `-total` against
+/// `fallback_account` (today's legacy shape).
+fn build_payment_postings(
+    receipt: &FormatterReceiptInput,
+    fallback_account: &str,
+    total_cents: i64,
+) -> Vec<(String, String, Option<String>)> {
+    let card_comment =
+        extract_card_last4(&receipt.raw_text).map(|last4| format!("card ****{last4}"));
+    if receipt.tenders.is_empty() {
+        return vec![(
+            fallback_account.to_string(),
+            format!("{} CAD", cents_to_fixed(-total_cents)),
+            card_comment,
+        )];
+    }
+
+    receipt
+        .tenders
+        .iter()
+        .map(|tender| {
+            let account = tender
+                .account
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| pending_account_for_kind(&tender.kind).to_string());
+            let amount_cents = decimal_to_cents(&tender.amount);
+            let comment = if tender.kind == "card" {
+                card_comment.clone()
+            } else {
+                Some(tender.kind.replace('_', " "))
+            };
+            (
+                account,
+                format!("{} CAD", cents_to_fixed(-amount_cents)),
+                comment,
+            )
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug)]
@@ -232,14 +292,8 @@ pub(crate) fn format_parsed_receipt(
         receipt.date_iso, merchant_clean
     ));
 
-    let total_str = cents_to_fixed(-total_cents);
-    let card_comment =
-        extract_card_last4(&receipt.raw_text).map(|last4| format!("card ****{last4}"));
-    let mut postings = vec![(
-        credit_card_account.to_string(),
-        format!("{total_str} CAD"),
-        card_comment,
-    )];
+    let mut postings = build_payment_postings(receipt, credit_card_account, total_cents);
+    let payment_posting_count = postings.len();
 
     let mut item_total_cents = 0i64;
     let mut item_posting_indexes = Vec::new();
@@ -287,6 +341,7 @@ pub(crate) fn format_parsed_receipt(
         formatted_postings,
         posting_warnings,
     ));
+    let _ = payment_posting_count;
 
     if !receipt.raw_text.is_empty() {
         lines.push(String::new());
@@ -327,14 +382,7 @@ pub(crate) fn format_draft_beancount(
         receipt.date_iso, merchant_clean
     ));
 
-    let total_str = cents_to_fixed(-total_cents);
-    let card_comment =
-        extract_card_last4(&receipt.raw_text).map(|last4| format!("card ****{last4}"));
-    let mut postings = vec![(
-        credit_card_account.to_string(),
-        format!("{total_str} CAD"),
-        card_comment,
-    )];
+    let mut postings = build_payment_postings(receipt, credit_card_account, total_cents);
 
     let mut item_total_cents = 0i64;
     let mut item_posting_indexes = Vec::new();
@@ -480,7 +528,35 @@ pub(crate) fn format_enriched_transaction(
 
     let expense_base = original_expense.unwrap_or_else(|| default_expense.to_string());
     let mut postings = Vec::new();
-    if let (Some(cc_account), Some(cc_amount_cents)) = (cc_account.clone(), cc_amount_cents) {
+    if !receipt.tenders.is_empty() {
+        // Multi-tender: replace the card tender's PENDING placeholder with the matched
+        // CC account; non-card tenders render as additional postings (PENDING fallback
+        // until the user picks a real asset account in review).
+        let resolved_card_account = cc_account
+            .clone()
+            .unwrap_or_else(|| "Liabilities:CreditCard:FIXME".to_string());
+        let mut card_used = false;
+        for tender in &receipt.tenders {
+            let amount_cents = decimal_to_cents(&tender.amount);
+            let (account, comment) = if tender.kind == "card" && !card_used {
+                card_used = true;
+                (resolved_card_account.clone(), None)
+            } else {
+                let account = tender
+                    .account
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| pending_account_for_kind(&tender.kind).to_string());
+                (account, Some(tender.kind.replace('_', " ")))
+            };
+            postings.push((
+                account,
+                format!("{} CAD", cents_to_fixed(-amount_cents)),
+                comment,
+            ));
+        }
+    } else if let (Some(cc_account), Some(cc_amount_cents)) = (cc_account.clone(), cc_amount_cents) {
         postings.push((
             cc_account,
             format!("{} CAD", cents_to_fixed(cc_amount_cents)),
@@ -521,9 +597,15 @@ pub(crate) fn format_enriched_transaction(
         }
     }
 
-    let expected_total_cents = cc_amount_cents
-        .map(|value| value.abs())
-        .unwrap_or(receipt_total_cents);
+    // Multi-tender: items+tax should equal the full receipt total (the matcher's
+    // amount comparison already handles the card vs. total reconciliation).
+    let expected_total_cents = if !receipt.tenders.is_empty() {
+        receipt_total_cents
+    } else {
+        cc_amount_cents
+            .map(|value| value.abs())
+            .unwrap_or(receipt_total_cents)
+    };
     if expected_total_cents > 0 && items_total_cents != expected_total_cents {
         let diff = expected_total_cents - items_total_cents;
         if diff > 1 {

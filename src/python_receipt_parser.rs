@@ -300,6 +300,14 @@ fn receipt_parse_receipt(
             .map(|warning| (warning.message, warning.after_item_index))
             .collect::<Vec<_>>(),
     )?;
+    dict.set_item(
+        "tenders",
+        parsed
+            .tenders
+            .into_iter()
+            .map(|tender| (tender.amount, tender.account, tender.kind, tender.raw_label))
+            .collect::<Vec<_>>(),
+    )?;
     Ok(dict.unbind())
 }
 

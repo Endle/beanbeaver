@@ -23,6 +23,16 @@ fn receipt_extract_subtotal(lines: Vec<String>) -> Option<i64> {
     receipt_fields::extract_subtotal(&lines)
 }
 
+/// Return `[(raw_label, amount_cents, kind), ...]` for tender lines found in OCR.
+/// Returns an empty list when the detected sum doesn't reconcile against `total_cents`.
+#[pyfunction]
+fn receipt_extract_tenders(lines: Vec<String>, total_cents: i64) -> Vec<(String, i64, String)> {
+    receipt_fields::extract_tenders(&lines, total_cents)
+        .into_iter()
+        .map(|tender| (tender.raw_label, tender.amount_cents, tender.kind.to_string()))
+        .collect()
+}
+
 #[pyfunction]
 fn receipt_extract_date(
     lines: Vec<String>,
@@ -39,5 +49,6 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(receipt_extract_tax, module)?)?;
     module.add_function(wrap_pyfunction!(receipt_extract_subtotal, module)?)?;
     module.add_function(wrap_pyfunction!(receipt_extract_date, module)?)?;
+    module.add_function(wrap_pyfunction!(receipt_extract_tenders, module)?)?;
     Ok(())
 }

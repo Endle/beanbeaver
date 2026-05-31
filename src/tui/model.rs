@@ -499,6 +499,7 @@ impl CcEntryEditor {
 pub(crate) enum ReviewPane {
     Items,
     Fields,
+    Tenders,
     Preview,
 }
 
@@ -506,7 +507,8 @@ impl ReviewPane {
     pub(crate) fn next(self) -> Self {
         match self {
             ReviewPane::Items => ReviewPane::Fields,
-            ReviewPane::Fields => ReviewPane::Preview,
+            ReviewPane::Fields => ReviewPane::Tenders,
+            ReviewPane::Tenders => ReviewPane::Preview,
             ReviewPane::Preview => ReviewPane::Items,
         }
     }
@@ -515,7 +517,8 @@ impl ReviewPane {
         match self {
             ReviewPane::Items => ReviewPane::Preview,
             ReviewPane::Fields => ReviewPane::Items,
-            ReviewPane::Preview => ReviewPane::Fields,
+            ReviewPane::Tenders => ReviewPane::Fields,
+            ReviewPane::Preview => ReviewPane::Tenders,
         }
     }
 }
@@ -659,6 +662,170 @@ pub(crate) enum ReviewEditTarget {
     ItemDescription(usize),
     ItemPrice(usize),
     ItemNotes(usize),
+    TenderAmount(usize),
+    TenderAccount(usize),
+    TenderRawLabel(usize),
+}
+
+pub(crate) const TENDER_KINDS: [&str; 4] = ["card", "gift_card", "cash", "store_credit"];
+
+pub(crate) fn next_tender_kind(current: &str, delta: isize) -> &'static str {
+    let index = TENDER_KINDS
+        .iter()
+        .position(|kind| *kind == current)
+        .unwrap_or(0) as isize;
+    let len = TENDER_KINDS.len() as isize;
+    let next = ((index + delta).rem_euclid(len)) as usize;
+    TENDER_KINDS[next]
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ReviewTenderState {
+    pub(crate) id: String,
+    pub(crate) is_new: bool,
+    pub(crate) original_index: Option<usize>,
+    pub(crate) amount: String,
+    pub(crate) original_kind: String,
+    pub(crate) kind: String,
+    pub(crate) original_account: String,
+    pub(crate) account: String,
+    pub(crate) raw_label: String,
+    pub(crate) original_removed: bool,
+    pub(crate) removed: bool,
+}
+
+impl ReviewTenderState {
+    pub(crate) fn from_document(index: usize, tender: &Value) -> Self {
+        let amount = effective_tender_text(tender, "amount");
+        let kind_raw = effective_tender_text(tender, "kind");
+        let kind = if TENDER_KINDS.contains(&kind_raw.as_str()) {
+            kind_raw
+        } else {
+            "card".to_string()
+        };
+        let account = effective_tender_text(tender, "account");
+        let raw_label = tender
+            .get("raw_label")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let removed = effective_tender_removed(tender);
+        Self {
+            id: format!("tender-existing-{:04}", index + 1),
+            is_new: false,
+            original_index: Some(index),
+            amount,
+            original_kind: kind.clone(),
+            kind,
+            original_account: account.clone(),
+            account,
+            raw_label,
+            original_removed: removed,
+            removed,
+        }
+    }
+
+    pub(crate) fn new_added(id: String) -> Self {
+        Self {
+            id,
+            is_new: true,
+            original_index: None,
+            amount: String::new(),
+            original_kind: "gift_card".to_string(),
+            kind: "gift_card".to_string(),
+            original_account: String::new(),
+            account: String::new(),
+            raw_label: String::new(),
+            original_removed: false,
+            removed: false,
+        }
+    }
+
+    pub(crate) fn has_meaningful_content(&self) -> bool {
+        !self.amount.trim().is_empty()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TenderEditorField {
+    Amount,
+    Kind,
+    Account,
+    RawLabel,
+    Removed,
+}
+
+impl TenderEditorField {
+    pub(crate) fn all() -> [Self; 5] {
+        [
+            Self::Amount,
+            Self::Kind,
+            Self::Account,
+            Self::RawLabel,
+            Self::Removed,
+        ]
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Amount => "Amount",
+            Self::Kind => "Kind",
+            Self::Account => "Account",
+            Self::RawLabel => "Raw Label",
+            Self::Removed => "Removed",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct TenderEditorState {
+    pub(crate) tender_index: usize,
+    pub(crate) field_state: ListState,
+}
+
+impl TenderEditorState {
+    pub(crate) fn new(tender_index: usize) -> Self {
+        let mut field_state = ListState::default();
+        field_state.select(Some(0));
+        Self {
+            tender_index,
+            field_state,
+        }
+    }
+
+    pub(crate) fn selected_field(&self) -> TenderEditorField {
+        let fields = TenderEditorField::all();
+        self.field_state
+            .selected()
+            .and_then(|index| fields.get(index).copied())
+            .unwrap_or(TenderEditorField::Amount)
+    }
+
+    pub(crate) fn move_selection(&mut self, delta: isize) {
+        let len = TenderEditorField::all().len();
+        let current = self.field_state.selected().unwrap_or(0) as isize;
+        let next = (current + delta).clamp(0, (len - 1) as isize) as usize;
+        self.field_state.select(Some(next));
+    }
+}
+
+fn effective_tender_text(tender: &Value, key: &str) -> String {
+    if let Some(review) = tender.get("review") {
+        if let Some(value) = review.get(key) {
+            if !value.is_null() {
+                return json_value_to_text(Some(value));
+            }
+        }
+    }
+    json_value_to_text(tender.get(key))
+}
+
+fn effective_tender_removed(tender: &Value) -> bool {
+    tender
+        .get("review")
+        .and_then(|review| review.get("removed"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -468,11 +468,15 @@ pub(crate) struct ReviewState {
     pub(crate) field_state: ListState,
     pub(crate) items: Vec<ReviewItemState>,
     pub(crate) item_state: ListState,
+    pub(crate) tenders: Vec<ReviewTenderState>,
+    pub(crate) tender_state: ListState,
+    pub(crate) tender_editor: Option<TenderEditorState>,
     pub(crate) category_options: Vec<CategoryOption>,
     pub(crate) item_editor: Option<ItemEditorState>,
     pub(crate) category_picker: Option<CategoryPickerState>,
     pub(crate) text_input: Option<TextInputState>,
     pub(crate) next_added_item_number: usize,
+    pub(crate) next_added_tender_number: usize,
 }
 
 pub(crate) struct ConfigState {
@@ -731,6 +735,17 @@ impl ReviewState {
             item_state.select(Some(0));
         }
 
+        let mut tenders = Vec::new();
+        if let Some(tender_docs) = document.get("tenders").and_then(Value::as_array) {
+            for (index, tender) in tender_docs.iter().enumerate() {
+                tenders.push(ReviewTenderState::from_document(index, tender));
+            }
+        }
+        let mut tender_state = ListState::default();
+        if !tenders.is_empty() {
+            tender_state.select(Some(0));
+        }
+
         Self {
             source_queue,
             path: detail.path.clone(),
@@ -744,11 +759,15 @@ impl ReviewState {
             field_state,
             items,
             item_state,
+            tenders,
+            tender_state,
+            tender_editor: None,
             category_options,
             item_editor: None,
             category_picker: None,
             text_input: None,
             next_added_item_number: 1,
+            next_added_tender_number: 1,
         }
     }
 
@@ -972,7 +991,206 @@ impl ReviewState {
                     item.notes = input.value;
                 }
             }
+            ReviewEditTarget::TenderAmount(index) => {
+                if let Some(tender) = self.tenders.get_mut(index) {
+                    tender.amount = input.value;
+                }
+            }
+            ReviewEditTarget::TenderAccount(index) => {
+                if let Some(tender) = self.tenders.get_mut(index) {
+                    tender.account = input.value;
+                }
+            }
+            ReviewEditTarget::TenderRawLabel(index) => {
+                if let Some(tender) = self.tenders.get_mut(index) {
+                    tender.raw_label = input.value;
+                }
+            }
         }
+    }
+
+    pub(crate) fn selected_tender_index(&self) -> Option<usize> {
+        self.tender_state.selected()
+    }
+
+    pub(crate) fn next_added_tender_id(&mut self) -> String {
+        loop {
+            let candidate = format!("tender-added-{:04}", self.next_added_tender_number);
+            self.next_added_tender_number += 1;
+            if self.tenders.iter().all(|tender| tender.id != candidate) {
+                return candidate;
+            }
+        }
+    }
+
+    pub(crate) fn add_tender(&mut self) -> String {
+        let id = self.next_added_tender_id();
+        self.tenders.push(ReviewTenderState::new_added(id.clone()));
+        let index = self.tenders.len().saturating_sub(1);
+        self.tender_state.select(Some(index));
+        self.tender_editor = Some(TenderEditorState::new(index));
+        id
+    }
+
+    pub(crate) fn start_tender_amount_edit(&mut self, index: usize) {
+        if let Some(tender) = self.tenders.get(index) {
+            self.text_input = Some(TextInputState::with_value(
+                ReviewEditTarget::TenderAmount(index),
+                format!("Tender Amount ({})", tender.id),
+                tender.amount.clone(),
+            ));
+        }
+    }
+
+    pub(crate) fn start_tender_account_edit(&mut self, index: usize) {
+        if let Some(tender) = self.tenders.get(index) {
+            self.text_input = Some(TextInputState::with_value(
+                ReviewEditTarget::TenderAccount(index),
+                format!("Tender Account ({})", tender.id),
+                tender.account.clone(),
+            ));
+        }
+    }
+
+    pub(crate) fn start_tender_raw_label_edit(&mut self, index: usize) {
+        if let Some(tender) = self.tenders.get(index) {
+            self.text_input = Some(TextInputState::with_value(
+                ReviewEditTarget::TenderRawLabel(index),
+                format!("Tender Raw Label ({})", tender.id),
+                tender.raw_label.clone(),
+            ));
+        }
+    }
+
+    pub(crate) fn fill_remaining_tender(&mut self, index: usize) -> Option<String> {
+        let total_scaled = self.receipt_total_scaled();
+        if total_scaled <= 0 {
+            return Some("Set a receipt Total before filling a tender amount".to_string());
+        }
+        let target_is_new = self.tenders.get(index).map(|tender| tender.is_new)?;
+        if !target_is_new {
+            return Some("Fill-remaining only applies to manually added tenders".to_string());
+        }
+        let others_sum: i64 = self
+            .tenders
+            .iter()
+            .enumerate()
+            .filter(|(other_index, tender)| *other_index != index && !tender.removed)
+            .map(|(other_index, _)| review_decimal_to_scaled(self.preview_tender_amount(other_index)))
+            .sum();
+        let remaining = (total_scaled - others_sum).max(0);
+        let amount_text = review_scaled_to_currency(remaining);
+        self.text_input = None;
+        let tender = self.tenders.get_mut(index)?;
+        tender.amount = amount_text.clone();
+        Some(format!("Filled {} to ${}", tender.id, amount_text))
+    }
+
+    pub(crate) fn cycle_tender_kind(&mut self, index: usize, delta: isize) -> Option<String> {
+        let tender = self.tenders.get_mut(index)?;
+        let next = next_tender_kind(&tender.kind, delta);
+        tender.kind = next.to_string();
+        Some(format!("{} kind -> {}", tender.id, next))
+    }
+
+    pub(crate) fn toggle_tender_removed(&mut self, index: usize) -> Option<String> {
+        let tender = self.tenders.get_mut(index)?;
+        tender.removed = !tender.removed;
+        Some(format!(
+            "{} {}",
+            tender.id,
+            if tender.removed {
+                "marked removed"
+            } else {
+                "restored"
+            }
+        ))
+    }
+
+    pub(crate) fn open_selected_tender_editor(&mut self) {
+        let Some(index) = self.selected_tender_index() else {
+            return;
+        };
+        self.tender_editor = Some(TenderEditorState::new(index));
+    }
+
+    pub(crate) fn activate_tender_editor_selection(&mut self) -> Option<String> {
+        let (tender_index, field) = {
+            let editor = self.tender_editor.as_ref()?;
+            (editor.tender_index, editor.selected_field())
+        };
+        let is_new = self.tenders.get(tender_index)?.is_new;
+        match field {
+            TenderEditorField::Amount => {
+                if is_new {
+                    self.start_tender_amount_edit(tender_index);
+                    Some("Editing tender amount".to_string())
+                } else {
+                    Some("Existing tender amount is read-only".to_string())
+                }
+            }
+            TenderEditorField::Kind => self.cycle_tender_kind(tender_index, 1),
+            TenderEditorField::Account => {
+                self.start_tender_account_edit(tender_index);
+                Some("Editing tender account".to_string())
+            }
+            TenderEditorField::RawLabel => {
+                if is_new {
+                    self.start_tender_raw_label_edit(tender_index);
+                    Some("Editing tender raw label".to_string())
+                } else {
+                    Some("Existing tender raw label is read-only".to_string())
+                }
+            }
+            TenderEditorField::Removed => self.toggle_tender_removed(tender_index),
+        }
+    }
+
+    pub(crate) fn toggle_tender_editor_removed(&mut self) -> Option<String> {
+        let tender_index = self.tender_editor.as_ref()?.tender_index;
+        self.toggle_tender_removed(tender_index)
+    }
+
+    pub(crate) fn preview_tender_amount(&self, index: usize) -> &str {
+        if let Some(input) = &self.text_input {
+            if let ReviewEditTarget::TenderAmount(target_index) = input.target {
+                if target_index == index {
+                    return input.value.as_str();
+                }
+            }
+        }
+        self.tenders
+            .get(index)
+            .map(|tender| tender.amount.as_str())
+            .unwrap_or("")
+    }
+
+    pub(crate) fn preview_tender_account(&self, index: usize) -> &str {
+        if let Some(input) = &self.text_input {
+            if let ReviewEditTarget::TenderAccount(target_index) = input.target {
+                if target_index == index {
+                    return input.value.as_str();
+                }
+            }
+        }
+        self.tenders
+            .get(index)
+            .map(|tender| tender.account.as_str())
+            .unwrap_or("")
+    }
+
+    pub(crate) fn preview_tender_raw_label(&self, index: usize) -> &str {
+        if let Some(input) = &self.text_input {
+            if let ReviewEditTarget::TenderRawLabel(target_index) = input.target {
+                if target_index == index {
+                    return input.value.as_str();
+                }
+            }
+        }
+        self.tenders
+            .get(index)
+            .map(|tender| tender.raw_label.as_str())
+            .unwrap_or("")
     }
 
     pub(crate) fn payload(&self) -> Value {
@@ -1046,9 +1264,63 @@ impl ReviewState {
             }
         }
 
+        let mut tenders = Vec::new();
+        for tender in &self.tenders {
+            if tender.is_new {
+                if !tender.has_meaningful_content() {
+                    continue;
+                }
+                let mut tender_review = serde_json::Map::new();
+                tender_review.insert(
+                    "amount".to_string(),
+                    Value::String(tender.amount.trim().to_string()),
+                );
+                tender_review.insert("kind".to_string(), Value::String(tender.kind.clone()));
+                if !tender.account.trim().is_empty() {
+                    tender_review.insert(
+                        "account".to_string(),
+                        Value::String(tender.account.trim().to_string()),
+                    );
+                }
+                if !tender.raw_label.trim().is_empty() {
+                    tender_review.insert(
+                        "raw_label".to_string(),
+                        Value::String(tender.raw_label.trim().to_string()),
+                    );
+                }
+                tenders.push(serde_json::json!({
+                    "create": true,
+                    "review": Value::Object(tender_review),
+                }));
+                continue;
+            }
+            let mut tender_review = serde_json::Map::new();
+            if tender.account != tender.original_account {
+                tender_review.insert(
+                    "account".to_string(),
+                    Value::String(tender.account.clone()),
+                );
+            }
+            if tender.kind != tender.original_kind {
+                tender_review.insert("kind".to_string(), Value::String(tender.kind.clone()));
+            }
+            if tender.removed != tender.original_removed {
+                tender_review.insert("removed".to_string(), Value::Bool(tender.removed));
+            }
+            if let Some(original_index) = tender.original_index {
+                if !tender_review.is_empty() {
+                    tenders.push(serde_json::json!({
+                        "index": original_index,
+                        "review": Value::Object(tender_review),
+                    }));
+                }
+            }
+        }
+
         serde_json::json!({
             "review": Value::Object(review),
             "items": items,
+            "tenders": tenders,
         })
     }
 
@@ -1106,6 +1378,42 @@ impl ReviewState {
             .get(index)
             .map(|item| item.notes.as_str())
             .unwrap_or("")
+    }
+
+    pub(crate) fn tender_sum_scaled(&self) -> i64 {
+        self.tenders
+            .iter()
+            .enumerate()
+            .filter(|(_, tender)| !tender.removed)
+            .map(|(index, _)| review_decimal_to_scaled(self.preview_tender_amount(index)))
+            .sum()
+    }
+
+    pub(crate) fn receipt_total_scaled(&self) -> i64 {
+        self.fields
+            .iter()
+            .position(|field| field.field == ReceiptReviewField::Total)
+            .map(|index| review_decimal_to_scaled(self.preview_receipt_field_value(index)))
+            .unwrap_or(0)
+    }
+
+    /// Sum-vs-total verdict for the Tenders pane.
+    /// Returns (sum_scaled, total_scaled, status_label).
+    pub(crate) fn tender_balance(&self) -> (i64, i64, String) {
+        let sum = self.tender_sum_scaled();
+        let total = self.receipt_total_scaled();
+        let status = if self.tenders.iter().all(|tender| tender.removed) {
+            "no tenders".to_string()
+        } else if total == 0 {
+            "no total".to_string()
+        } else if sum == total {
+            "balanced".to_string()
+        } else if sum < total {
+            format!("short ${}", review_scaled_to_currency(total - sum))
+        } else {
+            format!("over ${}", review_scaled_to_currency(sum - total))
+        };
+        (sum, total, status)
     }
 
     pub(crate) fn itemized_total_scaled(&self) -> i64 {
@@ -1193,6 +1501,56 @@ impl ReviewState {
             lines.push(String::new());
             lines.push(format!("Removed items: {}", removed));
         }
+
+        let active_tender_count = self.tenders.iter().filter(|tender| !tender.removed).count();
+        lines.push(String::new());
+        let (tender_sum, total_scaled, balance_status) = self.tender_balance();
+        lines.push(format!(
+            "Tenders ({})  sum ${} / total ${}  [{}]",
+            active_tender_count,
+            review_scaled_to_currency(tender_sum),
+            review_scaled_to_currency(total_scaled),
+            balance_status,
+        ));
+        if active_tender_count == 0 {
+            lines.push("  (none; renders as single PENDING posting for total)".to_string());
+        } else {
+            let mut display_index = 0;
+            for (index, tender) in self.tenders.iter().enumerate() {
+                if tender.removed {
+                    continue;
+                }
+                display_index += 1;
+                let amount = self.preview_tender_amount(index);
+                let amount = if amount.trim().is_empty() {
+                    "0.00"
+                } else {
+                    amount
+                };
+                let account = self.preview_tender_account(index);
+                let account = if account.trim().is_empty() {
+                    "<PENDING>"
+                } else {
+                    account
+                };
+                let new_tender = if tender.is_new { " [new]" } else { "" };
+                let label = self.preview_tender_raw_label(index);
+                let label = if label.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!(" \"{}\"", label)
+                };
+                lines.push(format!(
+                    "{:>2}. ${} {}{}  -> {}{}",
+                    display_index, amount, tender.kind, label, account, new_tender,
+                ));
+            }
+        }
+        let removed_tenders = self.tenders.iter().filter(|tender| tender.removed).count();
+        if removed_tenders > 0 {
+            lines.push(format!("Removed tenders: {}", removed_tenders));
+        }
+
         lines
     }
 
@@ -1304,6 +1662,62 @@ impl ReviewState {
                 lines.push(format!(
                     "{} removed: {} -> {}",
                     item.id, item.original_removed, item.removed
+                ));
+            }
+        }
+        for tender in &self.tenders {
+            if tender.is_new {
+                if !tender.has_meaningful_content() {
+                    continue;
+                }
+                let account = if tender.account.trim().is_empty() {
+                    "<PENDING>".to_string()
+                } else {
+                    tender.account.clone()
+                };
+                let amount = if tender.amount.trim().is_empty() {
+                    "<empty>"
+                } else {
+                    tender.amount.as_str()
+                };
+                let label = if tender.raw_label.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!(" \"{}\"", tender.raw_label)
+                };
+                let removed = if tender.removed { " [removed]" } else { "" };
+                lines.push(format!(
+                    "{} added: ${} {}{} -> {}{}",
+                    tender.id, amount, tender.kind, label, account, removed,
+                ));
+                continue;
+            }
+            if tender.account != tender.original_account {
+                lines.push(format!(
+                    "{} account: {} -> {}",
+                    tender.id,
+                    if tender.original_account.is_empty() {
+                        "<empty>"
+                    } else {
+                        tender.original_account.as_str()
+                    },
+                    if tender.account.is_empty() {
+                        "<empty>"
+                    } else {
+                        tender.account.as_str()
+                    },
+                ));
+            }
+            if tender.kind != tender.original_kind {
+                lines.push(format!(
+                    "{} kind: {} -> {}",
+                    tender.id, tender.original_kind, tender.kind,
+                ));
+            }
+            if tender.removed != tender.original_removed {
+                lines.push(format!(
+                    "{} removed: {} -> {}",
+                    tender.id, tender.original_removed, tender.removed,
                 ));
             }
         }

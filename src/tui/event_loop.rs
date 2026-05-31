@@ -168,6 +168,57 @@ pub(crate) fn run_app(
                         }
                         _ => {}
                     }
+                } else if review_state.tender_editor.is_some() {
+                    match key.code {
+                        KeyCode::Esc => {
+                            review_state.tender_editor = None;
+                            status_message = Some("Closed tender editor".to_string());
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if let Some(editor) = review_state.tender_editor.as_mut() {
+                                editor.move_selection(1);
+                            }
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            if let Some(editor) = review_state.tender_editor.as_mut() {
+                                editor.move_selection(-1);
+                            }
+                        }
+                        KeyCode::Enter => {
+                            status_message = review_state.activate_tender_editor_selection();
+                        }
+                        KeyCode::Char('x') | KeyCode::Char(' ') => {
+                            status_message = review_state.toggle_tender_editor_removed();
+                        }
+                        KeyCode::Left => {
+                            let tender_index = review_state
+                                .tender_editor
+                                .as_ref()
+                                .map(|editor| editor.tender_index);
+                            if let Some(index) = tender_index {
+                                status_message = review_state.cycle_tender_kind(index, -1);
+                            }
+                        }
+                        KeyCode::Right => {
+                            let tender_index = review_state
+                                .tender_editor
+                                .as_ref()
+                                .map(|editor| editor.tender_index);
+                            if let Some(index) = tender_index {
+                                status_message = review_state.cycle_tender_kind(index, 1);
+                            }
+                        }
+                        KeyCode::Char('f') => {
+                            let tender_index = review_state
+                                .tender_editor
+                                .as_ref()
+                                .map(|editor| editor.tender_index);
+                            if let Some(index) = tender_index {
+                                status_message = review_state.fill_remaining_tender(index);
+                            }
+                        }
+                        _ => {}
+                    }
                 } else {
                     match (key.code, key.modifiers) {
                         (KeyCode::Esc, _) => review_cancelled = true,
@@ -210,6 +261,17 @@ pub(crate) fn run_app(
                                         review_state.field_state.select(Some(next));
                                     }
                                 }
+                                ReviewPane::Tenders => {
+                                    let len = review_state.tenders.len();
+                                    if len > 0 {
+                                        let current =
+                                            review_state.tender_state.selected().unwrap_or(0)
+                                                as isize;
+                                        let next =
+                                            (current + 1).clamp(0, (len - 1) as isize) as usize;
+                                        review_state.tender_state.select(Some(next));
+                                    }
+                                }
                                 ReviewPane::Preview => {
                                     review_state.preview_scroll_y =
                                         review_state.preview_scroll_y.saturating_add(1);
@@ -240,6 +302,17 @@ pub(crate) fn run_app(
                                         review_state.field_state.select(Some(next));
                                     }
                                 }
+                                ReviewPane::Tenders => {
+                                    let len = review_state.tenders.len();
+                                    if len > 0 {
+                                        let current =
+                                            review_state.tender_state.selected().unwrap_or(0)
+                                                as isize;
+                                        let next =
+                                            (current - 1).clamp(0, (len - 1) as isize) as usize;
+                                        review_state.tender_state.select(Some(next));
+                                    }
+                                }
                                 ReviewPane::Preview => {
                                     review_state.preview_scroll_y =
                                         review_state.preview_scroll_y.saturating_sub(1);
@@ -249,15 +322,30 @@ pub(crate) fn run_app(
                         (KeyCode::Enter, _) => match review_state.pane {
                             ReviewPane::Items => review_state.open_selected_item_editor(),
                             ReviewPane::Fields => review_state.start_selected_field_edit(),
+                            ReviewPane::Tenders => review_state.open_selected_tender_editor(),
                             ReviewPane::Preview => {}
                         },
-                        (KeyCode::Char('i'), _) => {
-                            if review_state.pane == ReviewPane::Items {
+                        (KeyCode::Char('i'), _) => match review_state.pane {
+                            ReviewPane::Items => {
                                 let item_id = review_state.add_item();
                                 status_message = Some(format!(
                                     "Added {item_id}; blank new items are ignored on submit"
                                 ));
                             }
+                            ReviewPane::Tenders => {
+                                let tender_id = review_state.add_tender();
+                                status_message = Some(format!(
+                                    "Added {tender_id}; enter amount to keep on submit"
+                                ));
+                            }
+                            _ => {}
+                        },
+                        (KeyCode::Char('T'), _) => {
+                            let tender_id = review_state.add_tender();
+                            review_state.pane = ReviewPane::Tenders;
+                            status_message = Some(format!(
+                                "Added {tender_id}; enter amount to keep on submit"
+                            ));
                         }
                         (KeyCode::Char('c'), _) => {
                             if review_state.pane == ReviewPane::Items {
@@ -277,10 +365,23 @@ pub(crate) fn run_app(
                                 status_message = review_state.activate_item_editor_selection();
                             }
                         }
-                        (KeyCode::Char('x'), _) => {
-                            if review_state.pane == ReviewPane::Items {
+                        (KeyCode::Char('x'), _) => match review_state.pane {
+                            ReviewPane::Items => {
                                 if let Some(index) = review_state.selected_item_index() {
                                     status_message = review_state.toggle_item_removed(index);
+                                }
+                            }
+                            ReviewPane::Tenders => {
+                                if let Some(index) = review_state.selected_tender_index() {
+                                    status_message = review_state.toggle_tender_removed(index);
+                                }
+                            }
+                            _ => {}
+                        },
+                        (KeyCode::Char('f'), _) => {
+                            if review_state.pane == ReviewPane::Tenders {
+                                if let Some(index) = review_state.selected_tender_index() {
+                                    status_message = review_state.fill_remaining_tender(index);
                                 }
                             }
                         }

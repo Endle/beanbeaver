@@ -779,7 +779,11 @@ pub(crate) fn render_review_screen(
         .split(rows[1]);
     let right = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(42), Constraint::Percentage(58)])
+        .constraints([
+            Constraint::Percentage(30),
+            Constraint::Percentage(20),
+            Constraint::Percentage(50),
+        ])
         .split(body[1]);
 
     let item_lines: Vec<ListItem> = review_state
@@ -865,6 +869,58 @@ pub(crate) fn render_review_screen(
         .highlight_symbol(">> ");
     frame.render_stateful_widget(fields, right[0], &mut review_state.field_state);
 
+    let tender_lines: Vec<ListItem> = review_state
+        .tenders
+        .iter()
+        .enumerate()
+        .map(|(index, tender)| {
+            let amount = review_state.preview_tender_amount(index);
+            let amount = if amount.trim().is_empty() {
+                "0.00"
+            } else {
+                amount
+            };
+            let account = review_state.preview_tender_account(index);
+            let account = if account.trim().is_empty() {
+                "<PENDING>"
+            } else {
+                account
+            };
+            let removed = if tender.removed { " [removed]" } else { "" };
+            let new_tender = if tender.is_new { " [new]" } else { "" };
+            ListItem::new(Line::from(format!(
+                "${} {}  -> {}{}{}",
+                amount, tender.kind, account, new_tender, removed,
+            )))
+        })
+        .collect();
+    let tender_title = if review_state.tenders.is_empty() {
+        "Tenders (none — press i to add)".to_string()
+    } else {
+        let (sum, total, status) = review_state.tender_balance();
+        format!(
+            "Tenders ({})  ${} / ${}  [{}]",
+            review_state.tenders.len(),
+            review_scaled_to_currency(sum),
+            review_scaled_to_currency(total),
+            status,
+        )
+    };
+    let tenders_widget = List::new(tender_lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(tender_title)
+                .border_style(if review_state.pane == ReviewPane::Tenders {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default()
+                }),
+        )
+        .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+        .highlight_symbol(">> ");
+    frame.render_stateful_widget(tenders_widget, right[1], &mut review_state.tender_state);
+
     let preview = Paragraph::new(Text::from(
         review_state
             .preview_lines()
@@ -884,10 +940,10 @@ pub(crate) fn render_review_screen(
     )
     .scroll((review_state.preview_scroll_y, 0))
     .wrap(Wrap { trim: false });
-    frame.render_widget(preview, right[1]);
+    frame.render_widget(preview, right[2]);
 
     let help = Paragraph::new(format!(
-        "h/l pane  |  j/k move  |  Enter open item editor / edit field  |  i add item  |  v price  |  n notes  |  c category picker  |  x toggle removed  |  p preview tab  |  a {}  |  Esc cancel",
+        "h/l pane  |  j/k move  |  Enter open editor  |  i add (item/tender)  |  T add tender  |  f fill remaining  |  v price  |  n notes  |  c category  |  x toggle removed  |  p preview tab  |  a {}  |  Esc cancel",
         review_state.submit_label()
     ))
     .wrap(Wrap { trim: true });
@@ -896,12 +952,103 @@ pub(crate) fn render_review_screen(
     if review_state.item_editor.is_some() {
         render_item_editor_modal(frame, review_state);
     }
+    if review_state.tender_editor.is_some() {
+        render_tender_editor_modal(frame, review_state);
+    }
     if review_state.category_picker.is_some() {
         render_category_picker_modal(frame, review_state);
     }
     if let Some(text_input) = &review_state.text_input {
         render_text_input_modal(frame, text_input);
     }
+}
+
+pub(crate) fn render_tender_editor_modal(
+    frame: &mut ratatui::Frame<'_>,
+    review_state: &mut ReviewState,
+) {
+    let Some(tender_index) = review_state
+        .tender_editor
+        .as_ref()
+        .map(|editor| editor.tender_index)
+    else {
+        return;
+    };
+    let Some(tender) = review_state.tenders.get(tender_index) else {
+        return;
+    };
+
+    let popup = centered_rect(72, 12, frame.area());
+    frame.render_widget(Clear, popup);
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(if tender.is_new {
+                format!("Edit New Tender ({})", tender.id)
+            } else {
+                format!("Edit Tender ({})", tender.id)
+            })
+            .style(popup_style()),
+        popup,
+    );
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(7), Constraint::Length(2)])
+        .split(popup);
+
+    let items = TenderEditorField::all()
+        .into_iter()
+        .map(|field| {
+            let value = match field {
+                TenderEditorField::Amount => {
+                    if tender.amount.trim().is_empty() {
+                        "<empty>".to_string()
+                    } else {
+                        tender.amount.clone()
+                    }
+                }
+                TenderEditorField::Kind => tender.kind.clone(),
+                TenderEditorField::Account => {
+                    if tender.account.trim().is_empty() {
+                        "<PENDING>".to_string()
+                    } else {
+                        tender.account.clone()
+                    }
+                }
+                TenderEditorField::RawLabel => {
+                    if tender.raw_label.trim().is_empty() {
+                        "<empty>".to_string()
+                    } else {
+                        tender.raw_label.clone()
+                    }
+                }
+                TenderEditorField::Removed => tender.removed.to_string(),
+            };
+            ListItem::new(Line::from(format!("{}: {}", field.label(), value)))
+        })
+        .collect::<Vec<_>>();
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Fields")
+                .style(popup_style()),
+        )
+        .style(popup_style())
+        .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+        .highlight_symbol(">> ");
+    if let Some(editor) = review_state.tender_editor.as_mut() {
+        frame.render_stateful_widget(list, rows[0], &mut editor.field_state);
+    }
+
+    let help = Paragraph::new(
+        "Up/Down select  |  Enter edit / cycle kind / toggle removed  |  Left/Right cycle kind  |  f fill remaining  |  x toggle removed  |  Esc close",
+    )
+    .style(popup_style())
+    .wrap(Wrap { trim: true });
+    frame.render_widget(help, rows[1]);
 }
 
 pub(crate) fn render_item_editor_modal(

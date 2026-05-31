@@ -4,7 +4,11 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
+from beanbeaver.domain.receipt import Tender, TenderKind
+
 from .._rust import require_rust_matcher
+
+_VALID_TENDER_KINDS: set[str] = {"card", "gift_card", "cash", "store_credit"}
 
 
 def _extract_merchant(
@@ -70,3 +74,21 @@ def _extract_price_from_line(line: str) -> Decimal | None:
     if cents is None:
         return None
     return Decimal(int(cents)) / Decimal("100")
+
+
+def _extract_tenders(lines: list[str], total: Decimal) -> list[Tender]:
+    """Extract payment tenders from OCR; empty when sum doesn't reconcile against total."""
+    total_cents = int(total * Decimal("100"))
+    raw = require_rust_matcher().receipt_extract_tenders(lines, total_cents)
+    tenders: list[Tender] = []
+    for raw_label, amount_cents, kind in raw:
+        normalized_kind: TenderKind = kind if kind in _VALID_TENDER_KINDS else "card"
+        tenders.append(
+            Tender(
+                amount=Decimal(int(amount_cents)) / Decimal("100"),
+                account=None,
+                kind=normalized_kind,
+                raw_label=str(raw_label),
+            )
+        )
+    return tenders

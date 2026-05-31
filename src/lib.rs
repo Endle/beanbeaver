@@ -52,6 +52,10 @@ struct PyReceiptInput {
     merchant: String,
     #[pyo3(item("date_is_placeholder"))]
     date_is_placeholder: bool,
+    #[pyo3(item("card_amount_scaled"), default)]
+    card_amount_scaled: Option<i64>,
+    #[pyo3(item("non_card_amount_scaled"), default)]
+    non_card_amount_scaled: i64,
 }
 
 #[derive(FromPyObject)]
@@ -92,11 +96,13 @@ fn to_match_config(config: PyMatchConfig) -> matcher::MatchConfig {
 }
 
 fn to_receipt_input(receipt: PyReceiptInput) -> matcher::ReceiptInput {
-    matcher::ReceiptInput::new(
+    matcher::ReceiptInput::with_split_tender(
         receipt.date_ordinal,
         receipt.total_scaled,
         receipt.merchant,
         receipt.date_is_placeholder,
+        receipt.card_amount_scaled,
+        receipt.non_card_amount_scaled,
     )
 }
 
