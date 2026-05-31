@@ -95,6 +95,68 @@ def _normalize_item_category(value: object) -> str | None:
 _VALID_TENDER_KINDS = {"card", "gift_card", "cash", "store_credit"}
 
 
+def _validate_tender_create_patch(review_patch: dict[str, Any], *, ordinal: int) -> dict[str, Any]:
+    """Validate a create patch `{"review": {"amount", "kind", "account"?, "raw_label"?}}`."""
+    amount = _normalize_decimal_text(
+        review_patch.get("amount"),
+        label=f"tender amount (patch #{ordinal})",
+    )
+    if amount is None:
+        raise ValueError(f"Tender review patch #{ordinal} is missing required 'amount'")
+    kind_value = _normalize_optional_text(review_patch.get("kind"))
+    if kind_value is None:
+        raise ValueError(f"Tender review patch #{ordinal} is missing required 'kind'")
+    if kind_value not in _VALID_TENDER_KINDS:
+        raise ValueError(
+            f"Tender review patch #{ordinal} kind '{kind_value}' is not one of {sorted(_VALID_TENDER_KINDS)}"
+        )
+
+    new_tender: dict[str, Any] = {"amount": amount, "kind": kind_value}
+    if "account" in review_patch:
+        account = _normalize_optional_text(review_patch.get("account"))
+        if account is not None:
+            new_tender["account"] = account
+    if "raw_label" in review_patch:
+        raw_label = _normalize_optional_text(review_patch.get("raw_label"))
+        if raw_label is not None:
+            new_tender["raw_label"] = raw_label
+
+    return {"create": True, "tender": new_tender}
+
+
+def _validate_tender_edit_patch(
+    patch: dict[str, Any],
+    review_patch: dict[str, Any],
+    *,
+    ordinal: int,
+    tender_count: int,
+) -> tuple[int, dict[str, Any]]:
+    """Validate an edit patch `{"index": int, "review": {"account"?, "kind"?, "removed"?}}`."""
+    raw_index = patch.get("index")
+    if not isinstance(raw_index, int):
+        raise ValueError(f"Tender review patch #{ordinal} is missing integer 'index'")
+    if raw_index < 0 or raw_index >= tender_count:
+        raise ValueError(f"Tender review patch #{ordinal} index {raw_index} out of range (tenders: {tender_count})")
+
+    tender_review: dict[str, Any] = {}
+    if "account" in review_patch:
+        tender_review["account"] = _normalize_optional_text(review_patch.get("account"))
+    if "kind" in review_patch:
+        kind_value = _normalize_optional_text(review_patch.get("kind"))
+        if kind_value is not None and kind_value not in _VALID_TENDER_KINDS:
+            raise ValueError(
+                f"Tender review patch #{ordinal} kind '{kind_value}' is not one of {sorted(_VALID_TENDER_KINDS)}"
+            )
+        tender_review["kind"] = kind_value
+    if "removed" in review_patch:
+        removed = review_patch.get("removed")
+        if not isinstance(removed, bool):
+            raise ValueError(f"Tender review patch #{ordinal} field 'removed' must be a boolean")
+        tender_review["removed"] = removed
+
+    return raw_index, {"index": raw_index, "review": tender_review}
+
+
 def _validate_tender_review_patches(
     tender_review_patches: list[dict[str, Any]],
     *,
@@ -102,10 +164,9 @@ def _validate_tender_review_patches(
 ) -> list[dict[str, Any]]:
     """Validate per-tender review patches.
 
-    Edit patches: `{"index": int, "review": {"account"?, "kind"?, "removed"?}}`.
-    Create patches: `{"create": True, "review": {"amount", "kind", "account"?, "raw_label"?}}`.
     Edit patches are deduped by index (later entries clobber earlier); create
-    patches preserve their relative order.
+    patches preserve their relative order. See the create/edit helpers for the
+    accepted shapes.
     """
     edit_by_index: dict[int, dict[str, Any]] = {}
     creates: list[dict[str, Any]] = []
@@ -122,56 +183,11 @@ def _validate_tender_review_patches(
             raise ValueError(f"Tender review patch #{ordinal} field 'review' must be a JSON object")
 
         if create:
-            amount = _normalize_decimal_text(
-                review_patch.get("amount"),
-                label=f"tender amount (patch #{ordinal})",
-            )
-            if amount is None:
-                raise ValueError(f"Tender review patch #{ordinal} is missing required 'amount'")
-            kind_value = _normalize_optional_text(review_patch.get("kind"))
-            if kind_value is None:
-                raise ValueError(f"Tender review patch #{ordinal} is missing required 'kind'")
-            if kind_value not in _VALID_TENDER_KINDS:
-                raise ValueError(
-                    f"Tender review patch #{ordinal} kind '{kind_value}' is not one of {sorted(_VALID_TENDER_KINDS)}"
-                )
-
-            new_tender: dict[str, Any] = {"amount": amount, "kind": kind_value}
-            if "account" in review_patch:
-                account = _normalize_optional_text(review_patch.get("account"))
-                if account is not None:
-                    new_tender["account"] = account
-            if "raw_label" in review_patch:
-                raw_label = _normalize_optional_text(review_patch.get("raw_label"))
-                if raw_label is not None:
-                    new_tender["raw_label"] = raw_label
-
-            creates.append({"create": True, "tender": new_tender})
+            creates.append(_validate_tender_create_patch(review_patch, ordinal=ordinal))
             continue
 
-        raw_index = patch.get("index")
-        if not isinstance(raw_index, int):
-            raise ValueError(f"Tender review patch #{ordinal} is missing integer 'index'")
-        if raw_index < 0 or raw_index >= tender_count:
-            raise ValueError(f"Tender review patch #{ordinal} index {raw_index} out of range (tenders: {tender_count})")
-
-        tender_review: dict[str, Any] = {}
-        if "account" in review_patch:
-            tender_review["account"] = _normalize_optional_text(review_patch.get("account"))
-        if "kind" in review_patch:
-            kind_value = _normalize_optional_text(review_patch.get("kind"))
-            if kind_value is not None and kind_value not in _VALID_TENDER_KINDS:
-                raise ValueError(
-                    f"Tender review patch #{ordinal} kind '{kind_value}' is not one of {sorted(_VALID_TENDER_KINDS)}"
-                )
-            tender_review["kind"] = kind_value
-        if "removed" in review_patch:
-            removed = review_patch.get("removed")
-            if not isinstance(removed, bool):
-                raise ValueError(f"Tender review patch #{ordinal} field 'removed' must be a boolean")
-            tender_review["removed"] = removed
-
-        edit_by_index[raw_index] = {"index": raw_index, "review": tender_review}
+        raw_index, edit = _validate_tender_edit_patch(patch, review_patch, ordinal=ordinal, tender_count=tender_count)
+        edit_by_index[raw_index] = edit
 
     return list(edit_by_index.values()) + creates
 
