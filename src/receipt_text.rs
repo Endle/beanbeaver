@@ -396,6 +396,9 @@ fn is_section_header_text(text: &str) -> bool {
     let normalized = re_compact_space()
         .replace_all(&text.trim().to_ascii_uppercase(), " ")
         .to_string();
+    if normalized.starts_with("&&") {
+        return true;
+    }
     if matches!(
         normalized.as_str(),
         "MEAT" | "SEAFOOD" | "PRODUCE" | "DELI" | "GROCERY" | "BAKERY" | "FROZEN"

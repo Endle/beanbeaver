@@ -401,6 +401,9 @@ fn is_section_header_text(text: &str) -> bool {
     let normalized = re_multi_spaces()
         .replace(&text.trim().to_ascii_uppercase(), " ")
         .to_string();
+    if normalized.starts_with("&&") {
+        return true;
+    }
     if is_section_name(normalized.as_str()) {
         return true;
     }

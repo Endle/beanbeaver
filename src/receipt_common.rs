@@ -253,6 +253,9 @@ pub(crate) fn is_section_header_text(text: &str) -> bool {
         return false;
     }
     let normalized = collapse_internal_whitespace(text.trim()).to_ascii_uppercase();
+    if normalized.starts_with("&&") {
+        return true;
+    }
     if SECTION_HEADERS.iter().any(|header| *header == normalized) {
         return true;
     }
