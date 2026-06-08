@@ -36,6 +36,11 @@ fn re_dept_marker_prefix() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"^[&8]{2}\.?\s").unwrap())
 }
 
+fn re_total_ocr_variants() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"T[O0C]TA[L1I]").unwrap())
+}
+
 fn re_summary_patterns() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -296,6 +301,9 @@ pub(crate) fn looks_like_summary_line(text: &str) -> bool {
         return true;
     }
     if upper.contains("SUBTOTAL") || upper.contains("SUB TOTAL") || upper.contains("TOTAL") {
+        return true;
+    }
+    if re_total_ocr_variants().is_match(&upper) {
         return true;
     }
     if upper.contains("HST")
