@@ -1221,6 +1221,7 @@ pub(crate) fn extract_text_items(
                 && !is_qty_expr
                 && !force_backward
                 && !re_mangled_reg_marker().is_match(desc_part.trim())
+                && !looks_like_summary_line(desc_part.trim())
             {
                 deferred.push(DeferredTextOutcome::Item(ParsedTextItem {
                     description: desc_part.clone(),
