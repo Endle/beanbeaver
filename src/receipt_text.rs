@@ -290,6 +290,14 @@ fn re_total_ocr_variants() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"T[O0C]TA[L1I]").unwrap())
 }
 
+fn re_mangled_reg_marker() -> &'static Regex {
+    // Matches OCR-corrupted REG-price marker fragments like "4EG62.99", "#EG",
+    // "(EG$5.99" where OCR replaced the leading R with a similar-looking glyph
+    // and may have replaced the $ with a digit.
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^[^A-Za-z\s]{1,3}EG(?:\$?\d+\.\d{2})?\.?$").unwrap())
+}
+
 fn re_ascii_words() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"[A-Z]+").unwrap())
@@ -620,6 +628,9 @@ fn is_descriptive_candidate(text: &str) -> bool {
         return false;
     }
     if looks_like_summary_line(text) {
+        return false;
+    }
+    if re_mangled_reg_marker().is_match(text.trim()) {
         return false;
     }
     if looks_like_quantity_expression(text) {
@@ -1205,7 +1216,12 @@ pub(crate) fn extract_text_items(
                 continue;
             }
 
-            if !desc_part.is_empty() && desc_part.len() > 2 && !is_qty_expr && !force_backward {
+            if !desc_part.is_empty()
+                && desc_part.len() > 2
+                && !is_qty_expr
+                && !force_backward
+                && !re_mangled_reg_marker().is_match(desc_part.trim())
+            {
                 deferred.push(DeferredTextOutcome::Item(ParsedTextItem {
                     description: desc_part.clone(),
                     category_source: desc_part,
