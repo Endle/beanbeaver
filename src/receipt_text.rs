@@ -180,8 +180,13 @@ fn re_weak_parenthetical() -> &'static Regex {
 }
 
 fn re_weak_measure() -> &'static Regex {
+    // Matches size-only fragments like "320g", "500ml", "1.5kg" — and the
+    // OCR-mangled "+400g" form where the opening paren got transcribed as
+    // `+`. These appear as the desc_part on Foody Mart Frozen-section rows
+    // (`<size> <price>` with a trailing price the parser must hand to the
+    // item description on the line BELOW, not the standalone size token).
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?i)^\d+(?:\.\d+)?\s*(?:KG|G|LB|L|ML|OZ)$").unwrap())
+    RE.get_or_init(|| Regex::new(r"(?i)^[+]?\d+(?:\.\d+)?\s*(?:KG|G|LB|L|ML|OZ)$").unwrap())
 }
 
 fn re_malformed_price_marker() -> &'static Regex {
@@ -1088,6 +1093,24 @@ pub(crate) fn extract_text_items(
                                 price_cents: orphan_cents,
                                 quantity: 1,
                             }));
+                            // If the line two below also carries a trailing
+                            // price equal to orphan_cents (the typical Asian-
+                            // grocery `desc / size+price / qty / ...` layout
+                            // where the qty repeats the unit price), the
+                            // pairing is confirmed: mark next-line used so the
+                            // following iteration's weak-desc backward search
+                            // can't re-claim it (bug H/K). If next-next does
+                            // NOT match, the pairing is speculative — leave
+                            // next-line unmarked so a later higher-confidence
+                            // backward search can still reach it.
+                            let confirms = normalized_lines
+                                .get(i + 2)
+                                .and_then(|l| extract_trailing_price_cents(l.trim()))
+                                .map(|(c, _, _)| c.abs() == orphan_cents.abs())
+                                .unwrap_or(false);
+                            if confirms {
+                                used_text_lines[i + 1] = true;
+                            }
                             // The orphan-qty path just paired this line's
                             // trailing price with the description below. Don't
                             // also let the regular extract path pair the same
