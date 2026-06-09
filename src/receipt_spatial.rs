@@ -102,11 +102,21 @@ fn re_malformed_ocr_prefix() -> &'static Regex {
 }
 
 fn re_mangled_reg_marker() -> &'static Regex {
-    // Matches OCR-corrupted REG-price marker fragments like "4EG62.99", "#EG",
-    // "@EG", "(EG$5.99" where OCR replaced the leading R with a similar-looking
-    // glyph and may have replaced the $ with a digit.
+    // Matches OCR-corrupted REG-price marker fragments where OCR mangled the
+    // leading R (into "#", "4", "@", "(") and/or dropped the G (so "REG$" was
+    // captured as "E$"). Also catches the "EREG" / "REG$" forms.
+    //
+    // Hits: "#EG", "4EG62.99", "(EG$5.99", "#E$", "#E$5.99", "REG$5.99",
+    // "EREG12.99". Misses real items because each branch requires the
+    // marker shape (non-alpha prefix or literal REG) and a tight content
+    // pattern, not just any text containing those substrings.
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"^[^A-Za-z\s]{1,3}EG(?:\$?\d+\.\d{2})?\.?$").unwrap())
+    RE.get_or_init(|| {
+        Regex::new(
+            r"^(?:[^A-Za-z\s]{1,3}E(?:G(?:\$?\d+\.\d{2})?|\$(?:\d+\.\d{2})?)|E?REG\$?\d+\.\d{2})\.?$",
+        )
+        .unwrap()
+    })
 }
 
 fn re_multibuy_parenthetical() -> &'static Regex {
