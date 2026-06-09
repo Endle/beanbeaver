@@ -1067,6 +1067,13 @@ pub(crate) fn extract_text_items(
                                 price_cents: orphan_cents,
                                 quantity: 1,
                             }));
+                            // The orphan-qty path just paired this line's
+                            // trailing price with the description below. Don't
+                            // also let the regular extract path pair the same
+                            // trailing price with a description ABOVE — that
+                            // produces a duplicate extraction (bug K) where the
+                            // qty/sale-subtext gets glued onto the wrong item.
+                            continue;
                         }
                     }
                 }
