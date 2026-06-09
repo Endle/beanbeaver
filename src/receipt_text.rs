@@ -417,6 +417,25 @@ fn strip_leading_receipt_codes(text: &str) -> String {
     trimmed.trim().to_string()
 }
 
+fn re_sale_price_subtext() -> &'static Regex {
+    // OCR-merged sale-price subtext on Asian-grocery receipts:
+    // "<size>)@<unit>(<qty>/$<deal>)" appended after the real description
+    // because the opening paren before the size was lost and the closing
+    // paren glued straight to the `@`. The discriminator is `)@<digit>`,
+    // which never appears in legitimate item descriptions.
+    //
+    // Matches: " 6*60g)@5.99(1/$4.98)" → stripped. Does NOT match LCBO's
+    // "(1 @ 19.75)" form (no `)@` and there's a space around the `@`).
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\s+\S*\)@\d+\.\d{2}.*$").unwrap())
+}
+
+/// Strip the OCR-glued `<size>)@<unit>(<qty>/$<deal>)` sale-price subtext
+/// that some receipts append to item descriptions.
+fn strip_sale_price_subtext(text: &str) -> String {
+    re_sale_price_subtext().replace(text, "").trim().to_string()
+}
+
 fn is_section_header_text(text: &str) -> bool {
     if text.trim().is_empty() {
         return false;
@@ -1060,7 +1079,9 @@ pub(crate) fn extract_text_items(
                         // higher-confidence search (backward / weak-desc forward)
                         // is allowed to claim the same description.
                         if !used_text_lines[i + 1] && is_descriptive_candidate(next_trimmed) {
-                            let desc = strip_leading_receipt_codes(next_trimmed);
+                            let desc = strip_sale_price_subtext(
+                                &strip_leading_receipt_codes(next_trimmed),
+                            );
                             deferred.push(DeferredTextOutcome::Item(ParsedTextItem {
                                 category_source: desc.clone(),
                                 description: desc,
@@ -1295,9 +1316,10 @@ pub(crate) fn extract_text_items(
                 && !looks_like_summary_line(desc_part.trim())
             {
                 let desc_alpha = alpha_ratio(desc_part.trim());
+                let desc_clean = strip_sale_price_subtext(&desc_part);
                 deferred.push(DeferredTextOutcome::Item(ParsedTextItem {
-                    description: desc_part.clone(),
-                    category_source: desc_part,
+                    description: desc_clean.clone(),
+                    category_source: desc_clean,
                     price_cents,
                     quantity: 1,
                 }));
@@ -1535,9 +1557,10 @@ pub(crate) fn extract_text_items(
                         description_suffix = format!(" ({})", reversed.join(", "));
                     }
 
+                    let cleaned_desc = strip_sale_price_subtext(&found_desc_value);
                     deferred.push(DeferredTextOutcome::Item(ParsedTextItem {
-                        category_source: found_desc_value.clone(),
-                        description: format!("{found_desc_value}{description_suffix}"),
+                        category_source: cleaned_desc.clone(),
+                        description: format!("{cleaned_desc}{description_suffix}"),
                         price_cents,
                         quantity,
                     }));
