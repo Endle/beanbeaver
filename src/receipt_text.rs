@@ -465,6 +465,18 @@ fn looks_like_summary_line(text: &str) -> bool {
         return false;
     }
     let upper = text.trim().to_ascii_uppercase();
+    // "Member Pricing" / "Manager's Special" / "Manager Special" rows on
+    // Loblaws-family receipts are line-item discounts (negative price), not
+    // membership/store-info metadata, so they must NOT match the
+    // `^MEMBER\b` arm of re_summary_patterns. Without this carve-out the line
+    // is filtered, the discount is dropped, and the items sum overshoots the
+    // printed subtotal.
+    if upper.starts_with("MEMBER PRICING")
+        || upper.starts_with("MANAGER'S SPECIAL")
+        || upper.starts_with("MANAGER SPECIAL")
+    {
+        return false;
+    }
     if re_summary_patterns().is_match(&upper) {
         return true;
     }

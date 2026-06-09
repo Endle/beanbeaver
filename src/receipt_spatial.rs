@@ -227,11 +227,13 @@ fn re_ascii_words() -> &'static Regex {
 fn re_price_word() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     // Trailing `-` is Costco's convention for discount/refund lines
-    // (e.g. TPD/<sku> 3.00-). The optional trailing letters are tax flags
-    // that can fuse with the price into a single OCR token: Costco's H/T/J
-    // and T&T's G (GST) / P (PST), and T&T may print several space-separated
+    // (e.g. TPD/<sku> 3.00-); LEADING `-` is Loblaws-family convention for
+    // discount lines (e.g. "Member Pricing MRJ -1.49"). Either marks the
+    // amount as negative. The optional trailing letters are tax flags that
+    // can fuse with the price into a single OCR token: Costco's H/T/J and
+    // T&T's G (GST) / P (PST), and T&T may print several space-separated
     // (e.g. "$6.87 G P").
-    RE.get_or_init(|| Regex::new(r"^\$?(\d+\.\d{2})(-?)(?:\s*[HhTtJjGgPp])*$").unwrap())
+    RE.get_or_init(|| Regex::new(r"^(-?)\$?(\d+\.\d{2})(-?)(?:\s*[HhTtJjGgPp])*$").unwrap())
 }
 
 fn re_embedded_trailing_price_word() -> &'static Regex {
@@ -459,6 +461,18 @@ fn is_summary_line(text: &str) -> bool {
         return false;
     }
     let upper = text.trim().to_ascii_uppercase();
+    // "Member Pricing" / "Manager's Special" rows on Loblaws-family receipts
+    // are line-item discounts (negative price), not membership/store-info
+    // metadata, so they must NOT match the `^MEMBER\b` arm of
+    // re_summary_patterns. Without this carve-out the discount line is
+    // filtered, the negative price is dropped, and the items sum overshoots
+    // the printed subtotal (RCSS rcss_20260130 drops -$1.49 and -$0.98).
+    if upper.starts_with("MEMBER PRICING")
+        || upper.starts_with("MANAGER'S SPECIAL")
+        || upper.starts_with("MANAGER SPECIAL")
+    {
+        return false;
+    }
     if re_summary_patterns().is_match(&upper) {
         return true;
     }
@@ -610,11 +624,16 @@ fn is_price_word(text: &str) -> Option<i64> {
         .or_else(|| normalized.strip_prefix('w').map(str::trim_start))
         .unwrap_or(normalized.as_str());
     if let Some(captures) = re_price_word().captures(stripped) {
-        let value = parse_scaled_decimal(captures.get(1)?.as_str())?;
-        let is_negative = captures
-            .get(2)
+        let value = parse_scaled_decimal(captures.get(2)?.as_str())?;
+        let leading_minus = captures
+            .get(1)
             .map(|m| m.as_str() == "-")
             .unwrap_or(false);
+        let trailing_minus = captures
+            .get(3)
+            .map(|m| m.as_str() == "-")
+            .unwrap_or(false);
+        let is_negative = leading_minus || trailing_minus;
         return Some(if is_negative { -value } else { value });
     }
     if stripped.contains('@') || stripped.contains('/') {
