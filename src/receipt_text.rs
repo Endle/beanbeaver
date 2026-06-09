@@ -1289,7 +1289,15 @@ pub(crate) fn extract_text_items(
                         if cleaned_next.is_empty() || is_section_header_text(&cleaned_next) {
                             continue;
                         }
-                        if alpha_ratio(&cleaned_next) < 0.5 {
+                        // The `&& <Dept> price` section-header signal is strong:
+                        // the next non-section line is almost always the item
+                        // name even if it carries trailing OCR-mangled subtext
+                        // like `(125gx5)@8.99(1/$6.99)` that drags the alpha
+                        // ratio below 0.5. A more permissive threshold here lets
+                        // descriptions like "MN - Crispy Coffee Flavor 6*60g)..."
+                        // (ratio 0.46) pair correctly, while pure-noise lines
+                        // are still rejected.
+                        if alpha_ratio(&cleaned_next) < 0.35 {
                             continue;
                         }
                         found_desc = Some(cleaned_next);
