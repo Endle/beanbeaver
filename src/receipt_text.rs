@@ -1122,9 +1122,16 @@ pub(crate) fn extract_text_items(
                 }
             }
 
+            // Skip TOTAL/SUBTOTAL summary rows, including OCR-mangled variants
+            // like "Tota1$" (l→1) or "SUBTCTAL" (O→C). Without the
+            // `re_total_ocr_variants` arm these lines passed the literal
+            // contains() checks, fell into the description-search else branch,
+            // and emitted a "maybe missed item" warning at the summary amount
+            // (Al-Premium 16.93 phantom).
             if line_upper.contains("TOTAL")
                 || line_upper.contains("SUBTOTAL")
                 || line_upper.contains("SUB TOTAL")
+                || re_total_ocr_variants().is_match(&line_upper)
             {
                 continue;
             }
