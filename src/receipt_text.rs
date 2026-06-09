@@ -587,6 +587,18 @@ fn looks_like_quantity_expression(text: &str) -> bool {
         return true;
     }
 
+    // OCR-dropped `@`: lines like "2 $2.99" (qty + unit price, no `@`).
+    // Without this, the line "2 $2.99 5.98" splits into desc_part "2 $2.99"
+    // and trailing price 5.98, then the IF push emits a phantom item with
+    // "2 $2.99" as the description — eating the real item name that sits on
+    // the line above (Shepherds Purse 250g on fresh_140_18).
+    static RE_QTY_UNIT_NO_AT: OnceLock<Regex> = OnceLock::new();
+    let re_qty_unit_no_at = RE_QTY_UNIT_NO_AT
+        .get_or_init(|| Regex::new(r"^\d+\s+\$\d+\.\d{2}\s*$").unwrap());
+    if re_qty_unit_no_at.is_match(&normalized) {
+        return true;
+    }
+
     let upper = normalized.to_ascii_uppercase();
     if upper.starts_with('(') && upper.contains('@') && upper.contains("/$") {
         let alpha_count = upper.chars().filter(|ch| ch.is_ascii_alphabetic()).count();
