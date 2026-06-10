@@ -290,6 +290,24 @@ fn re_total_ocr_variants() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"T[O0C]TA[L1I]").unwrap())
 }
 
+fn re_mangled_reg_marker() -> &'static Regex {
+    // Matches OCR-corrupted REG-price marker fragments where OCR mangled the
+    // leading R (into "#", "4", "@", "(") and/or dropped the G (so "REG$" was
+    // captured as "E$"). Also catches the "EREG" / "REG$" forms.
+    //
+    // Hits: "#EG", "4EG62.99", "(EG$5.99", "#E$", "#E$5.99", "REG$5.99",
+    // "EREG12.99". Misses real items because each branch requires the
+    // marker shape (non-alpha prefix or literal REG) and a tight content
+    // pattern, not just any text containing those substrings.
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"^(?:[^A-Za-z\s]{1,3}E(?:G(?:\$?\d+\.\d{2})?|\$(?:\d+\.\d{2})?)|E?REG\$?\d+\.\d{2})\.?$",
+        )
+        .unwrap()
+    })
+}
+
 fn re_ascii_words() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"[A-Z]+").unwrap())
@@ -620,6 +638,9 @@ fn is_descriptive_candidate(text: &str) -> bool {
         return false;
     }
     if looks_like_summary_line(text) {
+        return false;
+    }
+    if re_mangled_reg_marker().is_match(text.trim()) {
         return false;
     }
     if looks_like_quantity_expression(text) {
@@ -1216,6 +1237,7 @@ pub(crate) fn extract_text_items(
                 && desc_part.len() > 2
                 && !is_qty_expr
                 && !force_backward
+                && !re_mangled_reg_marker().is_match(desc_part.trim())
                 && !looks_like_summary_line(desc_part.trim())
             {
                 deferred.push(DeferredTextOutcome::Item(ParsedTextItem {

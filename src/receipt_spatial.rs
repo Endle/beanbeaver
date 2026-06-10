@@ -101,6 +101,24 @@ fn re_malformed_ocr_prefix() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"^\(H{1,2}E[DI]?\b").unwrap())
 }
 
+fn re_mangled_reg_marker() -> &'static Regex {
+    // Matches OCR-corrupted REG-price marker fragments where OCR mangled the
+    // leading R (into "#", "4", "@", "(") and/or dropped the G (so "REG$" was
+    // captured as "E$"). Also catches the "EREG" / "REG$" forms.
+    //
+    // Hits: "#EG", "4EG62.99", "(EG$5.99", "#E$", "#E$5.99", "REG$5.99",
+    // "EREG12.99". Misses real items because each branch requires the
+    // marker shape (non-alpha prefix or literal REG) and a tight content
+    // pattern, not just any text containing those substrings.
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"^(?:[^A-Za-z\s]{1,3}E(?:G(?:\$?\d+\.\d{2})?|\$(?:\d+\.\d{2})?)|E?REG\$?\d+\.\d{2})\.?$",
+        )
+        .unwrap()
+    })
+}
+
 fn re_multibuy_parenthetical() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"^\(\d+\s*/\s*for\s+\$[\d.]+\)").unwrap())
@@ -672,6 +690,9 @@ fn is_valid_item_line(line: &ParsedLine, total_line_y: Option<f64>) -> bool {
     if re_malformed_ocr_prefix().is_match(&line.left_text) {
         return false;
     }
+    if re_mangled_reg_marker().is_match(line.left_text.trim()) {
+        return false;
+    }
     if line.left_text.len() < 8
         && !line.left_text.contains(' ')
         && !is_priced_generic_item_label(&line.left_text, &line.full_text)
@@ -1241,7 +1262,10 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
             };
             if chosen_distance <= direct_match_tolerance {
                 let description = clean_description(&all_lines[index].left_text);
-                if description.len() > 2 {
+                if description.len() > 2
+                    && !re_mangled_reg_marker().is_match(all_lines[index].left_text.trim())
+                    && !re_mangled_reg_marker().is_match(description.trim())
+                {
                     used_line_indices[index] = true;
                     items.push(SpatialExtractedItem {
                         description,
@@ -1260,7 +1284,7 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
             && !looks_like_quantity_expression(&source_line.left_text)
         {
             let description = clean_description(&source_line.left_text);
-            if description.len() > 2 {
+            if description.len() > 2 && !re_mangled_reg_marker().is_match(description.trim()) {
                 used_line_indices[price_candidate.source_line_index] = true;
                 items.push(SpatialExtractedItem {
                     description,
@@ -1321,7 +1345,7 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
                     continue;
                 }
                 let description = clean_description(&line.left_text);
-                if description.len() > 2 {
+                if description.len() > 2 && !re_mangled_reg_marker().is_match(description.trim()) {
                     used_line_indices[index] = true;
                     items.push(SpatialExtractedItem {
                         description,
