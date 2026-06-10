@@ -285,6 +285,11 @@ fn re_dept_marker_prefix() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"^[&8]{2}\.?\s").unwrap())
 }
 
+fn re_total_ocr_variants() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"T[O0C]TA[L1I]").unwrap())
+}
+
 fn re_ascii_words() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"[A-Z]+").unwrap())
@@ -446,6 +451,9 @@ fn looks_like_summary_line(text: &str) -> bool {
         return true;
     }
     if upper.contains("SUBTOTAL") || upper.contains("SUB TOTAL") || upper.contains("TOTAL") {
+        return true;
+    }
+    if re_total_ocr_variants().is_match(&upper) {
         return true;
     }
     if re_tax_tokens().is_match(&upper) {
@@ -1081,9 +1089,16 @@ pub(crate) fn extract_text_items(
                 }
             }
 
+            // Skip TOTAL/SUBTOTAL summary rows, including OCR-mangled variants
+            // like "Tota1$" (l→1) or "SUBTCTAL" (O→C). Without the
+            // `re_total_ocr_variants` arm these lines passed the literal
+            // contains() checks, fell into the description-search else branch,
+            // and emitted a "maybe missed item" warning at the summary amount
+            // (Al-Premium 16.93 phantom).
             if line_upper.contains("TOTAL")
                 || line_upper.contains("SUBTOTAL")
                 || line_upper.contains("SUB TOTAL")
+                || re_total_ocr_variants().is_match(&line_upper)
             {
                 continue;
             }
@@ -1197,7 +1212,12 @@ pub(crate) fn extract_text_items(
                 continue;
             }
 
-            if !desc_part.is_empty() && desc_part.len() > 2 && !is_qty_expr && !force_backward {
+            if !desc_part.is_empty()
+                && desc_part.len() > 2
+                && !is_qty_expr
+                && !force_backward
+                && !looks_like_summary_line(desc_part.trim())
+            {
                 deferred.push(DeferredTextOutcome::Item(ParsedTextItem {
                     description: desc_part.clone(),
                     category_source: desc_part,
