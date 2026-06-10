@@ -181,6 +181,11 @@ fn re_section_aisle_prefix() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"^[^A-Z0-9]*\d{1,2}\s*[-:]").unwrap())
 }
 
+fn re_dept_marker_prefix() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^[&8]{2}\.?\s").unwrap())
+}
+
 fn re_leading_section_item_prefix() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -401,6 +406,9 @@ fn is_section_header_text(text: &str) -> bool {
     let normalized = re_multi_spaces()
         .replace(&text.trim().to_ascii_uppercase(), " ")
         .to_string();
+    if re_dept_marker_prefix().is_match(&normalized) {
+        return true;
+    }
     if is_section_name(normalized.as_str()) {
         return true;
     }
