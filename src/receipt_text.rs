@@ -180,8 +180,13 @@ fn re_weak_parenthetical() -> &'static Regex {
 }
 
 fn re_weak_measure() -> &'static Regex {
+    // Matches size-only fragments like "320g", "500ml", "1.5kg" — and the
+    // OCR-mangled "+400g" form where the opening paren got transcribed as
+    // `+`. These appear as the desc_part on Foody Mart Frozen-section rows
+    // (`<size> <price>` with a trailing price the parser must hand to the
+    // item description on the line BELOW, not the standalone size token).
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?i)^\d+(?:\.\d+)?\s*(?:KG|G|LB|L|ML|OZ)$").unwrap())
+    RE.get_or_init(|| Regex::new(r"(?i)^[+]?\d+(?:\.\d+)?\s*(?:KG|G|LB|L|ML|OZ)$").unwrap())
 }
 
 fn re_malformed_price_marker() -> &'static Regex {
@@ -278,6 +283,34 @@ fn re_section_header_with_aisle() -> &'static Regex {
 fn re_section_aisle_prefix() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"^[^A-Z0-9]*\d{1,2}\s*[-:]").unwrap())
+}
+
+fn re_dept_marker_prefix() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^[&8]{2}\.?\s").unwrap())
+}
+
+fn re_total_ocr_variants() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"T[O0C]TA[L1I]").unwrap())
+}
+
+fn re_mangled_reg_marker() -> &'static Regex {
+    // Matches OCR-corrupted REG-price marker fragments where OCR mangled the
+    // leading R (into "#", "4", "@", "(") and/or dropped the G (so "REG$" was
+    // captured as "E$"). Also catches the "EREG" / "REG$" forms.
+    //
+    // Hits: "#EG", "4EG62.99", "(EG$5.99", "#E$", "#E$5.99", "REG$5.99",
+    // "EREG12.99". Misses real items because each branch requires the
+    // marker shape (non-alpha prefix or literal REG) and a tight content
+    // pattern, not just any text containing those substrings.
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"^(?:[^A-Za-z\s]{1,3}E(?:G(?:\$?\d+\.\d{2})?|\$(?:\d+\.\d{2})?)|E?REG\$?\d+\.\d{2})\.?$",
+        )
+        .unwrap()
+    })
 }
 
 fn re_ascii_words() -> &'static Regex {
@@ -389,6 +422,25 @@ fn strip_leading_receipt_codes(text: &str) -> String {
     trimmed.trim().to_string()
 }
 
+fn re_sale_price_subtext() -> &'static Regex {
+    // OCR-merged sale-price subtext on Asian-grocery receipts:
+    // "<size>)@<unit>(<qty>/$<deal>)" appended after the real description
+    // because the opening paren before the size was lost and the closing
+    // paren glued straight to the `@`. The discriminator is `)@<digit>`,
+    // which never appears in legitimate item descriptions.
+    //
+    // Matches: " 6*60g)@5.99(1/$4.98)" → stripped. Does NOT match LCBO's
+    // "(1 @ 19.75)" form (no `)@` and there's a space around the `@`).
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\s+\S*\)@\d+\.\d{2}.*$").unwrap())
+}
+
+/// Strip the OCR-glued `<size>)@<unit>(<qty>/$<deal>)` sale-price subtext
+/// that some receipts append to item descriptions.
+fn strip_sale_price_subtext(text: &str) -> String {
+    re_sale_price_subtext().replace(text, "").trim().to_string()
+}
+
 fn is_section_header_text(text: &str) -> bool {
     if text.trim().is_empty() {
         return false;
@@ -396,6 +448,9 @@ fn is_section_header_text(text: &str) -> bool {
     let normalized = re_compact_space()
         .replace_all(&text.trim().to_ascii_uppercase(), " ")
         .to_string();
+    if re_dept_marker_prefix().is_match(&normalized) {
+        return true;
+    }
     if matches!(
         normalized.as_str(),
         "MEAT" | "SEAFOOD" | "PRODUCE" | "DELI" | "GROCERY" | "BAKERY" | "FROZEN"
@@ -434,10 +489,25 @@ fn looks_like_summary_line(text: &str) -> bool {
         return false;
     }
     let upper = text.trim().to_ascii_uppercase();
+    // "Member Pricing" / "Manager's Special" / "Manager Special" rows on
+    // Loblaws-family receipts are line-item discounts (negative price), not
+    // membership/store-info metadata, so they must NOT match the
+    // `^MEMBER\b` arm of re_summary_patterns. Without this carve-out the line
+    // is filtered, the discount is dropped, and the items sum overshoots the
+    // printed subtotal.
+    if upper.starts_with("MEMBER PRICING")
+        || upper.starts_with("MANAGER'S SPECIAL")
+        || upper.starts_with("MANAGER SPECIAL")
+    {
+        return false;
+    }
     if re_summary_patterns().is_match(&upper) {
         return true;
     }
     if upper.contains("SUBTOTAL") || upper.contains("SUB TOTAL") || upper.contains("TOTAL") {
+        return true;
+    }
+    if re_total_ocr_variants().is_match(&upper) {
         return true;
     }
     if re_tax_tokens().is_match(&upper) {
@@ -541,6 +611,18 @@ fn looks_like_quantity_expression(text: &str) -> bool {
         return true;
     }
 
+    // OCR-dropped `@`: lines like "2 $2.99" (qty + unit price, no `@`).
+    // Without this, the line "2 $2.99 5.98" splits into desc_part "2 $2.99"
+    // and trailing price 5.98, then the IF push emits a phantom item with
+    // "2 $2.99" as the description — eating the real item name that sits on
+    // the line above (Shepherds Purse 250g on fresh_140_18).
+    static RE_QTY_UNIT_NO_AT: OnceLock<Regex> = OnceLock::new();
+    let re_qty_unit_no_at = RE_QTY_UNIT_NO_AT
+        .get_or_init(|| Regex::new(r"^\d+\s+\$\d+\.\d{2}\s*$").unwrap());
+    if re_qty_unit_no_at.is_match(&normalized) {
+        return true;
+    }
+
     let upper = normalized.to_ascii_uppercase();
     if upper.starts_with('(') && upper.contains('@') && upper.contains("/$") {
         let alpha_count = upper.chars().filter(|ch| ch.is_ascii_alphabetic()).count();
@@ -604,6 +686,9 @@ fn is_descriptive_candidate(text: &str) -> bool {
         return false;
     }
     if looks_like_summary_line(text) {
+        return false;
+    }
+    if re_mangled_reg_marker().is_match(text.trim()) {
         return false;
     }
     if looks_like_quantity_expression(text) {
@@ -913,6 +998,12 @@ pub(crate) fn extract_text_items(
         .iter()
         .map(|line| normalize_decimal_spacing(line))
         .collect();
+    // Track description lines already consumed by an earlier price so a later
+    // price's forward/backward search can't grab the same description. Without
+    // this, a "weak inline desc" line like "(1kg) 16.99" forces a backward walk
+    // that pulls the previous item's description, producing a cross-row leak
+    // (Foody Mart bug C).
+    let mut used_text_lines: Vec<bool> = vec![false; normalized_lines.len()];
 
     let total_line_idx = normalized_lines.iter().position(|line| {
         let upper = line.to_ascii_uppercase();
@@ -986,14 +1077,47 @@ pub(crate) fn extract_text_items(
                 if orphan_cents > 0 && !reconciles_as_own_total {
                     if let Some(next_line) = normalized_lines.get(i + 1) {
                         let next_trimmed = next_line.trim();
-                        if is_descriptive_candidate(next_trimmed) {
-                            let desc = strip_leading_receipt_codes(next_trimmed);
+                        // Skip if the next line was already consumed by an
+                        // earlier price's search — avoids cross-row leak.
+                        // Do NOT mark used here: this orphan-qty pairing is a
+                        // low-confidence OCR-column-merge heuristic, so a later
+                        // higher-confidence search (backward / weak-desc forward)
+                        // is allowed to claim the same description.
+                        if !used_text_lines[i + 1] && is_descriptive_candidate(next_trimmed) {
+                            let desc = strip_sale_price_subtext(
+                                &strip_leading_receipt_codes(next_trimmed),
+                            );
                             deferred.push(DeferredTextOutcome::Item(ParsedTextItem {
                                 category_source: desc.clone(),
                                 description: desc,
                                 price_cents: orphan_cents,
                                 quantity: 1,
                             }));
+                            // If the line two below also carries a trailing
+                            // price equal to orphan_cents (the typical Asian-
+                            // grocery `desc / size+price / qty / ...` layout
+                            // where the qty repeats the unit price), the
+                            // pairing is confirmed: mark next-line used so the
+                            // following iteration's weak-desc backward search
+                            // can't re-claim it (bug H/K). If next-next does
+                            // NOT match, the pairing is speculative — leave
+                            // next-line unmarked so a later higher-confidence
+                            // backward search can still reach it.
+                            let confirms = normalized_lines
+                                .get(i + 2)
+                                .and_then(|l| extract_trailing_price_cents(l.trim()))
+                                .map(|(c, _, _)| c.abs() == orphan_cents.abs())
+                                .unwrap_or(false);
+                            if confirms {
+                                used_text_lines[i + 1] = true;
+                            }
+                            // The orphan-qty path just paired this line's
+                            // trailing price with the description below. Don't
+                            // also let the regular extract path pair the same
+                            // trailing price with a description ABOVE — that
+                            // produces a duplicate extraction (bug K) where the
+                            // qty/sale-subtext gets glued onto the wrong item.
+                            continue;
                         }
                     }
                 }
@@ -1073,9 +1197,16 @@ pub(crate) fn extract_text_items(
                 }
             }
 
+            // Skip TOTAL/SUBTOTAL summary rows, including OCR-mangled variants
+            // like "Tota1$" (l→1) or "SUBTCTAL" (O→C). Without the
+            // `re_total_ocr_variants` arm these lines passed the literal
+            // contains() checks, fell into the description-search else branch,
+            // and emitted a "maybe missed item" warning at the summary amount
+            // (Al-Premium 16.93 phantom).
             if line_upper.contains("TOTAL")
                 || line_upper.contains("SUBTOTAL")
                 || line_upper.contains("SUB TOTAL")
+                || re_total_ocr_variants().is_match(&line_upper)
             {
                 continue;
             }
@@ -1189,13 +1320,39 @@ pub(crate) fn extract_text_items(
                 continue;
             }
 
-            if !desc_part.is_empty() && desc_part.len() > 2 && !is_qty_expr && !force_backward {
+            // If desc_part is a mangled REG-price marker (OCR ate the leading R,
+            // so "REG$15.99" became "#EG15.99" or "(EG$5.99"), the trailing
+            // price is the suggested-retail marker, not an item price. The if
+            // block below already filters via `!re_mangled_reg_marker`, but the
+            // else branch would back-walk and emit a phantom item paired with
+            // the previous line. Suppress the whole line instead.
+            if !desc_part.is_empty()
+                && re_mangled_reg_marker().is_match(desc_part.trim())
+            {
+                continue;
+            }
+
+            if !desc_part.is_empty()
+                && desc_part.len() > 2
+                && !is_qty_expr
+                && !force_backward
+                && !looks_like_summary_line(desc_part.trim())
+            {
+                let desc_alpha = alpha_ratio(desc_part.trim());
+                let desc_clean = strip_sale_price_subtext(&desc_part);
                 deferred.push(DeferredTextOutcome::Item(ParsedTextItem {
-                    description: desc_part.clone(),
-                    category_source: desc_part,
+                    description: desc_clean.clone(),
+                    category_source: desc_clean,
                     price_cents,
                     quantity: 1,
                 }));
+                // Only block subsequent backward walks when desc_part is a
+                // genuine description. Low-alpha junk like "#E$" must stay
+                // walkable so the next price below can reach the real item
+                // sitting above the junk.
+                if desc_alpha >= 0.5 {
+                    used_text_lines[i] = true;
+                }
             } else {
                 let mut qty_info = Vec::new();
                 let mut qty_modifiers = Vec::new();
@@ -1204,6 +1361,11 @@ pub(crate) fn extract_text_items(
 
                 if is_priced_section_header {
                     for j in (i + 1)..normalized_lines.len().min(i + 5) {
+                        if used_text_lines[j] {
+                            // A used line marks the start of another item's
+                            // territory; don't walk past it.
+                            break;
+                        }
                         let next_line = normalized_lines[j].trim();
                         if next_line.is_empty()
                             || re_skip_patterns().is_match(next_line)
@@ -1220,7 +1382,15 @@ pub(crate) fn extract_text_items(
                         if cleaned_next.is_empty() || is_section_header_text(&cleaned_next) {
                             continue;
                         }
-                        if alpha_ratio(&cleaned_next) < 0.5 {
+                        // The `&& <Dept> price` section-header signal is strong:
+                        // the next non-section line is almost always the item
+                        // name even if it carries trailing OCR-mangled subtext
+                        // like `(125gx5)@8.99(1/$6.99)` that drags the alpha
+                        // ratio below 0.5. A more permissive threshold here lets
+                        // descriptions like "MN - Crispy Coffee Flavor 6*60g)..."
+                        // (ratio 0.46) pair correctly, while pure-noise lines
+                        // are still rejected.
+                        if alpha_ratio(&cleaned_next) < 0.35 {
                             continue;
                         }
                         found_desc = Some(cleaned_next);
@@ -1234,6 +1404,9 @@ pub(crate) fn extract_text_items(
 
                 if found_desc.is_none() && prefer_forward_desc {
                     for j in (i + 1)..normalized_lines.len().min(i + 5) {
+                        if used_text_lines[j] {
+                            break;
+                        }
                         let next_line = normalized_lines[j].trim();
                         if next_line.is_empty()
                             || re_skip_patterns().is_match(next_line)
@@ -1263,6 +1436,12 @@ pub(crate) fn extract_text_items(
                 if found_desc.is_none() {
                     let lower_bound = i.saturating_sub(5);
                     for j in (lower_bound..i).rev() {
+                        if used_text_lines[j] {
+                            // A used line marks the end of the previous item's
+                            // territory; don't walk past it to grab a description
+                            // belonging to an item we've already paired.
+                            break;
+                        }
                         let prev_line = normalized_lines[j].trim();
                         if Regex::new(&format!(r"^[\d.]+\s*{TAX_FLAG_CLASS}\s*$"))
                             .unwrap()
@@ -1322,6 +1501,55 @@ pub(crate) fn extract_text_items(
                     }
                 }
 
+                // Forward fallback: when the price line has no usable
+                // description on its own (empty / very short / weak-parenthetical
+                // like "(1kg)" or "()") and backward search returned nothing,
+                // try a couple of lines forward. This handles Foody Mart-style
+                // layouts where the price comes BEFORE the description.
+                if found_desc.is_none()
+                    && !is_priced_section_header
+                    && !prefer_forward_desc
+                    && (desc_part.is_empty() || desc_part.len() <= 3 || force_backward)
+                {
+                    for j in (i + 1)..normalized_lines.len().min(i + 3) {
+                        if used_text_lines[j] {
+                            break;
+                        }
+                        let next_line = normalized_lines[j].trim();
+                        if next_line.is_empty()
+                            || re_skip_patterns().is_match(next_line)
+                            || looks_like_summary_line(next_line)
+                            || looks_like_quantity_expression(next_line)
+                            || looks_like_onsale_marker(next_line)
+                            || line_has_trailing_price(next_line)
+                            || re_standalone_price_line().is_match(next_line)
+                            || re_long_digits_line().is_match(next_line)
+                        {
+                            continue;
+                        }
+                        let cleaned_next = strip_leading_receipt_codes(next_line);
+                        // Treat unpriced "Meat" / "Bakery" lines as legitimate
+                        // descriptions even though those words are also in the
+                        // section-name table — that's how Asian-grocery receipts
+                        // label the items.
+                        let is_generic_priced_label = matches!(
+                            cleaned_next.trim().to_ascii_uppercase().as_str(),
+                            "MEAT" | "BAKERY"
+                        );
+                        if cleaned_next.is_empty()
+                            || (is_section_header_text(&cleaned_next) && !is_generic_priced_label)
+                        {
+                            continue;
+                        }
+                        if alpha_ratio(&cleaned_next) < 0.5 {
+                            continue;
+                        }
+                        found_desc = Some(cleaned_next);
+                        found_desc_line_idx = Some(j);
+                        break;
+                    }
+                }
+
                 if let Some(mut found_desc_value) = found_desc {
                     if let Some(source_idx) = found_desc_line_idx {
                         found_desc_value = merge_description_context(
@@ -1352,12 +1580,16 @@ pub(crate) fn extract_text_items(
                         description_suffix = format!(" ({})", reversed.join(", "));
                     }
 
+                    let cleaned_desc = strip_sale_price_subtext(&found_desc_value);
                     deferred.push(DeferredTextOutcome::Item(ParsedTextItem {
-                        category_source: found_desc_value.clone(),
-                        description: format!("{found_desc_value}{description_suffix}"),
+                        category_source: cleaned_desc.clone(),
+                        description: format!("{cleaned_desc}{description_suffix}"),
                         price_cents,
                         quantity,
                     }));
+                    if let Some(idx) = found_desc_line_idx {
+                        used_text_lines[idx] = true;
+                    }
                 } else if price_cents > 0 {
                     let mut message =
                         format!("maybe missed item near price {}", format_cents(price_cents));

@@ -101,6 +101,24 @@ fn re_malformed_ocr_prefix() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"^\(H{1,2}E[DI]?\b").unwrap())
 }
 
+fn re_mangled_reg_marker() -> &'static Regex {
+    // Matches OCR-corrupted REG-price marker fragments where OCR mangled the
+    // leading R (into "#", "4", "@", "(") and/or dropped the G (so "REG$" was
+    // captured as "E$"). Also catches the "EREG" / "REG$" forms.
+    //
+    // Hits: "#EG", "4EG62.99", "(EG$5.99", "#E$", "#E$5.99", "REG$5.99",
+    // "EREG12.99". Misses real items because each branch requires the
+    // marker shape (non-alpha prefix or literal REG) and a tight content
+    // pattern, not just any text containing those substrings.
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"^(?:[^A-Za-z\s]{1,3}E(?:G(?:\$?\d+\.\d{2})?|\$(?:\d+\.\d{2})?)|E?REG\$?\d+\.\d{2})\.?$",
+        )
+        .unwrap()
+    })
+}
+
 fn re_multibuy_parenthetical() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"^\(\d+\s*/\s*for\s+\$[\d.]+\)").unwrap())
@@ -181,6 +199,16 @@ fn re_section_aisle_prefix() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"^[^A-Z0-9]*\d{1,2}\s*[-:]").unwrap())
 }
 
+fn re_dept_marker_prefix() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^[&8]{2}\.?\s").unwrap())
+}
+
+fn re_total_ocr_variants() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"T[O0C]TA[L1I]").unwrap())
+}
+
 fn re_leading_section_item_prefix() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -199,11 +227,13 @@ fn re_ascii_words() -> &'static Regex {
 fn re_price_word() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     // Trailing `-` is Costco's convention for discount/refund lines
-    // (e.g. TPD/<sku> 3.00-). The optional trailing letters are tax flags
-    // that can fuse with the price into a single OCR token: Costco's H/T/J
-    // and T&T's G (GST) / P (PST), and T&T may print several space-separated
+    // (e.g. TPD/<sku> 3.00-); LEADING `-` is Loblaws-family convention for
+    // discount lines (e.g. "Member Pricing MRJ -1.49"). Either marks the
+    // amount as negative. The optional trailing letters are tax flags that
+    // can fuse with the price into a single OCR token: Costco's H/T/J and
+    // T&T's G (GST) / P (PST), and T&T may print several space-separated
     // (e.g. "$6.87 G P").
-    RE.get_or_init(|| Regex::new(r"^\$?(\d+\.\d{2})(-?)(?:\s*[HhTtJjGgPp])*$").unwrap())
+    RE.get_or_init(|| Regex::new(r"^(-?)\$?(\d+\.\d{2})(-?)(?:\s*[HhTtJjGgPp])*$").unwrap())
 }
 
 fn re_embedded_trailing_price_word() -> &'static Regex {
@@ -401,6 +431,9 @@ fn is_section_header_text(text: &str) -> bool {
     let normalized = re_multi_spaces()
         .replace(&text.trim().to_ascii_uppercase(), " ")
         .to_string();
+    if re_dept_marker_prefix().is_match(&normalized) {
+        return true;
+    }
     if is_section_name(normalized.as_str()) {
         return true;
     }
@@ -428,10 +461,25 @@ fn is_summary_line(text: &str) -> bool {
         return false;
     }
     let upper = text.trim().to_ascii_uppercase();
+    // "Member Pricing" / "Manager's Special" rows on Loblaws-family receipts
+    // are line-item discounts (negative price), not membership/store-info
+    // metadata, so they must NOT match the `^MEMBER\b` arm of
+    // re_summary_patterns. Without this carve-out the discount line is
+    // filtered, the negative price is dropped, and the items sum overshoots
+    // the printed subtotal (RCSS rcss_20260130 drops -$1.49 and -$0.98).
+    if upper.starts_with("MEMBER PRICING")
+        || upper.starts_with("MANAGER'S SPECIAL")
+        || upper.starts_with("MANAGER SPECIAL")
+    {
+        return false;
+    }
     if re_summary_patterns().is_match(&upper) {
         return true;
     }
     if upper.contains("SUBTOTAL") || upper.contains("SUB TOTAL") || upper.contains("TOTAL") {
+        return true;
+    }
+    if re_total_ocr_variants().is_match(&upper) {
         return true;
     }
     if re_tax_tokens().is_match(&upper) {
@@ -576,11 +624,16 @@ fn is_price_word(text: &str) -> Option<i64> {
         .or_else(|| normalized.strip_prefix('w').map(str::trim_start))
         .unwrap_or(normalized.as_str());
     if let Some(captures) = re_price_word().captures(stripped) {
-        let value = parse_scaled_decimal(captures.get(1)?.as_str())?;
-        let is_negative = captures
-            .get(2)
+        let value = parse_scaled_decimal(captures.get(2)?.as_str())?;
+        let leading_minus = captures
+            .get(1)
             .map(|m| m.as_str() == "-")
             .unwrap_or(false);
+        let trailing_minus = captures
+            .get(3)
+            .map(|m| m.as_str() == "-")
+            .unwrap_or(false);
+        let is_negative = leading_minus || trailing_minus;
         return Some(if is_negative { -value } else { value });
     }
     if stripped.contains('@') || stripped.contains('/') {
@@ -654,6 +707,9 @@ fn is_valid_item_line(line: &ParsedLine, total_line_y: Option<f64>) -> bool {
         return false;
     }
     if re_malformed_ocr_prefix().is_match(&line.left_text) {
+        return false;
+    }
+    if re_mangled_reg_marker().is_match(line.left_text.trim()) {
         return false;
     }
     if line.left_text.len() < 8
@@ -1225,7 +1281,10 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
             };
             if chosen_distance <= direct_match_tolerance {
                 let description = clean_description(&all_lines[index].left_text);
-                if description.len() > 2 {
+                if description.len() > 2
+                    && !re_mangled_reg_marker().is_match(all_lines[index].left_text.trim())
+                    && !re_mangled_reg_marker().is_match(description.trim())
+                {
                     used_line_indices[index] = true;
                     items.push(SpatialExtractedItem {
                         description,
@@ -1244,7 +1303,7 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
             && !looks_like_quantity_expression(&source_line.left_text)
         {
             let description = clean_description(&source_line.left_text);
-            if description.len() > 2 {
+            if description.len() > 2 && !re_mangled_reg_marker().is_match(description.trim()) {
                 used_line_indices[price_candidate.source_line_index] = true;
                 items.push(SpatialExtractedItem {
                     description,
@@ -1305,7 +1364,7 @@ pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionO
                     continue;
                 }
                 let description = clean_description(&line.left_text);
-                if description.len() > 2 {
+                if description.len() > 2 && !re_mangled_reg_marker().is_match(description.trim()) {
                     used_line_indices[index] = true;
                     items.push(SpatialExtractedItem {
                         description,

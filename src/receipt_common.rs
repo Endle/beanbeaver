@@ -31,6 +31,16 @@ fn re_section_aisle_prefix() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"^[^A-Z0-9]*\d{1,2}\s*[-:]").unwrap())
 }
 
+fn re_dept_marker_prefix() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^[&8]{2}\.?\s").unwrap())
+}
+
+fn re_total_ocr_variants() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"T[O0C]TA[L1I]").unwrap())
+}
+
 fn re_summary_patterns() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -253,6 +263,9 @@ pub(crate) fn is_section_header_text(text: &str) -> bool {
         return false;
     }
     let normalized = collapse_internal_whitespace(text.trim()).to_ascii_uppercase();
+    if re_dept_marker_prefix().is_match(&normalized) {
+        return true;
+    }
     if SECTION_HEADERS.iter().any(|header| *header == normalized) {
         return true;
     }
@@ -288,6 +301,9 @@ pub(crate) fn looks_like_summary_line(text: &str) -> bool {
         return true;
     }
     if upper.contains("SUBTOTAL") || upper.contains("SUB TOTAL") || upper.contains("TOTAL") {
+        return true;
+    }
+    if re_total_ocr_variants().is_match(&upper) {
         return true;
     }
     if upper.contains("HST")
