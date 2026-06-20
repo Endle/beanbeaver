@@ -3,7 +3,7 @@
 Beanbeaver turns bank statements and grocery receipts into your Beancount ledger.
 
 
-** Two modes**
+**Two modes**
 1. Import credit card and chequing statements into Beancount
 2. Parse scanned grocery receipts into itemized expenses.
 
@@ -15,6 +15,18 @@ You can use either mode on its own, but using both brings the synergy of semi-au
 
 [Output: Itemized Beancount Record](https://github.com/Endle/beanbeaver/blob/master/demo/receipt_groups/tnt_20251202/2025-12-02_t_t_supermarket_32_70.beancount)
 
+
+## TUI (recommended)
+
+`bb-tui` is the ratatui dashboard that is becoming the primary UI. It starts the
+OCR container and the receipt upload server for you, shows the scanned/approved
+receipt queues, and drives review, imports, and matching from one screen.
+
+```bash
+pixi run bb-tui
+```
+
+The legacy `bb` CLI below still works but is being deprecated in favor of the TUI.
 
 ## CLI Usage
 
@@ -72,7 +84,8 @@ Then we use iOS shortcut or other tools to sent the receipt to this endpoint:
 curl -X POST "http://<LAN_IP>:8080/beanbeaver" -F file=@receipt.jpg
 ```
 
-The server always saves a draft to `receipts/scanned/` for later manual review.
+The server always saves a draft stage into the receipt's own directory
+(`receipts/<receipt-dir>/stages/`) for later manual review.
 
 On success the endpoint returns a JSON body that the iOS Shortcut can surface as a notification:
 
@@ -101,7 +114,9 @@ On failure the body carries an `error_code` (`ocr_unreachable`, `ocr_error`, `pa
 ```
 bb edit
 ```
-It will move `merchant.beancount` from `receipts/scanned` into `receipts/approved`
+It appends a review stage to the receipt's `stages/` directory, promoting the
+receipt from *scanned* to *approved*. Files never move between status trees —
+status is derived from the latest stage file.
 
 There are also helpers
 ```
@@ -117,11 +132,15 @@ Here comes the fun part.
 bb match
 ```
 
-It will match beancount records (from credit card statements) with receipts (in `/receipts/approved`)
+It will match beancount records (from credit card statements) with approved receipts.
 
 **Notes:**
-- `receipts/scanned/` means OCR+parser succeeded, but the draft is unreviewed and may contain errors.
-- `receipts/approved/` means the draft has been reviewed and edited by a human.
+- Each receipt chain lives in one directory: `receipts/<receipt-dir>/` with
+  `source/`, `ocr/`, `stages/`, and `rendered/` subdirectories.
+- Status comes from the latest file under `stages/`: *scanned* means OCR+parser
+  succeeded but the draft is unreviewed and may contain errors; *approved* means
+  the draft has been reviewed and edited by a human; *matched* means it has been
+  paired with a ledger transaction.
 - `bb edit` requires an interactive TTY.
 
 ## Development
