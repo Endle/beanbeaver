@@ -1,36 +1,36 @@
 #[derive(Clone, Debug)]
-pub(crate) struct FormatterItemInput {
-    pub(crate) description: String,
-    pub(crate) price: String,
-    pub(crate) quantity: i32,
-    pub(crate) posting_account: String,
+pub struct FormatterItemInput {
+    pub description: String,
+    pub price: String,
+    pub quantity: i32,
+    pub posting_account: String,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct FormatterWarningInput {
-    pub(crate) message: String,
-    pub(crate) after_item_index: Option<usize>,
+pub struct FormatterWarningInput {
+    pub message: String,
+    pub after_item_index: Option<usize>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct FormatterTenderInput {
-    pub(crate) amount: String,
-    pub(crate) account: Option<String>,
-    pub(crate) kind: String,
+pub struct FormatterTenderInput {
+    pub amount: String,
+    pub account: Option<String>,
+    pub kind: String,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct FormatterReceiptInput {
-    pub(crate) merchant: String,
-    pub(crate) date_iso: String,
-    pub(crate) date_is_placeholder: bool,
-    pub(crate) total: String,
-    pub(crate) tax: Option<String>,
-    pub(crate) image_filename: String,
-    pub(crate) raw_text: String,
-    pub(crate) items: Vec<FormatterItemInput>,
-    pub(crate) warnings: Vec<FormatterWarningInput>,
-    pub(crate) tenders: Vec<FormatterTenderInput>,
+pub struct FormatterReceiptInput {
+    pub merchant: String,
+    pub date_iso: String,
+    pub date_is_placeholder: bool,
+    pub total: String,
+    pub tax: Option<String>,
+    pub image_filename: String,
+    pub raw_text: String,
+    pub items: Vec<FormatterItemInput>,
+    pub warnings: Vec<FormatterWarningInput>,
+    pub tenders: Vec<FormatterTenderInput>,
 }
 
 fn pending_account_for_kind(kind: &str) -> &'static str {
@@ -86,22 +86,22 @@ fn build_payment_postings(
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct EnrichedPostingInput {
-    pub(crate) account: String,
-    pub(crate) number: Option<String>,
-    pub(crate) currency: Option<String>,
+pub struct EnrichedPostingInput {
+    pub account: String,
+    pub number: Option<String>,
+    pub currency: Option<String>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct EnrichedMatchInput {
-    pub(crate) transaction_date_iso: String,
-    pub(crate) payee: String,
-    pub(crate) narration: String,
-    pub(crate) postings: Vec<EnrichedPostingInput>,
-    pub(crate) file_path: String,
-    pub(crate) line_number: i32,
-    pub(crate) confidence: f64,
-    pub(crate) match_details: String,
+pub struct EnrichedMatchInput {
+    pub transaction_date_iso: String,
+    pub payee: String,
+    pub narration: String,
+    pub postings: Vec<EnrichedPostingInput>,
+    pub file_path: String,
+    pub line_number: i32,
+    pub confidence: f64,
+    pub match_details: String,
 }
 
 fn decimal_to_cents(value: &str) -> i64 {
@@ -250,7 +250,7 @@ fn inject_posting_warnings(
     output
 }
 
-pub(crate) fn format_parsed_receipt(
+pub fn format_parsed_receipt(
     receipt: &FormatterReceiptInput,
     credit_card_account: &str,
     image_sha256: Option<&str>,
@@ -357,7 +357,7 @@ pub(crate) fn format_parsed_receipt(
     lines.join("\n")
 }
 
-pub(crate) fn format_draft_beancount(
+pub fn format_draft_beancount(
     receipt: &FormatterReceiptInput,
     credit_card_account: &str,
 ) -> String {
@@ -447,7 +447,7 @@ pub(crate) fn format_draft_beancount(
     lines.join("\n")
 }
 
-pub(crate) fn generate_filename(
+pub fn generate_filename(
     date_iso: &str,
     date_is_placeholder: bool,
     merchant: &str,
@@ -480,7 +480,7 @@ pub(crate) fn generate_filename(
     format!("{date_str}-{merchant_clean}.beancount")
 }
 
-pub(crate) fn format_enriched_transaction(
+pub fn format_enriched_transaction(
     receipt: &FormatterReceiptInput,
     match_input: &EnrichedMatchInput,
     default_expense: &str,

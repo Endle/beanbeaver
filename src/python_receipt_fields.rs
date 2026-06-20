@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
 
-use crate::receipt_fields;
+use receipt_core::receipt_fields;
 
 #[pyfunction]
 fn receipt_extract_price_from_line(line: &str) -> Option<i64> {

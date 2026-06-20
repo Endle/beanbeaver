@@ -4,10 +4,10 @@ use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
 use std::collections::HashSet;
 
-use crate::receipt_categories;
-use crate::receipt_parse_helpers;
-use crate::receipt_parser;
-use crate::receipt_spatial;
+use receipt_core::receipt_categories;
+use receipt_core::receipt_parse_helpers;
+use receipt_core::receipt_parser;
+use receipt_core::receipt_spatial;
 
 #[derive(Clone, Debug)]
 struct PyRuleEntry {

@@ -7,46 +7,46 @@ use crate::receipt_spatial;
 use crate::receipt_text;
 
 #[derive(Clone, Debug)]
-pub(crate) struct ParserRuleLayers {
-    pub(crate) category_rules: receipt_categories::CategoryRuleLayers,
-    pub(crate) account_mapping: Vec<(String, String)>,
+pub struct ParserRuleLayers {
+    pub category_rules: receipt_categories::CategoryRuleLayers,
+    pub account_mapping: Vec<(String, String)>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ParsedReceiptItem {
-    pub(crate) description: String,
-    pub(crate) price: String,
-    pub(crate) quantity: i32,
-    pub(crate) category: Option<String>,
+pub struct ParsedReceiptItem {
+    pub description: String,
+    pub price: String,
+    pub quantity: i32,
+    pub category: Option<String>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ParsedReceiptWarning {
-    pub(crate) message: String,
-    pub(crate) after_item_index: Option<usize>,
+pub struct ParsedReceiptWarning {
+    pub message: String,
+    pub after_item_index: Option<usize>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ParsedReceiptTender {
-    pub(crate) amount: String,
-    pub(crate) account: Option<String>,
-    pub(crate) kind: String,
-    pub(crate) raw_label: String,
+pub struct ParsedReceiptTender {
+    pub amount: String,
+    pub account: Option<String>,
+    pub kind: String,
+    pub raw_label: String,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ParsedReceiptData {
-    pub(crate) merchant: String,
-    pub(crate) date: Option<(i32, u32, u32)>,
-    pub(crate) date_is_placeholder: bool,
-    pub(crate) total: String,
-    pub(crate) items: Vec<ParsedReceiptItem>,
-    pub(crate) tax: Option<String>,
-    pub(crate) subtotal: Option<String>,
-    pub(crate) raw_text: String,
-    pub(crate) image_filename: String,
-    pub(crate) warnings: Vec<ParsedReceiptWarning>,
-    pub(crate) tenders: Vec<ParsedReceiptTender>,
+pub struct ParsedReceiptData {
+    pub merchant: String,
+    pub date: Option<(i32, u32, u32)>,
+    pub date_is_placeholder: bool,
+    pub total: String,
+    pub items: Vec<ParsedReceiptItem>,
+    pub tax: Option<String>,
+    pub subtotal: Option<String>,
+    pub raw_text: String,
+    pub image_filename: String,
+    pub warnings: Vec<ParsedReceiptWarning>,
+    pub tenders: Vec<ParsedReceiptTender>,
 }
 
 /// Some merchants print a line-item discount with NO sign — e.g. FreshCo's
@@ -124,7 +124,7 @@ fn categorize_description(description: &str, rule_layers: &ParserRuleLayers) -> 
     resolve_account_target(category_key.as_deref(), rule_layers, None)
 }
 
-pub(crate) fn parse_receipt(
+pub fn parse_receipt(
     full_text: &str,
     pages_for_helper: &[receipt_parse_helpers::MerchantPageInput],
     pages_for_spatial: &[receipt_spatial::PageInput],

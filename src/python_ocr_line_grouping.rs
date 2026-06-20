@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
 
-use crate::ocr_line_grouping;
+use receipt_core::ocr_line_grouping;
 use crate::python_detection_normalization::{to_logic, PyDetection};
 
 /// Group detections into reading-order lines. Returns, per line, the source

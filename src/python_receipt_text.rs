@@ -2,7 +2,7 @@ use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
 use std::collections::HashSet;
 
-use crate::receipt_text;
+use receipt_core::receipt_text;
 
 #[pyfunction]
 fn receipt_extract_text_items(

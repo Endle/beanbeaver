@@ -3,20 +3,20 @@ use std::cmp::Reverse;
 use std::sync::OnceLock;
 
 #[derive(Clone, Debug)]
-pub(crate) struct MerchantWordInput {
-    pub(crate) confidence: f64,
-    pub(crate) has_bbox: bool,
+pub struct MerchantWordInput {
+    pub confidence: f64,
+    pub has_bbox: bool,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct MerchantLineInput {
-    pub(crate) text: String,
-    pub(crate) words: Vec<MerchantWordInput>,
+pub struct MerchantLineInput {
+    pub text: String,
+    pub words: Vec<MerchantWordInput>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct MerchantPageInput {
-    pub(crate) lines: Vec<MerchantLineInput>,
+pub struct MerchantPageInput {
+    pub lines: Vec<MerchantLineInput>,
 }
 
 fn re_numeric_date_like() -> &'static Regex {
@@ -43,7 +43,7 @@ fn clean_merchant_candidate(value: &str) -> String {
         .to_string()
 }
 
-pub(crate) fn extract_merchant_with_confidence(pages: &[MerchantPageInput]) -> Option<String> {
+pub fn extract_merchant_with_confidence(pages: &[MerchantPageInput]) -> Option<String> {
     if pages.is_empty() {
         return None;
     }
@@ -82,7 +82,7 @@ pub(crate) fn extract_merchant_with_confidence(pages: &[MerchantPageInput]) -> O
     None
 }
 
-pub(crate) fn extract_merchant(
+pub fn extract_merchant(
     lines: &[String],
     full_text: &str,
     pages: &[MerchantPageInput],
@@ -146,7 +146,7 @@ pub(crate) fn extract_merchant(
     "UNKNOWN_MERCHANT".to_string()
 }
 
-pub(crate) fn has_useful_bbox_data(pages: &[MerchantPageInput]) -> bool {
+pub fn has_useful_bbox_data(pages: &[MerchantPageInput]) -> bool {
     if pages.is_empty() {
         return false;
     }
@@ -160,7 +160,7 @@ pub(crate) fn has_useful_bbox_data(pages: &[MerchantPageInput]) -> bool {
     false
 }
 
-pub(crate) fn is_spatial_layout_receipt(full_text: &str) -> bool {
+pub fn is_spatial_layout_receipt(full_text: &str) -> bool {
     let full_text_upper = full_text.to_ascii_uppercase();
     for merchant in [
         "T&T",

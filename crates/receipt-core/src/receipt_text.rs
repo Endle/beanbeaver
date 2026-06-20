@@ -3,17 +3,17 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 #[derive(Clone, Debug)]
-pub(crate) struct ParsedTextItem {
-    pub(crate) description: String,
-    pub(crate) category_source: String,
-    pub(crate) price_cents: i64,
-    pub(crate) quantity: i32,
+pub struct ParsedTextItem {
+    pub description: String,
+    pub category_source: String,
+    pub price_cents: i64,
+    pub quantity: i32,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct TextParserWarning {
-    pub(crate) message: String,
-    pub(crate) after_item_index: Option<usize>,
+pub struct TextParserWarning {
+    pub message: String,
+    pub after_item_index: Option<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -989,7 +989,7 @@ fn reconcile_malformed_price_candidates(
     })
 }
 
-pub(crate) fn extract_text_items(
+pub fn extract_text_items(
     lines: &[String],
     summary_amounts: &HashSet<i64>,
 ) -> (Vec<ParsedTextItem>, Vec<TextParserWarning>) {

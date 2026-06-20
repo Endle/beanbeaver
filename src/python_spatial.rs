@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
 
-use crate::spatial;
+use receipt_core::spatial;
 
 #[derive(FromPyObject)]
 struct PySpatialLineCandidateInput {

@@ -4,182 +4,182 @@ const SCHEMA_VERSION: &str = "2";
 const STAGE_PARSED: &str = "parsed";
 
 #[derive(Clone, Debug)]
-pub(crate) struct StageRuleLayers {
-    pub(crate) category_rules: receipt_categories::CategoryRuleLayers,
-    pub(crate) account_mapping: Vec<(String, String)>,
+pub struct StageRuleLayers {
+    pub category_rules: receipt_categories::CategoryRuleLayers,
+    pub account_mapping: Vec<(String, String)>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ReceiptItemInput {
-    pub(crate) description: String,
-    pub(crate) price: Option<String>,
-    pub(crate) quantity: i32,
-    pub(crate) category: Option<String>,
+pub struct ReceiptItemInput {
+    pub description: String,
+    pub price: Option<String>,
+    pub quantity: i32,
+    pub category: Option<String>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ReceiptWarningInput {
-    pub(crate) message: String,
-    pub(crate) after_item_index: Option<usize>,
+pub struct ReceiptWarningInput {
+    pub message: String,
+    pub after_item_index: Option<usize>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct TenderInput {
-    pub(crate) amount: String,
-    pub(crate) account: Option<String>,
-    pub(crate) kind: String,
-    pub(crate) raw_label: String,
+pub struct TenderInput {
+    pub amount: String,
+    pub account: Option<String>,
+    pub kind: String,
+    pub raw_label: String,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ReceiptInput {
-    pub(crate) merchant: String,
-    pub(crate) date_iso: String,
-    pub(crate) total: String,
-    pub(crate) date_is_placeholder: bool,
-    pub(crate) items: Vec<ReceiptItemInput>,
-    pub(crate) tax: Option<String>,
-    pub(crate) subtotal: Option<String>,
-    pub(crate) raw_text: String,
-    pub(crate) image_filename: String,
-    pub(crate) warnings: Vec<ReceiptWarningInput>,
-    pub(crate) tenders: Vec<TenderInput>,
+pub struct ReceiptInput {
+    pub merchant: String,
+    pub date_iso: String,
+    pub total: String,
+    pub date_is_placeholder: bool,
+    pub items: Vec<ReceiptItemInput>,
+    pub tax: Option<String>,
+    pub subtotal: Option<String>,
+    pub raw_text: String,
+    pub image_filename: String,
+    pub warnings: Vec<ReceiptWarningInput>,
+    pub tenders: Vec<TenderInput>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ClassificationData {
-    pub(crate) category: Option<String>,
-    pub(crate) tags: Vec<String>,
+pub struct ClassificationData {
+    pub category: Option<String>,
+    pub tags: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct StructuredWarning {
-    pub(crate) message: String,
-    pub(crate) source: String,
-    pub(crate) stage: String,
+pub struct StructuredWarning {
+    pub message: String,
+    pub source: String,
+    pub stage: String,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct BuiltStageItem {
-    pub(crate) id: String,
-    pub(crate) description: String,
-    pub(crate) price: Option<String>,
-    pub(crate) quantity: i32,
-    pub(crate) classification: Option<ClassificationData>,
-    pub(crate) warnings: Vec<StructuredWarning>,
-    pub(crate) source: String,
+pub struct BuiltStageItem {
+    pub id: String,
+    pub description: String,
+    pub price: Option<String>,
+    pub quantity: i32,
+    pub classification: Option<ClassificationData>,
+    pub warnings: Vec<StructuredWarning>,
+    pub source: String,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct BuiltStageMeta {
-    pub(crate) schema_version: String,
-    pub(crate) receipt_id: String,
-    pub(crate) stage: String,
-    pub(crate) stage_index: i32,
-    pub(crate) created_at: String,
-    pub(crate) created_by: String,
-    pub(crate) pass_name: String,
-    pub(crate) image_filename: Option<String>,
-    pub(crate) image_sha256: Option<String>,
-    pub(crate) ocr_json_path: Option<String>,
+pub struct BuiltStageMeta {
+    pub schema_version: String,
+    pub receipt_id: String,
+    pub stage: String,
+    pub stage_index: i32,
+    pub created_at: String,
+    pub created_by: String,
+    pub pass_name: String,
+    pub image_filename: Option<String>,
+    pub image_sha256: Option<String>,
+    pub ocr_json_path: Option<String>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct BuiltStageReceipt {
-    pub(crate) merchant: Option<String>,
-    pub(crate) date: Option<String>,
-    pub(crate) currency: String,
-    pub(crate) subtotal: Option<String>,
-    pub(crate) tax: Option<String>,
-    pub(crate) total: Option<String>,
+pub struct BuiltStageReceipt {
+    pub merchant: Option<String>,
+    pub date: Option<String>,
+    pub currency: String,
+    pub subtotal: Option<String>,
+    pub tax: Option<String>,
+    pub total: Option<String>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct BuiltStageTender {
-    pub(crate) amount: String,
-    pub(crate) account: Option<String>,
-    pub(crate) kind: String,
-    pub(crate) raw_label: String,
+pub struct BuiltStageTender {
+    pub amount: String,
+    pub account: Option<String>,
+    pub kind: String,
+    pub raw_label: String,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct BuiltStageDocument {
-    pub(crate) meta: BuiltStageMeta,
-    pub(crate) receipt: BuiltStageReceipt,
-    pub(crate) items: Vec<BuiltStageItem>,
-    pub(crate) warnings: Vec<StructuredWarning>,
-    pub(crate) raw_text: Option<String>,
-    pub(crate) tenders: Vec<BuiltStageTender>,
+pub struct BuiltStageDocument {
+    pub meta: BuiltStageMeta,
+    pub receipt: BuiltStageReceipt,
+    pub items: Vec<BuiltStageItem>,
+    pub warnings: Vec<StructuredWarning>,
+    pub raw_text: Option<String>,
+    pub tenders: Vec<BuiltStageTender>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct StageDocumentItemInput {
-    pub(crate) removed: bool,
-    pub(crate) description: Option<String>,
-    pub(crate) price: Option<String>,
-    pub(crate) quantity: Option<i32>,
-    pub(crate) classification: Option<ClassificationData>,
-    pub(crate) warning_messages: Vec<String>,
+pub struct StageDocumentItemInput {
+    pub removed: bool,
+    pub description: Option<String>,
+    pub price: Option<String>,
+    pub quantity: Option<i32>,
+    pub classification: Option<ClassificationData>,
+    pub warning_messages: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct StageDocumentTenderInput {
-    pub(crate) amount: Option<String>,
-    pub(crate) account: Option<String>,
-    pub(crate) kind: Option<String>,
-    pub(crate) raw_label: Option<String>,
-    pub(crate) removed: bool,
+pub struct StageDocumentTenderInput {
+    pub amount: Option<String>,
+    pub account: Option<String>,
+    pub kind: Option<String>,
+    pub raw_label: Option<String>,
+    pub removed: bool,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct StageDocumentInput {
-    pub(crate) merchant: Option<String>,
-    pub(crate) date_iso: Option<String>,
-    pub(crate) total: Option<String>,
-    pub(crate) tax: Option<String>,
-    pub(crate) subtotal: Option<String>,
-    pub(crate) raw_text: String,
-    pub(crate) image_filename: String,
-    pub(crate) items: Vec<StageDocumentItemInput>,
-    pub(crate) top_level_warning_messages: Vec<String>,
-    pub(crate) tenders: Vec<StageDocumentTenderInput>,
+pub struct StageDocumentInput {
+    pub merchant: Option<String>,
+    pub date_iso: Option<String>,
+    pub total: Option<String>,
+    pub tax: Option<String>,
+    pub subtotal: Option<String>,
+    pub raw_text: String,
+    pub image_filename: String,
+    pub items: Vec<StageDocumentItemInput>,
+    pub top_level_warning_messages: Vec<String>,
+    pub tenders: Vec<StageDocumentTenderInput>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ResolvedReceiptItem {
-    pub(crate) description: String,
-    pub(crate) price: String,
-    pub(crate) quantity: i32,
-    pub(crate) category: Option<String>,
+pub struct ResolvedReceiptItem {
+    pub description: String,
+    pub price: String,
+    pub quantity: i32,
+    pub category: Option<String>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ResolvedReceiptWarning {
-    pub(crate) message: String,
-    pub(crate) after_item_index: Option<usize>,
+pub struct ResolvedReceiptWarning {
+    pub message: String,
+    pub after_item_index: Option<usize>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ResolvedTender {
-    pub(crate) amount: String,
-    pub(crate) account: Option<String>,
-    pub(crate) kind: String,
-    pub(crate) raw_label: String,
+pub struct ResolvedTender {
+    pub amount: String,
+    pub account: Option<String>,
+    pub kind: String,
+    pub raw_label: String,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ResolvedReceiptData {
-    pub(crate) merchant: String,
-    pub(crate) date_iso: Option<String>,
-    pub(crate) date_is_placeholder: bool,
-    pub(crate) total: String,
-    pub(crate) tax: Option<String>,
-    pub(crate) subtotal: Option<String>,
-    pub(crate) raw_text: String,
-    pub(crate) image_filename: String,
-    pub(crate) items: Vec<ResolvedReceiptItem>,
-    pub(crate) warnings: Vec<ResolvedReceiptWarning>,
-    pub(crate) tenders: Vec<ResolvedTender>,
+pub struct ResolvedReceiptData {
+    pub merchant: String,
+    pub date_iso: Option<String>,
+    pub date_is_placeholder: bool,
+    pub total: String,
+    pub tax: Option<String>,
+    pub subtotal: Option<String>,
+    pub raw_text: String,
+    pub image_filename: String,
+    pub items: Vec<ResolvedReceiptItem>,
+    pub warnings: Vec<ResolvedReceiptWarning>,
+    pub tenders: Vec<ResolvedTender>,
 }
 
 fn legacy_account_alias(target: &str) -> Option<&'static str> {
@@ -250,7 +250,7 @@ fn resolve_account_target(
     }
 }
 
-pub(crate) fn classify_item_semantic(
+pub fn classify_item_semantic(
     description: &str,
     rule_layers: &StageRuleLayers,
     default_category: Option<String>,
@@ -267,7 +267,7 @@ pub(crate) fn classify_item_semantic(
     Some(ClassificationData { category, tags })
 }
 
-pub(crate) fn build_parsed_receipt_stage(
+pub fn build_parsed_receipt_stage(
     receipt: &ReceiptInput,
     rule_layers: &StageRuleLayers,
     receipt_id: &str,
@@ -353,7 +353,7 @@ pub(crate) fn build_parsed_receipt_stage(
     }
 }
 
-pub(crate) fn get_stage_summary(
+pub fn get_stage_summary(
     document: &StageDocumentInput,
 ) -> (Option<String>, Option<String>, Option<String>) {
     (
@@ -363,7 +363,7 @@ pub(crate) fn get_stage_summary(
     )
 }
 
-pub(crate) fn account_from_classification(
+pub fn account_from_classification(
     classification: Option<&ClassificationData>,
     rule_layers: &StageRuleLayers,
 ) -> Option<String> {
@@ -389,7 +389,7 @@ pub(crate) fn account_from_classification(
     None
 }
 
-pub(crate) fn resolve_stage_document(
+pub fn resolve_stage_document(
     document: &StageDocumentInput,
     rule_layers: &StageRuleLayers,
 ) -> ResolvedReceiptData {
