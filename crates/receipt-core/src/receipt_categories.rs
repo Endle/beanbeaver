@@ -8,44 +8,44 @@ const FUZZY_THRESHOLD_MEDIUM: f64 = 0.80;
 const FUZZY_THRESHOLD_LONG: f64 = 0.70;
 
 #[derive(Clone, Debug)]
-pub(crate) struct CategoryRule {
-    pub(crate) keywords: Vec<String>,
-    pub(crate) category: Option<String>,
-    pub(crate) tags: Vec<String>,
-    pub(crate) priority: i32,
+pub struct CategoryRule {
+    pub keywords: Vec<String>,
+    pub category: Option<String>,
+    pub tags: Vec<String>,
+    pub priority: i32,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct CategoryRuleLayers {
-    pub(crate) rules: Vec<CategoryRule>,
-    pub(crate) exact_only_keywords: HashSet<String>,
-    pub(crate) account_mapping: HashMap<String, String>,
+pub struct CategoryRuleLayers {
+    pub rules: Vec<CategoryRule>,
+    pub exact_only_keywords: HashSet<String>,
+    pub account_mapping: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct BuildRuleEntry {
-    pub(crate) keywords: Vec<String>,
-    pub(crate) target: Option<String>,
-    pub(crate) tags: Vec<String>,
-    pub(crate) priority: i32,
-    pub(crate) exact_only: bool,
+pub struct BuildRuleEntry {
+    pub keywords: Vec<String>,
+    pub target: Option<String>,
+    pub tags: Vec<String>,
+    pub priority: i32,
+    pub exact_only: bool,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct BuildClassifierConfig {
-    pub(crate) exact_only_keywords: Vec<String>,
-    pub(crate) rules: Vec<BuildRuleEntry>,
+pub struct BuildClassifierConfig {
+    pub exact_only_keywords: Vec<String>,
+    pub rules: Vec<BuildRuleEntry>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct RuleMatch {
-    pub(crate) category: Option<String>,
-    pub(crate) tags: Vec<String>,
-    pub(crate) matched_keyword: String,
-    pub(crate) priority: i32,
-    pub(crate) keyword_length: usize,
-    pub(crate) is_exact: bool,
-    pub(crate) rule_index: usize,
+pub struct RuleMatch {
+    pub category: Option<String>,
+    pub tags: Vec<String>,
+    pub matched_keyword: String,
+    pub priority: i32,
+    pub keyword_length: usize,
+    pub is_exact: bool,
+    pub rule_index: usize,
 }
 
 fn re_word_token() -> &'static Regex {
@@ -210,7 +210,7 @@ fn fuzzy_contains(keyword: &str, description: &str, threshold: Option<f64>) -> (
     }
 }
 
-pub(crate) fn find_all_matches(
+pub fn find_all_matches(
     description: &str,
     rule_layers: &CategoryRuleLayers,
 ) -> Vec<RuleMatch> {
@@ -317,7 +317,7 @@ fn normalize_legacy_account_target(target: &str) -> String {
     legacy_account_alias(target).unwrap_or(target).to_string()
 }
 
-pub(crate) fn resolve_account_target(
+pub fn resolve_account_target(
     target: Option<&str>,
     account_mapping: &HashMap<String, String>,
     default: Option<&str>,
@@ -341,7 +341,7 @@ pub(crate) fn resolve_account_target(
     }
 }
 
-pub(crate) fn build_rule_layers(
+pub fn build_rule_layers(
     default_account_mapping: HashMap<String, String>,
     classifier_configs: Vec<BuildClassifierConfig>,
     account_configs: Vec<HashMap<String, String>>,
@@ -398,7 +398,7 @@ pub(crate) fn build_rule_layers(
     }
 }
 
-pub(crate) fn classify_item_key(
+pub fn classify_item_key(
     description: &str,
     rule_layers: &CategoryRuleLayers,
     default: Option<String>,
@@ -411,7 +411,7 @@ pub(crate) fn classify_item_key(
     best.and_then(|matched| matched.category).or(default)
 }
 
-pub(crate) fn classify_item_tags(
+pub fn classify_item_tags(
     description: &str,
     rule_layers: &CategoryRuleLayers,
 ) -> Vec<String> {
@@ -430,7 +430,7 @@ pub(crate) fn classify_item_tags(
     tags
 }
 
-pub(crate) fn list_item_categories(rule_layers: &CategoryRuleLayers) -> Vec<(String, String)> {
+pub fn list_item_categories(rule_layers: &CategoryRuleLayers) -> Vec<(String, String)> {
     let mut categories = HashSet::new();
 
     categories.extend(rule_layers.account_mapping.keys().cloned());
@@ -462,7 +462,7 @@ pub(crate) fn list_item_categories(rule_layers: &CategoryRuleLayers) -> Vec<(Str
         .collect()
 }
 
-pub(crate) fn sorted_matches_for_debug(
+pub fn sorted_matches_for_debug(
     description: &str,
     rule_layers: &CategoryRuleLayers,
 ) -> Vec<RuleMatch> {

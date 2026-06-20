@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
 
-use crate::detection_normalization as logic;
+use receipt_core::detection_normalization as logic;
 
 /// Numeric view of a Python detection dict. Missing numeric fields default to
 /// 0.0 and a missing/blank text to the empty string so the noop and partial

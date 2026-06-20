@@ -2,6 +2,7 @@
 name = "bb-tui"
 version = "0.1.0"
 edition = "2021"
+publish = false
 
 [lib]
 name = "_rust_matcher"
@@ -14,7 +15,11 @@ path = "src/main.rs"
 [package.metadata.maturin]
 name = "beanbeaver._rust_matcher"
 
+[workspace]
+members = ["crates/receipt-core"]
+
 [dependencies]
+receipt-core = { path = "crates/receipt-core" }
 crossterm = "0.28"
 pyo3 = { version = "0.28", features = ["extension-module"] }
 ratatui = "0.29"

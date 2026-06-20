@@ -3,10 +3,10 @@ use std::cmp::Ordering;
 use std::sync::OnceLock;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct SimpleDate {
-    pub(crate) year: i32,
-    pub(crate) month: u32,
-    pub(crate) day: u32,
+pub struct SimpleDate {
+    pub year: i32,
+    pub month: u32,
+    pub day: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -107,7 +107,7 @@ fn parse_cents(token: &str) -> Option<i64> {
     Some(dollars * 100 + cents)
 }
 
-pub(crate) fn extract_price_from_line(line: &str) -> Option<i64> {
+pub fn extract_price_from_line(line: &str) -> Option<i64> {
     let normalized = normalize_decimal_spacing(line);
     for regex in [re_price_end(), re_price_anywhere()] {
         if let Some(captures) = regex.captures(&normalized) {
@@ -133,7 +133,7 @@ fn extract_max_price_from_line(line: &str) -> Option<i64> {
         .max()
 }
 
-pub(crate) fn extract_total(lines: &[String]) -> i64 {
+pub fn extract_total(lines: &[String]) -> i64 {
     const EXCLUDED_PHRASES: [&str; 6] = [
         "TOTAL DISCOUNT",
         "TOTAL DISCOUNT(S)",
@@ -239,7 +239,7 @@ pub(crate) fn extract_total(lines: &[String]) -> i64 {
     0
 }
 
-pub(crate) fn extract_tax(lines: &[String]) -> Option<i64> {
+pub fn extract_tax(lines: &[String]) -> Option<i64> {
     for idx in (0..lines.len()).rev() {
         let line_upper = lines[idx].to_ascii_uppercase();
         if line_upper.contains("SUBTOTAL") || line_upper.contains("SUB TOTAL") {
@@ -309,10 +309,10 @@ fn re_subtotal_label() -> &'static Regex {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct TenderLine {
-    pub(crate) raw_label: String,
-    pub(crate) amount_cents: i64,
-    pub(crate) kind: &'static str,
+pub struct TenderLine {
+    pub raw_label: String,
+    pub amount_cents: i64,
+    pub kind: &'static str,
 }
 
 fn classify_tender_line(line_upper: &str) -> Option<&'static str> {
@@ -386,7 +386,7 @@ fn trim_tender_label(line: &str) -> String {
 /// next standalone-amount line. Reconcile against `total_cents`: if the sum of
 /// detected tenders is within $0.05 of the total, return them; otherwise return
 /// an empty vec so the caller falls back to the single-payment shape.
-pub(crate) fn extract_tenders(lines: &[String], total_cents: i64) -> Vec<TenderLine> {
+pub fn extract_tenders(lines: &[String], total_cents: i64) -> Vec<TenderLine> {
     if total_cents <= 0 || lines.is_empty() {
         return Vec::new();
     }
@@ -432,7 +432,7 @@ pub(crate) fn extract_tenders(lines: &[String], total_cents: i64) -> Vec<TenderL
     tenders
 }
 
-pub(crate) fn extract_subtotal(lines: &[String]) -> Option<i64> {
+pub fn extract_subtotal(lines: &[String]) -> Option<i64> {
     for (idx, line) in lines.iter().enumerate() {
         let line_upper = line.to_ascii_uppercase();
         if re_subtotal_label().is_match(&line_upper) {
@@ -663,7 +663,7 @@ fn compare_ranked_candidates(left: &RankedDateCandidate, right: &RankedDateCandi
         .then_with(|| left.start.cmp(&right.start))
 }
 
-pub(crate) fn extract_date(
+pub fn extract_date(
     lines: &[String],
     full_text: &str,
     current_year: i32,

@@ -7,13 +7,13 @@ const SECTION_HEADERS: &[&str] = &[
 ];
 
 #[derive(Clone, Debug)]
-pub(crate) struct QuantityModifier {
-    pub(crate) quantity: i32,
-    pub(crate) unit_price_scaled: Option<i64>,
-    pub(crate) weight: Option<String>,
-    pub(crate) deal_price_scaled: Option<i64>,
-    pub(crate) pattern_type: String,
-    pub(crate) raw_line: String,
+pub struct QuantityModifier {
+    pub quantity: i32,
+    pub unit_price_scaled: Option<i64>,
+    pub weight: Option<String>,
+    pub deal_price_scaled: Option<i64>,
+    pub pattern_type: String,
+    pub raw_line: String,
 }
 
 fn re_spaced_decimal() -> &'static Regex {
@@ -231,7 +231,7 @@ fn parse_decimal_scaled(value: &str, scale: i64) -> Option<i64> {
     Some(if negative { -scaled } else { scaled })
 }
 
-pub(crate) fn parse_scaled_4(value: &str) -> Option<i64> {
+pub fn parse_scaled_4(value: &str) -> Option<i64> {
     parse_decimal_scaled(value, 10_000)
 }
 
@@ -254,11 +254,11 @@ fn collapse_internal_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-pub(crate) fn normalize_decimal_spacing(text: &str) -> String {
+pub fn normalize_decimal_spacing(text: &str) -> String {
     re_spaced_decimal().replace_all(text, "$1.$2").to_string()
 }
 
-pub(crate) fn is_section_header_text(text: &str) -> bool {
+pub fn is_section_header_text(text: &str) -> bool {
     if text.trim().is_empty() {
         return false;
     }
@@ -284,7 +284,7 @@ pub(crate) fn is_section_header_text(text: &str) -> bool {
     false
 }
 
-pub(crate) fn strip_leading_receipt_codes(text: &str) -> String {
+pub fn strip_leading_receipt_codes(text: &str) -> String {
     let cleaned = re_quantity_prefix().replace(text.trim(), "");
     re_long_leading_sku()
         .replace(cleaned.as_ref(), "")
@@ -292,7 +292,7 @@ pub(crate) fn strip_leading_receipt_codes(text: &str) -> String {
         .to_string()
 }
 
-pub(crate) fn looks_like_summary_line(text: &str) -> bool {
+pub fn looks_like_summary_line(text: &str) -> bool {
     if text.trim().is_empty() {
         return false;
     }
@@ -319,11 +319,11 @@ pub(crate) fn looks_like_summary_line(text: &str) -> bool {
             .any(|tag| upper.contains(tag))
 }
 
-pub(crate) fn looks_like_receipt_metadata_line(text: &str) -> bool {
+pub fn looks_like_receipt_metadata_line(text: &str) -> bool {
     !text.trim().is_empty() && re_receipt_metadata_patterns().is_match(text.trim())
 }
 
-pub(crate) fn line_has_trailing_price(text: &str) -> bool {
+pub fn line_has_trailing_price(text: &str) -> bool {
     if text.trim().is_empty() {
         return false;
     }
@@ -331,7 +331,7 @@ pub(crate) fn line_has_trailing_price(text: &str) -> bool {
     re_trailing_price().is_match(&normalized)
 }
 
-pub(crate) fn looks_like_onsale_marker(text: &str) -> bool {
+pub fn looks_like_onsale_marker(text: &str) -> bool {
     if text.trim().is_empty() {
         return false;
     }
@@ -347,14 +347,14 @@ pub(crate) fn looks_like_onsale_marker(text: &str) -> bool {
     re_onsale_marker().is_match(&compact)
 }
 
-pub(crate) fn is_priced_generic_item_label(left_text: &str, full_text: &str) -> bool {
+pub fn is_priced_generic_item_label(left_text: &str, full_text: &str) -> bool {
     line_has_trailing_price(full_text)
         && GENERIC_PRICED_ITEM_LABELS
             .iter()
             .any(|label| *label == left_text.trim().to_ascii_uppercase())
 }
 
-pub(crate) fn parse_quantity_modifier(line: &str) -> Option<QuantityModifier> {
+pub fn parse_quantity_modifier(line: &str) -> Option<QuantityModifier> {
     let normalized = normalize_decimal_spacing(line.trim());
 
     if let Some(captures) = re_count_at_price().captures(&normalized) {
@@ -397,7 +397,7 @@ pub(crate) fn parse_quantity_modifier(line: &str) -> Option<QuantityModifier> {
     None
 }
 
-pub(crate) fn validate_quantity_price(
+pub fn validate_quantity_price(
     total_price_scaled: i64,
     modifier: &QuantityModifier,
     tolerance_scaled: i64,
@@ -414,7 +414,7 @@ pub(crate) fn validate_quantity_price(
     }
 }
 
-pub(crate) fn looks_like_quantity_expression(text: &str) -> bool {
+pub fn looks_like_quantity_expression(text: &str) -> bool {
     let normalized = normalize_decimal_spacing(text.trim());
     if normalized.is_empty() {
         return false;
@@ -454,7 +454,7 @@ pub(crate) fn looks_like_quantity_expression(text: &str) -> bool {
         || re_prefixed_paren_for_price().is_match(&normalized)
 }
 
-pub(crate) fn extract_price_word(text: &str) -> Option<String> {
+pub fn extract_price_word(text: &str) -> Option<String> {
     let normalized = normalize_decimal_spacing(text.trim());
     let normalized = normalized
         .trim_start_matches(|ch: char| ch == 'W' || ch == 'w')
@@ -464,7 +464,7 @@ pub(crate) fn extract_price_word(text: &str) -> Option<String> {
     Some(captures.get(1)?.as_str().to_string())
 }
 
-pub(crate) fn clean_description(description: &str) -> String {
+pub fn clean_description(description: &str) -> String {
     let mut cleaned = description.to_string();
     cleaned = re_quantity_prefix().replace(&cleaned, "").into_owned();
     cleaned = re_remove_sale_marker()
@@ -498,6 +498,6 @@ pub(crate) fn clean_description(description: &str) -> String {
         .to_string()
 }
 
-pub(crate) fn format_scaled_4(value: i64) -> String {
+pub fn format_scaled_4(value: i64) -> String {
     format_scaled_decimal(value, 10_000)
 }

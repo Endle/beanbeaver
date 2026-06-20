@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
 
-use crate::receipt_parse_helpers;
+use receipt_core::receipt_parse_helpers;
 
 #[derive(Clone, Debug)]
 struct PyMerchantWordInput {

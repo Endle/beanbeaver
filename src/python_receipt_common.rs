@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
 
-use crate::receipt_common;
+use receipt_core::receipt_common;
 
 fn decimalish_to_string(value: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
     if value.is_none() {

@@ -49,7 +49,7 @@ fn price_text_re() -> &'static Regex {
 }
 
 /// Vertical overlap ratio test between two detections.
-pub(crate) fn boxes_overlap_y(a: &Detection, b: &Detection, min_overlap_ratio: f64) -> bool {
+pub fn boxes_overlap_y(a: &Detection, b: &Detection, min_overlap_ratio: f64) -> bool {
     let overlap_start = a.y_min.max(b.y_min);
     let overlap_end = a.y_max.min(b.y_max);
     if overlap_start >= overlap_end {

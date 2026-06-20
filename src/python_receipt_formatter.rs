@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
 
-use crate::receipt_formatter;
+use receipt_core::receipt_formatter;
 
 fn fixed_decimal_string(value: &Bound<'_, PyAny>) -> PyResult<String> {
     value

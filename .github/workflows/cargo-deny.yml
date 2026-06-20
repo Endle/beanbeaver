@@ -1,0 +1,24 @@
+name: cargo-deny
+
+# License guard: ensures no copyleft (GPL/LGPL/AGPL/MPL) third-party Rust crate can
+# enter the workspace that `receipt-core` (and thus the iOS binary) draws from.
+# See deny.toml for the permissive-only allowlist.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  cargo-deny:
+    name: cargo-deny (licenses)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check licenses
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses

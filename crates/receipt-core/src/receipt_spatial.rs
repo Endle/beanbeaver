@@ -9,47 +9,47 @@ const MAX_ITEM_DISTANCE: f64 = 0.08;
 const SPATIAL_FLOAT_EPSILON: f64 = 1e-6;
 
 #[derive(Clone, Debug)]
-pub(crate) struct BboxInput {
-    pub(crate) left: f64,
-    pub(crate) top: f64,
-    pub(crate) right: f64,
-    pub(crate) bottom: f64,
+pub struct BboxInput {
+    pub left: f64,
+    pub top: f64,
+    pub right: f64,
+    pub bottom: f64,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct WordInput {
-    pub(crate) text: String,
-    pub(crate) bbox: BboxInput,
-    pub(crate) confidence: f64,
+pub struct WordInput {
+    pub text: String,
+    pub bbox: BboxInput,
+    pub confidence: f64,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct LineInput {
-    pub(crate) text: String,
-    pub(crate) words: Vec<WordInput>,
+pub struct LineInput {
+    pub text: String,
+    pub words: Vec<WordInput>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct PageInput {
-    pub(crate) lines: Vec<LineInput>,
+pub struct PageInput {
+    pub lines: Vec<LineInput>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct SpatialExtractedItem {
-    pub(crate) description: String,
-    pub(crate) price_scaled: i64,
+pub struct SpatialExtractedItem {
+    pub description: String,
+    pub price_scaled: i64,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct SpatialParserWarning {
-    pub(crate) message: String,
-    pub(crate) after_item_index: Option<usize>,
+pub struct SpatialParserWarning {
+    pub message: String,
+    pub after_item_index: Option<usize>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct SpatialExtractionOutcome {
-    pub(crate) items: Vec<SpatialExtractedItem>,
-    pub(crate) warnings: Vec<SpatialParserWarning>,
+pub struct SpatialExtractionOutcome {
+    pub items: Vec<SpatialExtractedItem>,
+    pub warnings: Vec<SpatialParserWarning>,
 }
 
 #[derive(Clone, Debug)]
@@ -781,7 +781,7 @@ fn x_center(word: &WordInput) -> f64 {
     (word.bbox.left + word.bbox.right) / 2.0
 }
 
-pub(crate) fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionOutcome {
+pub fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionOutcome {
     let mut items = Vec::new();
     let mut warnings = Vec::new();
     if pages.is_empty() {

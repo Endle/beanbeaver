@@ -1,8 +1,6 @@
-mod detection_normalization;
 mod match_domain;
 mod match_service;
 mod matcher;
-mod ocr_line_grouping;
 mod python_detection_normalization;
 mod python_ledger_access;
 mod python_ocr_line_grouping;
@@ -13,20 +11,15 @@ mod python_receipt_fields;
 mod python_receipt_formatter;
 mod python_receipt_parse_helpers;
 mod python_receipt_parser;
+mod python_receipt_process;
 mod python_receipt_spatial;
 mod python_receipt_staged_json;
 mod python_receipt_text;
 mod python_spatial;
-mod receipt_categories;
-mod receipt_common;
-mod receipt_fields;
-mod receipt_formatter;
-mod receipt_parse_helpers;
-mod receipt_parser;
-mod receipt_spatial;
-mod receipt_staged_json;
-mod receipt_text;
-mod spatial;
+
+// Pure receipt-parsing logic now lives in the standalone `receipt-core` crate
+// (no PyO3 / no GPL beancount dependency). The PyO3 glue modules below reference
+// it via `receipt_core::…`.
 
 use pyo3::prelude::*;
 
@@ -200,6 +193,7 @@ fn _rust_matcher(module: &Bound<'_, PyModule>) -> PyResult<()> {
     python_receipt_formatter::register(module)?;
     python_receipt_fields::register(module)?;
     python_receipt_parser::register(module)?;
+    python_receipt_process::register(module)?;
     python_receipt_parse_helpers::register(module)?;
     python_receipt_staged_json::register(module)?;
     python_spatial::register(module)?;

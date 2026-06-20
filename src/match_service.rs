@@ -4,7 +4,7 @@ use crate::python_ledger_access::{
     apply_receipt_match_native, list_transactions_native, NativeLedgerPosting,
     NativeLedgerSnapshot, NativeLedgerTransaction,
 };
-use crate::receipt_formatter::{
+use receipt_core::receipt_formatter::{
     format_enriched_transaction, EnrichedMatchInput, EnrichedPostingInput, FormatterItemInput,
     FormatterReceiptInput, FormatterWarningInput,
 };
@@ -556,7 +556,7 @@ fn formatter_receipt_input(receipt: &NativeReceipt) -> FormatterReceiptInput {
         tenders: receipt
             .tenders
             .iter()
-            .map(|tender| crate::receipt_formatter::FormatterTenderInput {
+            .map(|tender| receipt_core::receipt_formatter::FormatterTenderInput {
                 amount: tender.amount.clone(),
                 account: tender.account.clone(),
                 kind: tender.kind.clone(),

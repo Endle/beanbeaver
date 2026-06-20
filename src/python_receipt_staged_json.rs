@@ -4,8 +4,8 @@ use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
 use std::collections::HashSet;
 
-use crate::receipt_categories;
-use crate::receipt_staged_json;
+use receipt_core::receipt_categories;
+use receipt_core::receipt_staged_json;
 
 #[derive(Clone, Debug)]
 struct PyRuleEntry {

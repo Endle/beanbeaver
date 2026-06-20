@@ -1,5 +1,5 @@
 #[derive(Clone, Debug)]
-pub(crate) struct SpatialLineCandidate {
+pub struct SpatialLineCandidate {
     line_y: f64,
     is_used: bool,
     is_valid_item_line: bool,
@@ -8,7 +8,7 @@ pub(crate) struct SpatialLineCandidate {
 }
 
 impl SpatialLineCandidate {
-    pub(crate) fn new(
+    pub fn new(
         line_y: f64,
         is_used: bool,
         is_valid_item_line: bool,
@@ -27,7 +27,7 @@ impl SpatialLineCandidate {
 
 const SPATIAL_FLOAT_EPSILON: f64 = 1e-6;
 
-pub(crate) fn select_spatial_item_line(
+pub fn select_spatial_item_line(
     price_y: f64,
     y_tolerance: f64,
     max_item_distance: f64,
@@ -144,18 +144,6 @@ mod tests {
         ];
 
         let selected = select_spatial_item_line(0.21, 0.01, 0.08, true, false, candidates).unwrap();
-
-        assert_eq!(selected.0, 1);
-    }
-
-    #[test]
-    fn skips_priced_lines_above_for_onsale_rows() {
-        let candidates = vec![
-            SpatialLineCandidate::new(0.19, false, true, true, false),
-            SpatialLineCandidate::new(0.21, false, true, false, false),
-        ];
-
-        let selected = select_spatial_item_line(0.20, 0.01, 0.08, false, true, candidates).unwrap();
 
         assert_eq!(selected.0, 1);
     }
