@@ -179,6 +179,31 @@ Not needed on macOS.
    re-baseline private fixtures **append-only** (never overwrite — see
    `PRIVATE_TESTS.md` / `e2e_test.md`).
 
+## On-device OCR quality (measured 2026-06-21, private corpus, 80 receipts)
+
+`cargo run -p ocr-paddle --example device_sim -- <dir-or-image> [--cached] [--dump]`
+runs the on-device pipeline on macOS (`live` = on-device ONNX models; `--cached`
+= desktop PaddleOCR `.ocr.json` through the **same** `process_receipt`) and
+scores vs `expected.json`. Same parser + images + scoring, so live-vs-cached
+isolates OCR quality:
+
+| metric | live (on-device) | cached (desktop PaddleOCR) |
+|---|---|---|
+| merchant | 92% | 100% |
+| date | 81% | 100% |
+| total | 82% | 99% |
+| critical items | **51%** | **95%** |
+| fully correct | **18%** | **84%** |
+
+**Conclusion: the parser is excellent; the on-device OCR stage is the entire
+bottleneck on real-world photos.** Failure modes: digit misreads on date/total
+(`0263-01-23`, totals → `0.00`), dropped lines on dense receipts, occasional
+text-orientation misses. Open question (determines the fix): model-variant gap
+vs. our Rust det/rec port being weaker than reference PaddleOCR — the desktop
+OCR is the external `ghcr.io/endle/beanbeaver-ocr` container (PaddleOCR), so
+confirm its model variant there. Likely highest-leverage next step: try the
+PP-OCRv5 **server** detection model on-device and re-measure with `device_sim`.
+
 ## Notes / gotchas
 
 - **Parity is approximate**, by design: same model weights, but Core-Image vs PIL
