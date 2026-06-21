@@ -233,6 +233,21 @@ approximation, contour extraction, resize rounding, possible doc-orientation).
 Localize with `device_sim --detcmp` (our boxes vs `.ocr.json` boxes). Bigger
 models stay an option later (gated on a CoreML/ANE EP for latency).
 
+**Faithful-port progress:**
+- `--detcmp` localized the loss to **detection**: we cover only ~75% of
+  PaddleOCR's lines (worse on dense receipts — `cnc` 46%, `fresh`/`foody` ~62%).
+- **RESIZE_LONG 960 → 1536** (detect at higher res): recovers dense-receipt
+  lines, lifting the private corpus **crit-items 51%→61%, fully-correct
+  18%→24%, date 81%→88%** with the small mobile models — matching the
+  bigger-model configs at *no* size cost. Net win, but a blunt one: it shifts
+  a couple of public-fixture results (regresses upright costco `DOORDASH2X50`,
+  tnt `WJ LIGHT…`; fixes WASABI tilts, WING HING) — Phase 5 gaps recalibrated.
+- **Next:** the deeper lever is box-segmentation fidelity — even where line
+  *counts* now match PaddleOCR, only ~62% of its boxes align with ours, so our
+  contour→min-box→unclip construction still splits/merges/positions
+  differently. Make it faithful to PaddleOCR (`get_mini_boxes`, the box
+  expansion, multiple-of-128 resize rounding).
+
 ## Notes / gotchas
 
 - **Parity is approximate**, by design: same model weights, but Core-Image vs PIL

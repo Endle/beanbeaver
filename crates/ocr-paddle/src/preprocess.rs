@@ -14,8 +14,13 @@
 
 use image::RgbImage;
 
-/// Longest-side target for detection resize.
-pub const RESIZE_LONG: u32 = 960;
+/// Longest-side target for detection resize. PaddleOCR's `DetResizeForTest`
+/// default is 960, but on dense receipts (150+ small lines) 960 under-detects:
+/// adjacent rows merge / thin rows vanish. Detecting at 1536 recovers them and
+/// lifts end-to-end critical-item extraction 51%->61% on the private corpus
+/// (vs the same parser's 95% on desktop OCR) at no model-size cost. Higher
+/// values help recall further but cost detection latency.
+pub const RESIZE_LONG: u32 = 1536;
 /// DB models are fully convolutional but require H,W to be multiples of 32.
 pub const STRIDE: u32 = 32;
 
@@ -90,25 +95,32 @@ mod tests {
     use super::*;
     use image::RgbImage;
 
+    // Expected dim: scale by ratio, round, then round up to a STRIDE multiple.
+    fn expect_dim(orig: u32, ratio: f32) -> u32 {
+        ((orig as f32 * ratio).round() as u32).max(1).div_ceil(STRIDE) * STRIDE
+    }
+
     #[test]
-    fn resized_dims_scale_longer_side_to_960_and_pad_to_32() {
-        // 400x800 -> longer side 800 scaled to 960 (ratio 1.2): w=480, h=960.
+    fn resized_dims_scale_longer_side_to_resize_long_and_pad_to_stride() {
+        // 400x800: longer side (800) scaled to RESIZE_LONG; shorter by same ratio.
         let (w, h) = resized_dims(400, 800);
-        assert_eq!(h, 960);
-        assert_eq!(w, 480);
+        let ratio = RESIZE_LONG as f32 / 800.0;
+        assert_eq!(h, expect_dim(800, ratio));
+        assert_eq!(w, expect_dim(400, ratio));
         assert_eq!(w % STRIDE, 0);
         assert_eq!(h % STRIDE, 0);
     }
 
     #[test]
-    fn resized_dims_round_up_to_multiple_of_32() {
-        // 1000x1000 -> ratio 0.96 -> 960x960, already multiple of 32.
-        assert_eq!(resized_dims(1000, 1000), (960, 960));
-        // Non-divisible result rounds up.
-        let (w, h) = resized_dims(700, 1000); // ratio 0.96 -> w=672, h=960
-        assert_eq!(h, 960);
+    fn resized_dims_round_up_to_multiple_of_stride() {
+        // Square stays square at the RESIZE_LONG (a STRIDE multiple).
+        assert_eq!(resized_dims(1000, 1000), (RESIZE_LONG, RESIZE_LONG));
+        // Non-divisible result rounds up to a STRIDE multiple.
+        let (w, h) = resized_dims(700, 1000);
+        let ratio = RESIZE_LONG as f32 / 1000.0;
+        assert_eq!(h, RESIZE_LONG);
+        assert_eq!(w, expect_dim(700, ratio));
         assert_eq!(w % STRIDE, 0);
-        assert!(w >= 672);
     }
 
     #[test]
