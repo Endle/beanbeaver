@@ -16,6 +16,11 @@ final class ReceiptPipeline {
 
     private(set) var status: Status = .idle
 
+    /// The exact JPEG bytes (written to a temp file) that the OCR last saw, for
+    /// diagnostics: export it and A/B against the desktop server to isolate the
+    /// capture/encode path from the OCR model.
+    private(set) var capturedImageURL: URL?
+
     /// Default credit-card account for the placeholder posting; tweak in UI later.
     var creditCardAccount = "Liabilities:CreditCard"
 
@@ -47,6 +52,7 @@ final class ReceiptPipeline {
 
     func scan(imageData: Data) async {
         status = .scanning
+        capturedImageURL = persistCapture(imageData)
         let account = creditCardAccount
         do {
             let session = try loadedSession()
@@ -57,6 +63,19 @@ final class ReceiptPipeline {
             status = .done(result)
         } catch {
             status = .failed(String(describing: error))
+        }
+    }
+
+    /// Write the captured JPEG to a timestamped temp file so it can be exported
+    /// via the share sheet (AirDrop / Files / Mail).
+    private func persistCapture(_ data: Data) -> URL? {
+        let stamp = Int(Date().timeIntervalSince1970)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("receipt_capture_\(stamp).jpg")
+        do {
+            try data.write(to: url)
+            return url
+        } catch {
+            return nil
         }
     }
 }

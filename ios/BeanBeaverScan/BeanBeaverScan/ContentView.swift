@@ -84,10 +84,26 @@ struct ContentView: View {
         case .scanning:
             HStack { ProgressView(); Text("Scanning…") }
         case .failed(let message):
-            Label(message, systemImage: "exclamationmark.triangle")
-                .foregroundStyle(.red)
+            VStack(alignment: .leading, spacing: 12) {
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.red)
+                capturedImageExport
+            }
         case .done(let result):
-            ReceiptResultView(result: result)
+            VStack(alignment: .leading, spacing: 12) {
+                ReceiptResultView(result: result)
+                capturedImageExport
+            }
+        }
+    }
+
+    /// Export the exact JPEG the OCR saw, to A/B against the desktop server.
+    @ViewBuilder
+    private var capturedImageExport: some View {
+        if let url = pipeline.capturedImageURL {
+            ShareLink(item: url) {
+                Label("Export captured image", systemImage: "photo.badge.arrow.down")
+            }
         }
     }
 }
