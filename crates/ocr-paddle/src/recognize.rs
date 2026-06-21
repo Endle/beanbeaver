@@ -35,7 +35,12 @@ impl Recognizer {
     /// Recognize the text inside one detected quad. Returns `(text, confidence)`.
     pub fn recognize(&mut self, img: &RgbImage, quad: &Quad) -> ort::Result<(String, f32)> {
         let crop = rotate_crop(img, quad);
-        let (data, w) = rec_preprocess(&crop);
+        self.recognize_crop(&crop)
+    }
+
+    /// Recognize an already-cropped (and orientation-corrected) line image.
+    pub fn recognize_crop(&mut self, crop: &RgbImage) -> ort::Result<(String, f32)> {
+        let (data, w) = rec_preprocess(crop);
 
         let tensor = Tensor::from_array(([1_usize, 3, REC_HEIGHT as usize, w], data))?;
         // Copy the output out so the session borrow ends before we read `self`.
@@ -90,7 +95,7 @@ impl Recognizer {
 
 /// Perspective-crop the quad into an upright rectangle (PaddleOCR
 /// `get_rotate_crop_image`); rotate 90° when the region is tall (vertical text).
-fn rotate_crop(img: &RgbImage, quad: &Quad) -> RgbImage {
+pub(crate) fn rotate_crop(img: &RgbImage, quad: &Quad) -> RgbImage {
     let p = quad.points;
     let dist = |a: [f32; 2], b: [f32; 2]| ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt();
     let crop_w = dist(p[0], p[1]).max(dist(p[2], p[3])).round().max(1.0) as u32;

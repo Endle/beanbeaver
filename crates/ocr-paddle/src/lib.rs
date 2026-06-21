@@ -7,7 +7,10 @@
 //! - `db_postprocess` — DB probability map -> quad boxes (next).
 //! - recognition + CTC decode, textline-orientation cls, and `ort` inference wiring.
 
+pub mod classify;
 pub mod db_postprocess;
 pub mod detect;
+pub mod engine;
 pub mod preprocess;
+pub mod process;
 pub mod recognize;
