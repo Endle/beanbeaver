@@ -64,7 +64,7 @@ Desktop (unchanged, out of scope for v1): ingest exported fragment →
 | 3a — UniFFI binding (`crates/ffi`, host-verified) | ✅ on `ios` | — |
 | 3b — cross-compile iOS targets + `.xcframework` | ✅ on `ios` | — |
 | 2 (Swift) — SwiftUI app + local SPM package + `.xcodeproj` | ✅ builds + runs on iOS 26.5 sim | — |
-| 4 — wire core into app + export | 🟡 wired (photo-picker → scan → beancount + ShareLink); pick→scan flow not yet UI-verified | — |
+| 4 — wire core into app + export | ✅ VisionKit scan + photo-picker → on-device scan → beancount + ShareLink; on-device scan verified via DEBUG bundled-sample path | — |
 | 5 — validate/re-baseline vs all `tests/receipts_e2e/*` | ⬜ | — |
 
 **xcframework (3b)**: `crates/ffi/build-xcframework.sh` builds release static libs

@@ -1,10 +1,12 @@
 import SwiftUI
 import PhotosUI
+import VisionKit
 import BBReceiptKit
 
 struct ContentView: View {
     @State private var pipeline = ReceiptPipeline()
     @State private var photoItem: PhotosPickerItem?
+    @State private var showScanner = false
 
     /// Bundled DEBUG sample (a redacted Costco receipt fixture).
     private let sampleName = "costco_20260218_redact"
@@ -13,11 +15,22 @@ struct ContentView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    if VNDocumentCameraViewController.isSupported {
+                        Button {
+                            showScanner = true
+                        } label: {
+                            Label("Scan a receipt", systemImage: "doc.viewfinder")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                    }
+
                     PhotosPicker(selection: $photoItem, matching: .images) {
                         Label("Pick a receipt photo", systemImage: "photo.on.rectangle")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
                     .controlSize(.large)
 
 #if DEBUG
@@ -36,6 +49,13 @@ struct ContentView: View {
                 .padding()
             }
             .navigationTitle("BeanBeaver Scan")
+            .fullScreenCover(isPresented: $showScanner) {
+                DocumentScanner(
+                    onScan: { data in Task { await pipeline.scan(imageData: data) } },
+                    onFinish: { showScanner = false }
+                )
+                .ignoresSafeArea()
+            }
 #if DEBUG
             .task {
                 // Lets `simctl launch … -autoRunSample` exercise the pipeline

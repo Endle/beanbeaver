@@ -10,6 +10,7 @@
 		1C0000000000000000000001 /* BeanBeaverScanApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B0000000000000000000001 /* BeanBeaverScanApp.swift */; };
 		1C0000000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B0000000000000000000002 /* ContentView.swift */; };
 		1C0000000000000000000003 /* ReceiptPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B0000000000000000000003 /* ReceiptPipeline.swift */; };
+		1C0000000000000000000004 /* DocumentScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B0000000000000000000004 /* DocumentScanner.swift */; };
 		1C0000000000000000000010 /* PP-OCRv5_mobile_det.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 1B0000000000000000000010 /* PP-OCRv5_mobile_det.onnx */; };
 		1C0000000000000000000011 /* PP-OCRv5_mobile_rec.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 1B0000000000000000000011 /* PP-OCRv5_mobile_rec.onnx */; };
 		1C0000000000000000000012 /* PP-LCNet_x1_0_textline_ori.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 1B0000000000000000000012 /* PP-LCNet_x1_0_textline_ori.onnx */; };
@@ -22,6 +23,7 @@
 		1B0000000000000000000001 /* BeanBeaverScanApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeanBeaverScanApp.swift; sourceTree = "<group>"; };
 		1B0000000000000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		1B0000000000000000000003 /* ReceiptPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceiptPipeline.swift; sourceTree = "<group>"; };
+		1B0000000000000000000004 /* DocumentScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentScanner.swift; sourceTree = "<group>"; };
 		1B0000000000000000000010 /* PP-OCRv5_mobile_det.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = "PP-OCRv5_mobile_det.onnx"; path = "../../models/PP-OCRv5_mobile_det.onnx"; sourceTree = SOURCE_ROOT; };
 		1B0000000000000000000011 /* PP-OCRv5_mobile_rec.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = "PP-OCRv5_mobile_rec.onnx"; path = "../../models/PP-OCRv5_mobile_rec.onnx"; sourceTree = SOURCE_ROOT; };
 		1B0000000000000000000012 /* PP-LCNet_x1_0_textline_ori.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = "PP-LCNet_x1_0_textline_ori.onnx"; path = "../../models/PP-LCNet_x1_0_textline_ori.onnx"; sourceTree = SOURCE_ROOT; };
@@ -63,6 +65,7 @@
 				1B0000000000000000000001 /* BeanBeaverScanApp.swift */,
 				1B0000000000000000000002 /* ContentView.swift */,
 				1B0000000000000000000003 /* ReceiptPipeline.swift */,
+				1B0000000000000000000004 /* DocumentScanner.swift */,
 			);
 			path = BeanBeaverScan;
 			sourceTree = "<group>";
@@ -159,6 +162,7 @@
 				1C0000000000000000000001 /* BeanBeaverScanApp.swift in Sources */,
 				1C0000000000000000000002 /* ContentView.swift in Sources */,
 				1C0000000000000000000003 /* ReceiptPipeline.swift in Sources */,
+				1C0000000000000000000004 /* DocumentScanner.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -219,6 +223,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Scan receipts with the camera.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -243,6 +248,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Scan receipts with the camera.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
