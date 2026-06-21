@@ -1,0 +1,19 @@
+[package]
+name = "ocr-paddle"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[lib]
+name = "ocr_paddle"
+
+[dependencies]
+# Image decode + resize for the detection/recognition preprocessing.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+# Connected-components / contour finding for DB post-processing.
+imageproc = "0.25"
+# Minimum-rotated-rectangle + polygon geometry for DB box extraction.
+geo = "0.29"
+# ONNX Runtime for PP-OCRv5 det/rec/cls inference.
+ort = "=2.0.0-rc.12"

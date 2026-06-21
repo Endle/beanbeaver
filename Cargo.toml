@@ -16,7 +16,7 @@ path = "src/main.rs"
 name = "beanbeaver._rust_matcher"
 
 [workspace]
-members = ["crates/receipt-core"]
+members = ["crates/receipt-core", "crates/ocr-paddle"]
 
 [dependencies]
 receipt-core = { path = "crates/receipt-core" }
