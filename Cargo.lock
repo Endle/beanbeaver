@@ -1257,6 +1257,7 @@ dependencies = [
  "image",
  "imageproc",
  "ort",
+ "receipt-core",
 ]
 
 [[package]]

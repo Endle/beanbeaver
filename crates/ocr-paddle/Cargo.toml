@@ -17,3 +17,5 @@ imageproc = "0.25"
 geo = "0.29"
 # ONNX Runtime for PP-OCRv5 det/rec/cls inference.
 ort = "=2.0.0-rc.12"
+# Downstream parsing/formatting (detections -> structured receipt + beancount).
+receipt-core = { path = "../receipt-core" }
