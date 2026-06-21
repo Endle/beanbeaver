@@ -32,6 +32,19 @@ final class ReceiptPipeline {
         return s
     }
 
+#if DEBUG
+    /// Run the pipeline on a JPEG bundled in the app (debug/demo path that
+    /// bypasses the photo picker).
+    func scanBundledSample(named name: String) async {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "jpg"),
+              let data = try? Data(contentsOf: url) else {
+            status = .failed("Bundled sample \(name).jpg not found")
+            return
+        }
+        await scan(imageData: data)
+    }
+#endif
+
     func scan(imageData: Data) async {
         status = .scanning
         let account = creditCardAccount

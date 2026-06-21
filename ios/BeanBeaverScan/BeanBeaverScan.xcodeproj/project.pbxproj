@@ -13,6 +13,7 @@
 		1C0000000000000000000010 /* PP-OCRv5_mobile_det.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 1B0000000000000000000010 /* PP-OCRv5_mobile_det.onnx */; };
 		1C0000000000000000000011 /* PP-OCRv5_mobile_rec.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 1B0000000000000000000011 /* PP-OCRv5_mobile_rec.onnx */; };
 		1C0000000000000000000012 /* PP-LCNet_x1_0_textline_ori.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 1B0000000000000000000012 /* PP-LCNet_x1_0_textline_ori.onnx */; };
+		1C0000000000000000000013 /* costco_20260218_redact.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 1B0000000000000000000013 /* costco_20260218_redact.jpg */; };
 		1C0000000000000000000020 /* BBReceiptKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000000000000000000012 /* BBReceiptKit */; };
 /* End PBXBuildFile section */
 
@@ -24,6 +25,7 @@
 		1B0000000000000000000010 /* PP-OCRv5_mobile_det.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = "PP-OCRv5_mobile_det.onnx"; path = "../../models/PP-OCRv5_mobile_det.onnx"; sourceTree = SOURCE_ROOT; };
 		1B0000000000000000000011 /* PP-OCRv5_mobile_rec.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = "PP-OCRv5_mobile_rec.onnx"; path = "../../models/PP-OCRv5_mobile_rec.onnx"; sourceTree = SOURCE_ROOT; };
 		1B0000000000000000000012 /* PP-LCNet_x1_0_textline_ori.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = "PP-LCNet_x1_0_textline_ori.onnx"; path = "../../models/PP-LCNet_x1_0_textline_ori.onnx"; sourceTree = SOURCE_ROOT; };
+		1B0000000000000000000013 /* costco_20260218_redact.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; name = "costco_20260218_redact.jpg"; path = "../../tests/receipts_e2e/costco_20260218_redact.jpg"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -71,6 +73,7 @@
 				1B0000000000000000000010 /* PP-OCRv5_mobile_det.onnx */,
 				1B0000000000000000000011 /* PP-OCRv5_mobile_rec.onnx */,
 				1B0000000000000000000012 /* PP-LCNet_x1_0_textline_ori.onnx */,
+				1B0000000000000000000013 /* costco_20260218_redact.jpg */,
 			);
 			name = Models;
 			sourceTree = "<group>";
@@ -142,6 +145,7 @@
 				1C0000000000000000000010 /* PP-OCRv5_mobile_det.onnx in Resources */,
 				1C0000000000000000000011 /* PP-OCRv5_mobile_rec.onnx in Resources */,
 				1C0000000000000000000012 /* PP-LCNet_x1_0_textline_ori.onnx in Resources */,
+				1C0000000000000000000013 /* costco_20260218_redact.jpg in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

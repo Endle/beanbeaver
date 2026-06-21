@@ -6,6 +6,9 @@ struct ContentView: View {
     @State private var pipeline = ReceiptPipeline()
     @State private var photoItem: PhotosPickerItem?
 
+    /// Bundled DEBUG sample (a redacted Costco receipt fixture).
+    private let sampleName = "costco_20260218_redact"
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -17,11 +20,31 @@ struct ContentView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
 
+#if DEBUG
+                    Button {
+                        Task { await pipeline.scanBundledSample(named: sampleName) }
+                    } label: {
+                        Label("Run bundled sample", systemImage: "doc.text.magnifyingglass")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+#endif
+
                     statusView
                 }
                 .padding()
             }
             .navigationTitle("BeanBeaver Scan")
+#if DEBUG
+            .task {
+                // Lets `simctl launch … -autoRunSample` exercise the pipeline
+                // headlessly for screenshots/verification.
+                if ProcessInfo.processInfo.arguments.contains("-autoRunSample") {
+                    await pipeline.scanBundledSample(named: sampleName)
+                }
+            }
+#endif
             .onChange(of: photoItem) { _, item in
                 guard let item else { return }
                 Task {
