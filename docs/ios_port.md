@@ -65,7 +65,20 @@ Desktop (unchanged, out of scope for v1): ingest exported fragment →
 | 3b — cross-compile iOS targets + `.xcframework` | ✅ on `ios` | — |
 | 2 (Swift) — SwiftUI app + local SPM package + `.xcodeproj` | ✅ builds + runs on iOS 26.5 sim | — |
 | 4 — wire core into app + export | ✅ VisionKit scan + photo-picker → on-device scan → beancount + ShareLink; on-device scan verified via DEBUG bundled-sample path | — |
-| 5 — validate/re-baseline vs all `tests/receipts_e2e/*` | ⬜ | — |
+| 5 — validate/re-baseline vs all `tests/receipts_e2e/*` | ✅ on `ios` | — |
+
+**Phase 5 (on-device validation)**: `crates/ocr-paddle/tests/phase5_e2e.rs` runs
+`process_image` over every `tests/receipts_e2e/*.jpg` (11 with images) and checks
+against the same `.expected.json` as the desktop Python e2e (merchant fuzzy /
+date exact / total decimal / critical items), with OCR-tolerant item matching
+(collapses letter-O↔digit-0, strips leading item codes, ignores spaces). Run:
+`cargo test -p ocr-paddle --test phase5_e2e -- --ignored --nocapture`.
+**Result: merchant/date/total + the large majority of items match the server on
+all upright + mild-tilt fixtures.** 15 known parity gaps are tracked append-only
+in `KNOWN_ON_DEVICE_GAPS` (public `expected.json` never weakened): (a) a few
+single-char misreads even upright — TOMAX `PDR`→`PUR`, WING HING `SWT`→`SUT`;
+(b) severe synthetic tilt (5°/7°) degrades detection (costco total reads `0.00`,
+some prices shuffled). Mild tilt (3°) matches the server.
 
 **xcframework (3b)**: `crates/ffi/build-xcframework.sh` builds release static libs
 for `aarch64-apple-ios` + `aarch64-apple-ios-sim`, libtool-merges each with the
