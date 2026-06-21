@@ -10,3 +10,4 @@
 pub mod db_postprocess;
 pub mod detect;
 pub mod preprocess;
+pub mod recognize;
