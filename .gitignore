@@ -215,3 +215,15 @@ __marimo__/
 
 # On-device OCR models (downloaded/converted; large, not committed)
 models/
+
+# Generated UniFFI Swift bindings (regenerated from the compiled lib)
+crates/ffi/generated/
+
+# iOS build artifacts (rebuilt by crates/ffi/build-xcframework.sh)
+ios/BBReceiptKit/Frameworks/
+ios/BBReceiptKit/Sources/BBReceiptKit/Generated/
+# Xcode user/build state
+ios/**/xcuserdata/
+ios/**/*.xcworkspace/xcuserdata/
+ios/**/build/
+.DS_Store

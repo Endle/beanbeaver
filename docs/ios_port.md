@@ -61,10 +61,38 @@ Desktop (unchanged, out of scope for v1): ingest exported fragment →
 | 0 — carve out `receipt-core` crate (no Python/GPL), cargo-deny license guard | ✅ shipped to master | PR #112 (`9883dc5`) |
 | 1 — consolidate OCR glue into core; `process_receipt`; parity test vs legacy chain (byte-identical, 6 fixtures) | ✅ shipped to master | PR #112 |
 | 2 (Rust) — `ocr-paddle`: PP-OCRv5 det + rec + CTC + cls + `process_image` | ✅ on `ios` | `3ff2072`, `89e0fad`, `dc5711e` |
-| 2 (Swift) — SwiftUI/VisionKit app | ⬜ **next, on macOS** | — |
-| 3 — UniFFI binding + `.xcframework` | ⬜ next | — |
-| 4 — wire core into app + export | ⬜ | — |
+| 3a — UniFFI binding (`crates/ffi`, host-verified) | ✅ on `ios` | — |
+| 3b — cross-compile iOS targets + `.xcframework` | ✅ on `ios` | — |
+| 2 (Swift) — SwiftUI app + local SPM package + `.xcodeproj` | ✅ builds + runs on iOS 26.5 sim | — |
+| 4 — wire core into app + export | 🟡 wired (photo-picker → scan → beancount + ShareLink); pick→scan flow not yet UI-verified | — |
 | 5 — validate/re-baseline vs all `tests/receipts_e2e/*` | ⬜ | — |
+
+**xcframework (3b)**: `crates/ffi/build-xcframework.sh` builds release static libs
+for `aarch64-apple-ios` + `aarch64-apple-ios-sim`, libtool-merges each with the
+prebuilt `libonnxruntime.a`, and assembles `BBReceiptFFI.xcframework` (verified:
+both slices carry `OrtGetApiBase` + the uniffi exports). Outputs into
+`ios/BBReceiptKit/` (git-ignored). Sim slice is arm64-only (`INCLUDE_X86_SIM=1`
+to add Intel).
+
+**Swift app (2/4)**: `ios/` — local SPM package `BBReceiptKit` (binaryTarget +
+`ReceiptScanner` conveniences) and `BeanBeaverScan` SwiftUI app (PhotosPicker →
+`OcrSession.scan` off-main → render receipt + beancount + `ShareLink` export).
+Hand-written `.xcodeproj` (no XcodeGen). `-scheme` build SUCCEEDS for the
+simulator (iOS 26.5 runtime via `xcodebuild -downloadPlatform iOS`); app
+installs + launches + renders on the iPhone 17 Pro sim (62 MB bundle incl.
+models). NOTE: build with `-scheme` (not `-target` — the latter fails Swift
+module resolution for the local package). Remaining: drive the PhotosPicker →
+scan flow to visually confirm on-device OCR output (host FFI test already
+proves the logic).
+
+**UniFFI binding (3a)**: `crates/ffi` (`bb-receipt-ffi`, MIT) exposes a UniFFI
+`OcrSession` object — `new(model_dir)` loads the 3 ONNX models once (Mutex-wrapped
+`OcrEngine`), `scan(image_bytes, today, credit_card_account) → ReceiptResult`
+(flattened `ProcessedReceipt`: merchant/date/total/tax/subtotal/items[]/warnings[]/
+beancount). Host build clean (uniffi 0.28.3); FFI round-trip test
+(`cargo test -p bb-receipt-ffi -- --ignored`) passes on the Costco fixture. Swift
+bindings generate via `cargo run -p bb-receipt-ffi --bin uniffi-bindgen -- generate
+--library target/debug/libbb_receipt_ffi.dylib --language swift --out-dir <dir>`.
 
 **End-to-end validated**: `process_image` on `tests/receipts_e2e/costco_20260218_redact.jpg`
 → beancount with merchant COSTCO, date 2026-02-18, total 221.97, tax 4.44, 7
@@ -153,4 +181,11 @@ Not needed on macOS.
 - **`ort` 2.0.0-rc.12**: inputs are positional (`ort::inputs![tensor]`);
   `Session::inputs()` is a method (fields private); copy the output tensor to an
   owned `Vec` before borrowing `&self` again.
+- **`ort` on iOS (proven 2026-06-21)**: `ort`'s default `download-binaries`
+  feature auto-fetches a prebuilt `libonnxruntime.a` for both `aarch64-apple-ios`
+  and `aarch64-apple-ios-sim` (cached under `~/Library/Caches/ort.pyke.io/`). No
+  manual ORT cross-build needed. `crates/ffi` cross-compiles clean for both; the
+  Rust staticlib is plain arm64 Mach-O. NOTE: the Rust `.a` does **not** embed
+  `libonnxruntime.a` — the xcframework step must ship/link the ORT static lib too
+  (combine via `libtool`, or add it as a separate xcframework slice).
 - **Rec vocabulary**: `num_classes = blank(0) + dict(18383) + space` = 18385.

@@ -1,0 +1,294 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1C0000000000000000000001 /* BeanBeaverScanApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B0000000000000000000001 /* BeanBeaverScanApp.swift */; };
+		1C0000000000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B0000000000000000000002 /* ContentView.swift */; };
+		1C0000000000000000000003 /* ReceiptPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B0000000000000000000003 /* ReceiptPipeline.swift */; };
+		1C0000000000000000000010 /* PP-OCRv5_mobile_det.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 1B0000000000000000000010 /* PP-OCRv5_mobile_det.onnx */; };
+		1C0000000000000000000011 /* PP-OCRv5_mobile_rec.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 1B0000000000000000000011 /* PP-OCRv5_mobile_rec.onnx */; };
+		1C0000000000000000000012 /* PP-LCNet_x1_0_textline_ori.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 1B0000000000000000000012 /* PP-LCNet_x1_0_textline_ori.onnx */; };
+		1C0000000000000000000020 /* BBReceiptKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1A0000000000000000000012 /* BBReceiptKit */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		1A0000000000000000000007 /* BeanBeaverScan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BeanBeaverScan.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1B0000000000000000000001 /* BeanBeaverScanApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeanBeaverScanApp.swift; sourceTree = "<group>"; };
+		1B0000000000000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		1B0000000000000000000003 /* ReceiptPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReceiptPipeline.swift; sourceTree = "<group>"; };
+		1B0000000000000000000010 /* PP-OCRv5_mobile_det.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = "PP-OCRv5_mobile_det.onnx"; path = "../../models/PP-OCRv5_mobile_det.onnx"; sourceTree = SOURCE_ROOT; };
+		1B0000000000000000000011 /* PP-OCRv5_mobile_rec.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = "PP-OCRv5_mobile_rec.onnx"; path = "../../models/PP-OCRv5_mobile_rec.onnx"; sourceTree = SOURCE_ROOT; };
+		1B0000000000000000000012 /* PP-LCNet_x1_0_textline_ori.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = "PP-LCNet_x1_0_textline_ori.onnx"; path = "../../models/PP-LCNet_x1_0_textline_ori.onnx"; sourceTree = SOURCE_ROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		1A000000000000000000000F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1C0000000000000000000020 /* BBReceiptKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1A0000000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				1A0000000000000000000004 /* BeanBeaverScan */,
+				1A0000000000000000000005 /* Models */,
+				1A0000000000000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		1A0000000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000000000000000000007 /* BeanBeaverScan.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		1A0000000000000000000004 /* BeanBeaverScan */ = {
+			isa = PBXGroup;
+			children = (
+				1B0000000000000000000001 /* BeanBeaverScanApp.swift */,
+				1B0000000000000000000002 /* ContentView.swift */,
+				1B0000000000000000000003 /* ReceiptPipeline.swift */,
+			);
+			path = BeanBeaverScan;
+			sourceTree = "<group>";
+		};
+		1A0000000000000000000005 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				1B0000000000000000000010 /* PP-OCRv5_mobile_det.onnx */,
+				1B0000000000000000000011 /* PP-OCRv5_mobile_rec.onnx */,
+				1B0000000000000000000012 /* PP-LCNet_x1_0_textline_ori.onnx */,
+			);
+			name = Models;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1A0000000000000000000006 /* BeanBeaverScan */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A0000000000000000000009 /* Build configuration list for PBXNativeTarget "BeanBeaverScan" */;
+			buildPhases = (
+				1A000000000000000000000E /* Sources */,
+				1A000000000000000000000F /* Frameworks */,
+				1A0000000000000000000010 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BeanBeaverScan;
+			packageProductDependencies = (
+				1A0000000000000000000012 /* BBReceiptKit */,
+			);
+			productName = BeanBeaverScan;
+			productReference = 1A0000000000000000000007 /* BeanBeaverScan.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1A0000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1700;
+				LastUpgradeCheck = 1700;
+				TargetAttributes = {
+					1A0000000000000000000006 = {
+						CreatedOnToolsVersion = 17.0;
+					};
+				};
+			};
+			buildConfigurationList = 1A0000000000000000000008 /* Build configuration list for PBXProject "BeanBeaverScan" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 1A0000000000000000000002;
+			packageReferences = (
+				1A0000000000000000000011 /* XCLocalSwiftPackageReference "BBReceiptKit" */,
+			);
+			productRefGroup = 1A0000000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				1A0000000000000000000006 /* BeanBeaverScan */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1A0000000000000000000010 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1C0000000000000000000010 /* PP-OCRv5_mobile_det.onnx in Resources */,
+				1C0000000000000000000011 /* PP-OCRv5_mobile_rec.onnx in Resources */,
+				1C0000000000000000000012 /* PP-LCNet_x1_0_textline_ori.onnx in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1A000000000000000000000E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1C0000000000000000000001 /* BeanBeaverScanApp.swift in Sources */,
+				1C0000000000000000000002 /* ContentView.swift in Sources */,
+				1C0000000000000000000003 /* ReceiptPipeline.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		1A000000000000000000000A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		1A000000000000000000000B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		1A000000000000000000000C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS = NO;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				MARKETING_VERSION = 0.1;
+				OTHER_LDFLAGS = "-lc++";
+				PRODUCT_BUNDLE_IDENTIFIER = com.beanbeaver.BeanBeaverScan;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		1A000000000000000000000D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS = NO;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				MARKETING_VERSION = 0.1;
+				OTHER_LDFLAGS = "-lc++";
+				PRODUCT_BUNDLE_IDENTIFIER = com.beanbeaver.BeanBeaverScan;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1A0000000000000000000008 /* Build configuration list for PBXProject "BeanBeaverScan" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A000000000000000000000A /* Debug */,
+				1A000000000000000000000B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1A0000000000000000000009 /* Build configuration list for PBXNativeTarget "BeanBeaverScan" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A000000000000000000000C /* Debug */,
+				1A000000000000000000000D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		1A0000000000000000000011 /* XCLocalSwiftPackageReference "BBReceiptKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../BBReceiptKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1A0000000000000000000012 /* BBReceiptKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = BBReceiptKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 1A0000000000000000000001 /* Project object */;
+}
