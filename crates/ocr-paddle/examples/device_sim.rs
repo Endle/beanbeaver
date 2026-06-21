@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use ocr_paddle::engine::OcrEngine;
-use ocr_paddle::process::process_image;
+use ocr_paddle::process::{process_image, resize_and_pad};
 use receipt_core::ocr_transform::RawDetection;
 use receipt_core::process::{process_receipt, ProcessedReceipt};
 use receipt_core::receipt_categories::resolve_account_target;
@@ -41,6 +41,7 @@ fn main() {
     let mut today = (2026u16, 6u8, 21u8);
     let mut dump = false;
     let mut cached = false;
+    let mut detcmp = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -49,6 +50,7 @@ fn main() {
             "--today" => today = parse_today(&args.next().expect("--today needs YYYY-MM-DD")),
             "--dump" => dump = true,
             "--cached" => cached = true,
+            "--detcmp" => detcmp = true,
             _ => path = Some(PathBuf::from(a)),
         }
     }
@@ -58,18 +60,20 @@ fn main() {
     let mut engine = if cached {
         None
     } else {
-        Some(
-            OcrEngine::from_paths(
-                models.join("PP-OCRv5_mobile_det.onnx"),
-                models.join("PP-OCRv5_mobile_rec.onnx"),
-                Some(models.join("PP-LCNet_x1_0_textline_ori.onnx")),
-            )
-            .expect("load models (pass --models DIR if not ./models)"),
-        )
+        let det = find_model(&models, "_det.onnx");
+        let rec = find_model(&models, "_rec.onnx");
+        let cls = find_model(&models, "_ori.onnx");
+        eprintln!("det: {}\nrec: {}\ncls: {}", det.display(), rec.display(), cls.display());
+        Some(OcrEngine::from_paths(det, rec, Some(cls)).expect("load models (pass --models DIR if not ./models)"))
     };
 
     let mapping: HashMap<String, String> = default_parser_rule_layers().account_mapping.into_iter().collect();
     let today = (today.0 as i32, today.1 as u32, today.2 as u32);
+
+    if detcmp {
+        run_detcmp(engine.as_mut().expect("engine for detcmp"), &path);
+        return;
+    }
 
     println!("mode: {}", if cached { "cached (desktop PaddleOCR)" } else { "live (on-device ONNX)" });
     if path.is_dir() {
@@ -77,6 +81,76 @@ fn main() {
     } else {
         run_single(&mut engine, cached, &mapping, today, &path, true);
     }
+}
+
+/// Compare our detection (final recognized lines) against PaddleOCR's `.ocr.json`
+/// boxes in the same padded space — localizes missing vs duplicated lines.
+fn run_detcmp(engine: &mut OcrEngine, path: &Path) {
+    let mut jpgs: Vec<PathBuf> = std::fs::read_dir(path)
+        .expect("read dir")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "jpg") && p.with_extension("ocr.json").exists())
+        .collect();
+    jpgs.sort();
+
+    println!("{:<44} {:>6} {:>6} {:>8}", "fixture", "ours", "paddle", "recall");
+    let (mut sum_ours, mut sum_pad, mut sum_recall, mut n) = (0usize, 0usize, 0f64, 0usize);
+    for jpg in &jpgs {
+        let img = image::open(jpg).expect("decode").to_rgb8();
+        let dets = engine.recognize_image(&resize_and_pad(&img)).expect("detect");
+        let our_boxes: Vec<(f32, f32, f32, f32)> = dets
+            .iter()
+            .map(|d| {
+                let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+                for p in &d.points {
+                    x0 = x0.min(p[0]);
+                    y0 = y0.min(p[1]);
+                    x1 = x1.max(p[0]);
+                    y1 = y1.max(p[1]);
+                }
+                (x0, y0, x1, y1)
+            })
+            .collect();
+
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(jpg.with_extension("ocr.json")).unwrap()).unwrap();
+        let paddle: Vec<(f32, f32)> = v["detections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|det| {
+                let bbox = det[0].as_array()?;
+                let cx = bbox.iter().filter_map(|p| p[0].as_f64()).sum::<f64>() / 4.0;
+                let cy = bbox.iter().filter_map(|p| p[1].as_f64()).sum::<f64>() / 4.0;
+                Some((cx as f32, cy as f32))
+            })
+            .collect();
+
+        let covered = paddle
+            .iter()
+            .filter(|&&(cx, cy)| our_boxes.iter().any(|&(x0, y0, x1, y1)| cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1))
+            .count();
+        let recall = if paddle.is_empty() { 1.0 } else { covered as f64 / paddle.len() as f64 };
+        let name = jpg.file_stem().and_then(|s| s.to_str()).unwrap_or("?");
+        println!("{name:<44} {:>6} {:>6} {:>7.0}%", dets.len(), paddle.len(), recall * 100.0);
+        sum_ours += dets.len();
+        sum_pad += paddle.len();
+        sum_recall += recall;
+        n += 1;
+    }
+
+    println!("\n=== detcmp: {n} fixtures ===");
+    println!("  our lines: {sum_ours}   paddle lines: {sum_pad}   (we find {:.0}% as many)", pct(sum_ours, sum_pad));
+    println!("  avg recall (paddle lines our boxes cover): {:.0}%", if n > 0 { 100.0 * sum_recall / n as f64 } else { 0.0 });
+}
+
+/// Find the single `*<suffix>` ONNX in a model dir (works for both `mobile`
+/// and `server` naming, e.g. `PP-OCRv5_server_det.onnx`).
+fn find_model(dir: &Path, suffix: &str) -> PathBuf {
+    std::fs::read_dir(dir)
+        .unwrap_or_else(|_| panic!("model dir not found: {}", dir.display()))
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .find(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(suffix)))
+        .unwrap_or_else(|| panic!("no *{suffix} in {}", dir.display()))
 }
 
 /// Extract one receipt either live (ONNX on the jpg) or cached (desktop .ocr.json).

@@ -204,6 +204,35 @@ OCR is the external `ghcr.io/endle/beanbeaver-ocr` container (PaddleOCR), so
 confirm its model variant there. Likely highest-leverage next step: try the
 PP-OCRv5 **server** detection model on-device and re-measure with `device_sim`.
 
+## Bigger-model experiment + decision (2026-06-21)
+
+Question: does shipping bigger PP-OCRv5 models fix on-device quality? Measured on
+the 80-receipt private corpus (`device_sim`, same parser/scoring, only OCR varies):
+
+| metric | mobile (current) | hybrid (mob det+srv rec) | full-server | cached (desktop PaddleOCR) |
+|---|---|---|---|---|
+| merchant | 92% | 96% | 98% | 100% |
+| date | 81% | 69% ↓ | 70% ↓ | 100% |
+| total | 82% | 88% | 92% | 99% |
+| crit-items | 51% | 60% | 68% | 95% |
+| **fully correct** | **18%** | **26%** | **24%** | **84%** |
+
+**Bigger weights are NOT the fix** — best heavy config reaches 26% vs the 84% the
+same parser gets on desktop OCR, at +80–160 MB and ~3.7× latency (18.8 s/img on
+Mac CPU), and they even regress date. The bottleneck is **our Rust OCR pipeline,
+not the weights**. The desktop (`../beanbeaver-ocr`, paddleocr 3.3.0,
+`PaddleOCR(use_textline_orientation=True, lang='en', ocr_version='PP-OCRv5')`,
+**CPU**) runs PaddleOCR's full mature pipeline (its resize, DB postprocess,
+doc/textline orientation, decode); our `ocr-paddle` reimplements only part of it.
+
+**Decision: faithful Rust port** — keep on-device/serverless; close the gap by
+matching PaddleOCR's detection pipeline behavior. Our DBPostProcess *params*
+already match the model `inference.yml` (thresh 0.3, box_thresh 0.6, unclip 1.5,
+resize_long 960), so the divergence is **algorithmic/subtle** (unclip is an
+approximation, contour extraction, resize rounding, possible doc-orientation).
+Localize with `device_sim --detcmp` (our boxes vs `.ocr.json` boxes). Bigger
+models stay an option later (gated on a CoreML/ANE EP for latency).
+
 ## Notes / gotchas
 
 - **Parity is approximate**, by design: same model weights, but Core-Image vs PIL

@@ -215,6 +215,8 @@ __marimo__/
 
 # On-device OCR models (downloaded/converted; large, not committed)
 models/
+# Experiment dirs (server/hybrid model variants + conversion sources)
+models-*/
 
 # Generated UniFFI Swift bindings (regenerated from the compiled lib)
 crates/ffi/generated/
