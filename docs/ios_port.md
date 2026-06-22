@@ -284,9 +284,24 @@ image conditioning before and the parse after.
   vs text-recall 76%).
 - **`device_sim`'s 61% is a pessimistic lower bound for real iOS**: desktop
   deskews its inputs in software; on-device, **VisionKit already deskews/crops/
-  orients** before our pipeline. We've been measuring without the front-end
-  production has. (Quantify by re-running on deskewed/VisionKit-conditioned
-  inputs before porting deskew to Rust.)
+  orients** before our pipeline.
+
+**Deskew quantified (disproven as a lever):** ran master's deskew (EXIF + the
+projection-profile rotate) over the corpus, then `device_sim`. Only 13/80 images
+were skewed enough to rotate, and the aggregate barely moved (items 61%→60%,
+fully 24%→24%, total 82%→86%). So **deskew does not explain the gap** on this
+(mostly-straight) corpus — no need to port it. The dominant failures are
+single high-value lines: **total** (`0.00`, `2.41` for 72.41, `1841.64` for
+184.64) and **date** (`2006`/`0263`/`3014` for 2026) — traceable to detection
+box positions feeding slightly-off crops to the (faithful) recognizer.
+
+**Crash bug found + fixed** (`467a0d6`): `String::truncate(80)` in
+`receipt_text`/`receipt_spatial` panicked at a non-char-boundary on CJK receipt
+text (Python's `[:80]` is char-based). Real iOS crash risk; surfaced by the
+deskew run. Fixed to truncate by characters; `receipt-core` tests green.
+
+**Remaining lever = detection box-position fidelity** (the contour→min-box step),
+which gates both item coverage and total/date recognition. Deep, partly Bucket A.
 
 ## Notes / gotchas
 
