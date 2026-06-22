@@ -242,11 +242,21 @@ models stay an option later (gated on a CoreML/ANE EP for latency).
   bigger-model configs at *no* size cost. Net win, but a blunt one: it shifts
   a couple of public-fixture results (regresses upright costco `DOORDASH2X50`,
   tnt `WJ LIGHT…`; fixes WASABI tilts, WING HING) — Phase 5 gaps recalibrated.
-- **Next:** the deeper lever is box-segmentation fidelity — even where line
-  *counts* now match PaddleOCR, only ~62% of its boxes align with ours, so our
-  contour→min-box→unclip construction still splits/merges/positions
-  differently. Make it faithful to PaddleOCR (`get_mini_boxes`, the box
-  expansion, multiple-of-128 resize rounding).
+- **`unclip` is already faithful** (distance = area·ratio/perimeter, grow rect
+  per side = pyclipper round-offset of a rect) — verified, not a lever.
+- **Detect-vs-recog split** (`--detcmp` text recall, dense subset): box-recall
+  63% but **text recall 76%** — our box *positions* diverge from PaddleOCR (the
+  center metric understated us), yet item-extraction (61%) < text-recall (76%),
+  so positional divergence degrades receipt-core's spatial item↔price pairing.
+- **Can we fully reproduce desktop on-device? Unlikely** — irreducible gap from
+  a different contour lib (`imageproc` Suzuki vs OpenCV), float kernels,
+  recognition misreads, and possible PaddleOCR doc-orientation. Realistic to
+  keep closing it, not to hit byte-parity. Remaining levers, measured:
+  (1) **recognition accuracy** — date/digit garbling (`0263`, `3014`, `C0KE`)
+  looks like a fixable rec-preprocess/CTC issue, likely highest value;
+  (2) **box positional fidelity** — helps the parser pair items/prices;
+  (3) detection recall on the ~24% missed lines (diminishing returns).
+  Max-accuracy fallback remains the proven server/hybrid path.
 
 ## Notes / gotchas
 
