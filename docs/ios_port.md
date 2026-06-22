@@ -258,6 +258,36 @@ models stay an option later (gated on a CoreML/ANE EP for latency).
   (3) detection recall on the ~24% missed lines (diminishing returns).
   Max-accuracy fallback remains the proven server/hybrid path.
 
+## Desktop pipeline, stage-by-stage (master + ../beanbeaver-ocr)
+
+`../beanbeaver-ocr` is a thin wrapper: `PaddleOCR(use_textline_orientation=True,
+lang='en', ocr_version='PP-OCRv5', device='cpu').ocr(img)`. Per-model behavior is
+pinned by each model's `inference.yml` (we have them locally). Master owns the
+image conditioning before and the parse after.
+
+| Stage | Desktop | Our `ocr-paddle` | Verdict |
+|---|---|---|---|
+| Pre-OCR (`resize_image_bytes`/`image_pipeline.py`) | EXIF → **deskew** (BICUBIC, white) → resize LANCZOS cap 3000 → pad 50 → JPEG-95 | `resize_and_pad`: Lanczos cap 3000 → pad 50; no EXIF/deskew | resize+pad ✓; **deskew missing** |
+| Doc orientation | `use_doc_orientation_classify/unwarp` not set → off | none | ✓ not a gap |
+| Det resize | `DetResizeForTest resize_long 960`, round 128 | `RESIZE_LONG 1536`, round 32 | deliberate (helps); rounding minor |
+| DB postprocess | thresh .3/box .6/unclip 1.5; cv2 contours; minAreaRect; pyclipper | same params; imageproc contours; geo min-rect; analytic unclip | params+unclip ✓; **contours → box positions diverge** |
+| Textline-ori cls | PP-LCNet_x1_0_textline_ori | `classify.rs` | ✓ present |
+| Rec preprocess | `RecResizeImg` h48/dyn-W, `(x/255−.5)/.5` BGR | identical | ✓ **faithful** |
+| CTC decode | `CTCLabelDecode` greedy; blank0/dict1–18383/space18384 | identical | ✓ **faithful** |
+| Post-OCR | `transform_paddleocr_result` → `parse_receipt` | `process_receipt` (same receipt-core) | ✓ identical |
+
+**Conclusions:**
+- **Recognition + parsing are already faithful** — digit garbling (`0263`, `C0KE`)
+  is bad *inputs* to rec (misaligned crops / un-deskewed text), not a rec bug.
+- The two real Bucket-B gaps are **upstream of rec**: (a) missing **deskew**,
+  (b) **detection box positions** (imageproc vs OpenCV contours; box-recall 63%
+  vs text-recall 76%).
+- **`device_sim`'s 61% is a pessimistic lower bound for real iOS**: desktop
+  deskews its inputs in software; on-device, **VisionKit already deskews/crops/
+  orients** before our pipeline. We've been measuring without the front-end
+  production has. (Quantify by re-running on deskewed/VisionKit-conditioned
+  inputs before porting deskew to Rust.)
+
 ## Notes / gotchas
 
 - **Parity is approximate**, by design: same model weights, but Core-Image vs PIL
