@@ -758,11 +758,14 @@ fn maybe_push_warning(warnings: &mut Vec<TextParserWarning>, items_len: usize, m
 }
 
 fn truncated_context(line: &str) -> String {
-    let mut context = line.trim().to_string();
-    if context.len() > 80 {
-        context.truncate(80);
+    // Truncate to 80 *characters* (matching Python's `[:80]`); a byte-index
+    // `truncate(80)` panics when byte 80 lands inside a multibyte char (e.g.
+    // CJK text on Asian-grocery receipts).
+    let trimmed = line.trim();
+    match trimmed.char_indices().nth(80) {
+        Some((byte_idx, _)) => trimmed[..byte_idx].to_string(),
+        None => trimmed.to_string(),
     }
-    context
 }
 
 fn extract_trailing_noisy_price(line: &str) -> Option<(String, String, i64, usize)> {

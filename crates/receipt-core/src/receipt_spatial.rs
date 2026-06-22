@@ -1391,8 +1391,10 @@ pub fn extract_spatial_items(pages: Vec<PageInput>) -> SpatialExtractionOutcome 
             if context_text.is_empty() {
                 context_text = closest_line.full_text.trim().to_string();
             }
-            if context_text.len() > 80 {
-                context_text.truncate(80);
+            // Truncate by characters, not bytes: byte 80 may split a multibyte
+            // CJK char (Asian-grocery receipts) and panic.
+            if let Some((byte_idx, _)) = context_text.char_indices().nth(80) {
+                context_text.truncate(byte_idx);
             }
             let mut message = format!(
                 "maybe missed item near price {}",
