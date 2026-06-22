@@ -93,11 +93,12 @@ fn run_detcmp(engine: &mut OcrEngine, path: &Path) {
         .collect();
     jpgs.sort();
 
-    println!("{:<44} {:>6} {:>6} {:>8}", "fixture", "ours", "paddle", "recall");
-    let (mut sum_ours, mut sum_pad, mut sum_recall, mut n) = (0usize, 0usize, 0f64, 0usize);
+    println!("{:<40} {:>6} {:>6} {:>8} {:>8}", "fixture", "ours", "paddle", "box-rec", "txt-rec");
+    let (mut sum_ours, mut sum_pad, mut sum_recall, mut sum_txt, mut n) = (0usize, 0usize, 0f64, 0f64, 0usize);
     for jpg in &jpgs {
         let img = image::open(jpg).expect("decode").to_rgb8();
         let dets = engine.recognize_image(&resize_and_pad(&img)).expect("detect");
+        let our_texts: Vec<String> = dets.iter().map(|d| normalize_item(&d.text)).collect();
         let our_boxes: Vec<(f32, f32, f32, f32)> = dets
             .iter()
             .map(|d| {
@@ -113,7 +114,7 @@ fn run_detcmp(engine: &mut OcrEngine, path: &Path) {
             .collect();
 
         let v: Value = serde_json::from_str(&std::fs::read_to_string(jpg.with_extension("ocr.json")).unwrap()).unwrap();
-        let paddle: Vec<(f32, f32)> = v["detections"]
+        let paddle: Vec<(f32, f32, String)> = v["detections"]
             .as_array()
             .unwrap()
             .iter()
@@ -121,26 +122,38 @@ fn run_detcmp(engine: &mut OcrEngine, path: &Path) {
                 let bbox = det[0].as_array()?;
                 let cx = bbox.iter().filter_map(|p| p[0].as_f64()).sum::<f64>() / 4.0;
                 let cy = bbox.iter().filter_map(|p| p[1].as_f64()).sum::<f64>() / 4.0;
-                Some((cx as f32, cy as f32))
+                let text = det[1][0].as_str().unwrap_or_default().to_string();
+                Some((cx as f32, cy as f32, text))
             })
             .collect();
 
         let covered = paddle
             .iter()
-            .filter(|&&(cx, cy)| our_boxes.iter().any(|&(x0, y0, x1, y1)| cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1))
+            .filter(|(cx, cy, _)| our_boxes.iter().any(|&(x0, y0, x1, y1)| *cx >= x0 && *cx <= x1 && *cy >= y0 && *cy <= y1))
+            .count();
+        // Text recall: paddle lines whose (normalized) text appears among ours.
+        let txt_covered = paddle
+            .iter()
+            .filter(|(_, _, t)| {
+                let nt = normalize_item(t);
+                !nt.is_empty() && our_texts.iter().any(|o| o.contains(&nt) || nt.contains(o.as_str()))
+            })
             .count();
         let recall = if paddle.is_empty() { 1.0 } else { covered as f64 / paddle.len() as f64 };
+        let txt_recall = if paddle.is_empty() { 1.0 } else { txt_covered as f64 / paddle.len() as f64 };
         let name = jpg.file_stem().and_then(|s| s.to_str()).unwrap_or("?");
-        println!("{name:<44} {:>6} {:>6} {:>7.0}%", dets.len(), paddle.len(), recall * 100.0);
+        println!("{name:<40} {:>6} {:>6} {:>7.0}% {:>7.0}%", dets.len(), paddle.len(), recall * 100.0, txt_recall * 100.0);
         sum_ours += dets.len();
         sum_pad += paddle.len();
         sum_recall += recall;
+        sum_txt += txt_recall;
         n += 1;
     }
 
     println!("\n=== detcmp: {n} fixtures ===");
     println!("  our lines: {sum_ours}   paddle lines: {sum_pad}   (we find {:.0}% as many)", pct(sum_ours, sum_pad));
-    println!("  avg recall (paddle lines our boxes cover): {:.0}%", if n > 0 { 100.0 * sum_recall / n as f64 } else { 0.0 });
+    println!("  box recall (paddle lines our boxes cover):   {:.0}%", if n > 0 { 100.0 * sum_recall / n as f64 } else { 0.0 });
+    println!("  text recall (paddle lines we also read OK):  {:.0}%", if n > 0 { 100.0 * sum_txt / n as f64 } else { 0.0 });
 }
 
 /// Find the single `*<suffix>` ONNX in a model dir (works for both `mobile`
