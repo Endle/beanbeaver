@@ -8,6 +8,9 @@ struct ContentView: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var showScanner = false
 
+    /// When on, a copy of each camera-scanned receipt is saved to the camera roll.
+    @AppStorage("saveScansToPhotos") private var saveScansToPhotos = false
+
     /// Bundled DEBUG sample (a redacted Costco receipt fixture).
     private let sampleName = "costco_20260218_redact"
 
@@ -44,6 +47,11 @@ struct ContentView: View {
                     .controlSize(.large)
 #endif
 
+                    if VNDocumentCameraViewController.isSupported {
+                        Toggle("Save scans to Photos", isOn: $saveScansToPhotos)
+                            .font(.subheadline)
+                    }
+
                     statusView
                 }
                 .padding()
@@ -51,7 +59,10 @@ struct ContentView: View {
             .navigationTitle("BeanBeaver Scan")
             .fullScreenCover(isPresented: $showScanner) {
                 DocumentScanner(
-                    onScan: { data in Task { await pipeline.scan(imageData: data) } },
+                    onScan: { data in
+                        if saveScansToPhotos { PhotoSaver.save(imageData: data) }
+                        Task { await pipeline.scan(imageData: data) }
+                    },
                     onFinish: { showScanner = false }
                 )
                 .ignoresSafeArea()
