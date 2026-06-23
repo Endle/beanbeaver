@@ -59,7 +59,7 @@ fn re_skip_patterns() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(
-            r"(?i)TOTAL|SUBTOTAL|SUB\s+TOTAL|TOTALS?\s+ON|^TAX$|^HST|^GST|^PST|AFTER\s+TAX|\d+%$|^CASH\b|^CREDIT\b|^DEBIT\b|^CHANGE\b|^BALANCE|^VISA\b|^MASTERCARD\b|^AMEX\b|^APPROVED\b|^ACTIVATED\b|^PC\s+\d|^ACCT:|^ACCOUNT:|^REFERENCE|THANK YOU|WELCOME|RECEIPT|TRANSACTION|^POINTS\b|^REWARDS\b|^EARNED\b|^SAVED$|^YOU SAVED|^CARD|AUTH|REF\s*#|SLIP\s*#|^TILL|CASHIER|\bSTORE\b|^PHONE|ADDRESS|SIGNATURE|Merchant|^QTY$|^UNIT$|^SAV$|ITEM\s+COUNT|NUMBER\s+OF\s+ITEMS|XXXX+|^CAD|VERIFIED|^PIN$|CUSTOMER\s+COPY|COPY$|Optimum|Redeemed",
+            r"(?i)TOTAL|SUBTOTAL|SUB\s+TOTAL|TOTALS?\s+ON|^TAX$|^HST|^GST|^PST|AFTER\s+TAX|^\s*\d+\s*%$|^CASH\b|^CREDIT\b|^DEBIT\b|^CHANGE\b|^BALANCE|^VISA\b|^MASTERCARD\b|^AMEX\b|^APPROVED\b|^ACTIVATED\b|^PC\s+\d|^ACCT:|^ACCOUNT:|^REFERENCE|THANK YOU|WELCOME|RECEIPT|TRANSACTION|^POINTS\b|^REWARDS\b|^EARNED\b|^SAVED$|^YOU SAVED|^CARD|AUTH|REF\s*#|SLIP\s*#|^TILL|CASHIER|\bSTORE\b|^PHONE|ADDRESS|SIGNATURE|Merchant|^QTY$|^UNIT$|^SAV$|ITEM\s+COUNT|NUMBER\s+OF\s+ITEMS|XXXX+|^CAD|VERIFIED|^PIN$|CUSTOMER\s+COPY|COPY$|Optimum|Redeemed",
         )
         .unwrap()
     })
@@ -1753,6 +1753,36 @@ mod tests {
                 .iter()
                 .any(|it| it.description.contains("Natrel") && it.price_cents == 1119),
             "expected Natrel paired at 11.19, got {items:?}"
+        );
+    }
+
+    #[test]
+    fn keeps_item_whose_description_ends_in_percent_fat() {
+        // Costco 2026-05-24_costco_56_42: "458 MILK 2% 6.09" must parse. The
+        // price-stripped description "458 MILK 2%" ends in "2%" (fat content),
+        // which must NOT trip the standalone-percentage skip pattern. A bare
+        // "2%" line (a tax/rate row) must still be skipped.
+        let lines: Vec<String> = [
+            "458 MILK 2% 6.09",
+            "458 MILK 2% 6.09",
+            "1346909 KS ORG 2% 4L 10.29",
+            "2%",
+            "SUBTOTAL 22.47",
+            "TOTAL 22.47",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let summary_amounts = HashSet::from([2247i64]);
+        let (items, _warnings) = extract_text_items(&lines, &summary_amounts);
+        assert_eq!(
+            items.iter().filter(|it| it.price_cents == 609).count(),
+            2,
+            "both MILK 2% lines should parse, got {items:?}"
+        );
+        assert!(
+            !items.iter().any(|it| it.description.trim() == "2%"),
+            "bare percentage line must still be skipped, got {items:?}"
         );
     }
 
