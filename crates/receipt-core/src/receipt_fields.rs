@@ -44,6 +44,35 @@ fn re_month_name_date() -> &'static Regex {
     })
 }
 
+// Day-first month-name dates, e.g. "22-May-2026" or "22 May 2026".
+fn re_dmy_month_name_date() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)\b(\d{1,2})[-\s]+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*[-\s]+(\d{4})\b",
+        )
+        .unwrap()
+    })
+}
+
+fn month_number_from_name(name: &str) -> Option<i32> {
+    match name.get(..3).unwrap_or("").to_ascii_lowercase().as_str() {
+        "jan" => Some(1),
+        "feb" => Some(2),
+        "mar" => Some(3),
+        "apr" => Some(4),
+        "may" => Some(5),
+        "jun" => Some(6),
+        "jul" => Some(7),
+        "aug" => Some(8),
+        "sep" => Some(9),
+        "oct" => Some(10),
+        "nov" => Some(11),
+        "dec" => Some(12),
+        _ => None,
+    }
+}
+
 fn re_price_end() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"\$?\s*(\d+\.\d{2})\s*$").unwrap())
@@ -451,7 +480,15 @@ pub fn extract_subtotal(lines: &[String]) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_subtotal, extract_tenders, extract_total};
+    use super::{extract_date, extract_subtotal, extract_tenders, extract_total};
+
+    #[test]
+    fn date_parses_day_first_hyphenated_month_name() {
+        // Jin Lian Food / Clover format: "22-May-2026 3:22:42p.m."
+        let lines = vec!["22-May-2026 3:22:42p.m.".to_string()];
+        let parsed = extract_date(&lines, "", 2026).expect("date should parse");
+        assert_eq!((parsed.year, parsed.month, parsed.day), (2026, 5, 22));
+    }
 
     #[test]
     fn subtotal_tolerates_costco_subtctal_ocr_typo() {
@@ -743,26 +780,25 @@ pub fn extract_date(
         }
 
         for captures in re_month_name_date().captures_iter(&normalized_line) {
-            let month_key = captures
-                .get(1)
-                .map(|m| m.as_str().to_ascii_lowercase())
-                .unwrap_or_default();
-            let month = match month_key.get(..3).unwrap_or("") {
-                "jan" => Some(1),
-                "feb" => Some(2),
-                "mar" => Some(3),
-                "apr" => Some(4),
-                "may" => Some(5),
-                "jun" => Some(6),
-                "jul" => Some(7),
-                "aug" => Some(8),
-                "sep" => Some(9),
-                "oct" => Some(10),
-                "nov" => Some(11),
-                "dec" => Some(12),
-                _ => None,
-            };
+            let month = captures.get(1).and_then(|m| month_number_from_name(m.as_str()));
             let day = captures.get(2).and_then(|m| m.as_str().parse::<i32>().ok());
+            let year = captures.get(3).and_then(|m| m.as_str().parse::<i32>().ok());
+            let start = captures.get(1).map(|m| m.start()).unwrap_or(0);
+            if let (Some(month), Some(day), Some(year)) = (month, day, year) {
+                if let Some(parsed) = safe_date(year, month, day) {
+                    ranked_candidates.push(RankedDateCandidate {
+                        score: 26 + hint_bonus + year_score(parsed.year, current_year),
+                        line_index,
+                        start,
+                        date: parsed,
+                    });
+                }
+            }
+        }
+
+        for captures in re_dmy_month_name_date().captures_iter(&normalized_line) {
+            let day = captures.get(1).and_then(|m| m.as_str().parse::<i32>().ok());
+            let month = captures.get(2).and_then(|m| month_number_from_name(m.as_str()));
             let year = captures.get(3).and_then(|m| m.as_str().parse::<i32>().ok());
             let start = captures.get(1).map(|m| m.start()).unwrap_or(0);
             if let (Some(month), Some(day), Some(year)) = (month, day, year) {
