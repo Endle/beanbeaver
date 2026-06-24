@@ -62,8 +62,13 @@ our pipeline runs.
    `origin`; consider excluding the DEBUG bundled fixture from Release.
 
 **Key tool:** `cargo run -p ocr-paddle --example device_sim -- <dir-or-img>
-[--cached] [--detcmp] [--dump] [--models DIR]` — reproduces on-device behavior on
-macOS and scores vs `expected.json`. Needs `models/` populated.
+[--cached] [--detcmp] [--attrib] [--dump] [--models DIR]` — reproduces on-device
+behavior on macOS and scores vs `expected.json`. Diagnostics for the box-position
+work: `--attrib` buckets each live failure by stage (det-miss / bad-crop /
+true-rec / pairing, `ATTRIB_V=1` for a per-failure line); `--detcmp` compares our
+boxes vs the desktop `.ocr.json`; and `REC_DUMP_DIR=<dir> device_sim <img>` saves
+each line's pre-rec crop PNG + box/conf/text to separate crop-extraction from
+recognition. Needs `models/` populated.
 
 ## Locked decisions
 
