@@ -39,6 +39,18 @@ xcodebuild -scheme BeanBeaverScan -sdk iphonesimulator \
 
 Or just open `BeanBeaverScan.xcodeproj` in Xcode and run.
 
+## Iterating on the UI
+
+- **In Xcode:** `ContentView.swift` ships `#Preview` blocks (DEBUG-only) for the
+  result view (full / minimal) and the whole screen in every state
+  (idle / scanning / done / failed), backed by mock `ReceiptResult`s — no OCR
+  needed. `ReceiptPipeline.preview(_:)` pins a status; `ContentView(previewPipeline:)`
+  injects it. Edit a view and the canvas updates live.
+- **Headless screenshot:** `ios/sim-shot.sh` builds, installs, launches on the
+  booted simulator, and writes a PNG (add `--sample` for a real on-device OCR
+  run via `-autoRunSample`). Previews render only in Xcode's canvas, so this is
+  the way to capture the running app from the command line.
+
 ## Notes
 
 - The 3 `.onnx` models are bundled as app resources (referenced from

@@ -161,3 +161,83 @@ struct ReceiptResultView: View {
         }
     }
 }
+
+// MARK: - Previews
+
+#if DEBUG
+extension ContentView {
+    /// Preview/screenshot-only initializer that injects a pinned-status pipeline
+    /// so the whole screen renders in any state without running OCR.
+    init(previewPipeline: ReceiptPipeline) {
+        _pipeline = State(initialValue: previewPipeline)
+    }
+}
+
+extension ReceiptResult {
+    /// A rich, fully-populated result (mirrors the bundled Costco fixture).
+    static let previewFull = ReceiptResult(
+        merchant: "Costco Wholesale",
+        date: "2026-02-18",
+        dateIsPlaceholder: false,
+        total: "$148.73",
+        tax: "$9.42",
+        subtotal: "$139.31",
+        items: [
+            ReceiptItem(description: "ORG BANANAS", price: "$2.49", quantity: 1, category: "Groceries"),
+            ReceiptItem(description: "ROTISSERIE CHICKEN", price: "$4.99", quantity: 1, category: "Groceries"),
+            ReceiptItem(description: "KIRKLAND OLIVE OIL 2L", price: "$21.99", quantity: 1, category: "Groceries"),
+            ReceiptItem(description: "BATH TISSUE 30 ROLL", price: "$24.99", quantity: 1, category: "Household"),
+            ReceiptItem(description: "GASOLINE REGULAR", price: "$58.40", quantity: 1, category: nil),
+        ],
+        warnings: [],
+        beancount: """
+        2026-02-18 * "Costco Wholesale"
+          Expenses:Groceries          54.45 USD
+          Expenses:Household          24.99 USD
+          Expenses:Uncategorized      58.40 USD
+          Liabilities:CreditCard     -148.73 USD
+        """
+    )
+
+    /// A sparse result: no line items, inferred date, parser warnings.
+    static let previewMinimal = ReceiptResult(
+        merchant: "Corner Cafe",
+        date: nil,
+        dateIsPlaceholder: true,
+        total: "$6.50",
+        tax: nil,
+        subtotal: nil,
+        items: [],
+        warnings: ["No line items detected", "Date inferred from today"],
+        beancount: """
+        2026-06-24 * "Corner Cafe"
+          Expenses:Uncategorized       6.50 USD
+          Liabilities:CreditCard      -6.50 USD
+        """
+    )
+}
+
+#Preview("Result – full") {
+    ScrollView { ReceiptResultView(result: .previewFull).padding() }
+}
+
+#Preview("Result – minimal") {
+    ScrollView { ReceiptResultView(result: .previewMinimal).padding() }
+}
+
+#Preview("Screen – idle") {
+    ContentView()
+}
+
+#Preview("Screen – scanning") {
+    ContentView(previewPipeline: .preview(.scanning))
+}
+
+#Preview("Screen – done") {
+    ContentView(previewPipeline: .preview(.done(.previewFull)))
+}
+
+#Preview("Screen – failed") {
+    ContentView(previewPipeline: .preview(.failed("Couldn't read this receipt. Try retaking the photo in better light.")))
+}
+#endif

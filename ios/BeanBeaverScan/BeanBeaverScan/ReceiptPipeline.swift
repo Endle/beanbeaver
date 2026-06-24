@@ -79,3 +79,16 @@ final class ReceiptPipeline {
         }
     }
 }
+
+#if DEBUG
+extension ReceiptPipeline {
+    /// Preview/screenshot-only factory pinned to a given status, so SwiftUI
+    /// previews can render every UI state without running OCR. Must live in this
+    /// file: `status`'s setter is `private`.
+    static func preview(_ status: Status) -> ReceiptPipeline {
+        let pipeline = ReceiptPipeline()
+        pipeline.status = status
+        return pipeline
+    }
+}
+#endif
