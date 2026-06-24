@@ -251,6 +251,15 @@ fn re_leading_long_sku() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"^\d{6,}[A-Za-z]?\s*").unwrap())
 }
 
+// Short numeric item codes (Costco prints 3-5 digit codes, e.g. "458 MILK 2%").
+// Only stripped when followed by whitespace and more text, so a bare numeric
+// line is left to the digits-only guards. Used for the description-quality
+// (alpha-ratio) check, not for the displayed description.
+fn re_leading_short_code() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^\d{3,5}\s+(?P<rest>\S)").unwrap())
+}
+
 fn re_sale_marker() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"\(SALE\)\s*").unwrap())
@@ -420,6 +429,7 @@ fn strip_leading_receipt_codes(text: &str) -> String {
     let trimmed = text.trim();
     let trimmed = re_leading_qty_prefix().replace(trimmed, "");
     let trimmed = re_leading_long_sku().replace(trimmed.as_ref(), "");
+    let trimmed = re_leading_short_code().replace(trimmed.as_ref(), "$rest");
     let trimmed = re_leading_section_item_prefix().replace(trimmed.as_ref(), "");
     trimmed.trim().to_string()
 }
@@ -1474,6 +1484,54 @@ mod tests {
 
         assert!(observed.contains(&("Napa".to_string(), 31_700)));
         assert!(observed.contains(&("Soybean Sprout".to_string(), 10_300)));
+    }
+
+    #[test]
+    fn keeps_costco_short_code_item_with_percent_suffix() {
+        // Costco 2026-05-24_costco_56_42: "458 MILK 2% 6.09". The 3-digit item
+        // code "458" plus the "2%" fat suffix dragged the alpha-ratio below 0.5
+        // so both MILK lines were dropped, while "1346909 KS ORG 2% 4L" (6-digit
+        // code, stripped) survived. Stripping the short code restores them.
+        let page = PageInput {
+            lines: vec![
+                LineInput {
+                    text: "458 MILK 2% 6.09".to_string(),
+                    words: vec![
+                        word("458 MILK 2%", 0.30, 0.200, 0.54, 0.212),
+                        word("6.09", 0.82, 0.200, 0.90, 0.212),
+                    ],
+                },
+                LineInput {
+                    text: "458 MILK 2% 6.09".to_string(),
+                    words: vec![
+                        word("458 MILK 2%", 0.30, 0.220, 0.54, 0.232),
+                        word("6.09", 0.82, 0.220, 0.90, 0.232),
+                    ],
+                },
+                LineInput {
+                    text: "1346909 KS ORG 2% 4L 10.29".to_string(),
+                    words: vec![
+                        word("1346909 KS ORG 2% 4L", 0.30, 0.240, 0.58, 0.252),
+                        word("10.29", 0.82, 0.240, 0.90, 0.252),
+                    ],
+                },
+                LineInput {
+                    text: "TOTAL 26.47".to_string(),
+                    words: vec![
+                        word("TOTAL", 0.09, 0.500, 0.18, 0.512),
+                        word("26.47", 0.82, 0.500, 0.90, 0.512),
+                    ],
+                },
+            ],
+        };
+
+        let outcome = extract_spatial_items(vec![page]);
+        let milk_count = outcome
+            .items
+            .iter()
+            .filter(|item| item.price_scaled == 60_900)
+            .count();
+        assert_eq!(milk_count, 2, "both MILK 2% lines expected, got {:?}", outcome.items);
     }
 
     #[test]
