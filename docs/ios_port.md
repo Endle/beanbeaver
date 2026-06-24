@@ -18,11 +18,11 @@ Phase 5 validation, the `device_sim` macOS harness.
 
 **The live question is on-device OCR quality.** On a 80-receipt real-world corpus
 (`../beanbeaver-private-test`), the on-device pipeline scores **82% critical-items
-/ 44% fully-correct**, vs **97%/89%** for the *same parser* fed desktop PaddleOCR
-detections — and that cached figure **equals the desktop's honest score exactly**
-(71/71 of the non-`known_failures` fixtures pass; see "Scorer fix + corrected
-baseline" below). The **parser is fully faithful**; the residual is our Rust OCR
-pipeline. Two findings closed most of the original gap:
+/ 46% fully-correct / 95% total**, vs **97% / 89% / 99%** for the *same parser*
+fed desktop PaddleOCR detections — and that cached figure **equals the desktop's
+honest score exactly** (71/71 of the non-`known_failures` fixtures pass; see
+"Scorer fix + corrected baseline" below). The **parser is fully faithful**; the
+residual is our Rust OCR pipeline. Three findings closed most of the original gap:
 - **Recognition model was wrong** (the big one, 2026-06-24): we shipped the
   18,383-class multilingual `PP-OCRv5_mobile_rec`, but the desktop baseline uses
   `en_PP-OCRv5_mobile_rec` (436-class **English**). The huge vocabulary mis-read
@@ -30,21 +30,32 @@ pipeline. Two findings closed most of the original gap:
   **24%→44% fully, 61%→82% items, date 88%→100%** (see "Recognition model
   mismatch" below). Bigger *multilingual* weights never helped because the axis
   was wrong — narrower/English, not bigger.
-- **Detection box positions** are now the dominant residual (`imageproc` Suzuki
-  contours vs OpenCV): clipped/mispositioned crops cause the remaining 8 `0.00`/
-  partial total misreads (Costco/NoFrills), not recognition. deskew + `unclip`
-  ruled out. Cheap win banked earlier: detect at 1536 → +10% items.
+- **Total reconciliation** (2026-06-24): box-position artifacts mis-paired the
+  TOTAL label with the tax row (or nothing → `0.00`), but the correct total is
+  still printed in the payment block. `extract_total` now reconciles against the
+  card-tender / `AMOUNT:` echo, recovering the Costco totals: **live total
+  90%→95%, fully 44%→46%**, cached unchanged (parity-safe). The 4 remaining
+  total-fails read `0.00` (fail-loud; flagged for confirmation in matching).
+- **Detection box positions** are the dominant *remaining* residual (`imageproc`
+  Suzuki contours vs OpenCV): box-Y mis-registration scrambles label↔amount
+  pairing — the ~87-item "pairing" bucket and the 3 non-Costco `0.00` totals
+  share this root. deskew + `unclip` ruled out. Cheap win banked earlier: detect
+  at 1536 → +10% items.
 
 **Target (locked):** one scorer (`device_sim`, strict, no tolerance) for both
-modes; the goal is **live → cached**, currently **44% vs 89% fully** / **82% vs
-97% items**. The 9 genuinely-ambiguous `known_failures` are excluded for both
-(the desktop fails them too). `device_sim --live` is a *pessimistic* lower bound
-for real iOS: VisionKit deskews/crops/orients before our pipeline runs.
+modes; the goal is **live → cached**, currently **46% vs 89% fully** / **82% vs
+97% items** / **95% vs 99% total**. The 9 genuinely-ambiguous `known_failures`
+are excluded for both (the desktop fails them too). `device_sim --live` is a
+*pessimistic* lower bound for real iOS: VisionKit deskews/crops/orients before
+our pipeline runs.
 
 **Open next steps (ranked):**
 1. Detection box-position fidelity in `db_postprocess.rs` (the deep lever —
-   `imageproc` Suzuki contours vs OpenCV). Now the dominant residual: clipped
-   total-line crops (`72.41`→`2.41`) and `0.00` misreads on dense Costco/NoFrills.
+   `imageproc` Suzuki contours vs OpenCV). The shared root behind both remaining
+   gaps: the ~87-item "pairing" bucket and the 3 non-Costco `0.00` totals. Start
+   with the mask-vs-contour diagnostic (dump our DB binary mask vs PaddleOCR's on
+   a dense fixture: if the mask differs it's a cheap fix; if only contours differ
+   it's the hard `imageproc`-vs-OpenCV path).
 2. Item coverage on dense receipts (fresh / foody_mart) — detection recall on
    small/faint lines.
 3. Housekeeping: rename the bundled rec model to its `en_` name; push `ios` to
@@ -284,6 +295,38 @@ mostly Costco/NoFrills) plus item coverage on dense receipts — i.e. the
 `db_postprocess.rs` lever, *not* recognition. This also retires the old "bigger
 models don't fix it" framing as the wrong axis: the win was a *narrower* (English)
 model, not a bigger one.
+
+## Total reconciliation against the payment block (2026-06-24)
+
+Dissecting the 8 remaining live total-fails (all Costco/NoFrills) showed they are
+**not OCR failures** — the correct total is recognized, but a box-Y
+mis-registration scrambles the label↔amount pairing so the grouper hands
+`extract_total` a line like `TOTAL 20.14` (the tax row) with the real `245.87`
+orphaned on the next line. The dump for `costco_245_87`:
+
+```
+SUBTOTAL 9.69      (should be 225.73)
+TAX 225.73         (should be 20.14)
+TOTAL 20.14        (should be 245.87)   <- extract_total returns 20.14
+245.87             (orphaned; also in "AMOUNT: 245.87" and "MasterCard 245.87")
+```
+
+Fix (`receipt_fields::extract_total`): after the raw label-scan pick, **reconcile
+against the payment block** — prefer an amount corroborated by ≥2 payment lines
+(card tender / `AMOUNT:` echo) but only when it **exceeds** the candidate, so
+cash-with-change and split-tender receipts are untouched and correctly-paired
+receipts never trigger it. Shared with desktop via the PyO3 binding;
+parity-safe by construction and verified (cached corpus byte-identical).
+
+| metric | live (en) | live (en + reconcile) | cached |
+|---|---|---|---|
+| total | 90% | **95%** (76/80) | 99% |
+| fully correct | 44% | **46%** | 89% |
+
+Recovers the 4 Costco totals. The 4 remaining total-fails read `0.00` (fail-loud
+→ flagged for confirmation in matching, see the `total-matching-safeguard`
+memory; 1 is a `known_failures`). The non-Costco residual (C&C / NoFrills, no
+`AMOUNT:` echo) and the item-pairing bucket fall to the box-position lever.
 
 ## Scorer fix + corrected baseline (2026-06-24) — CACHED BASELINE
 
