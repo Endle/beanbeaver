@@ -1,13 +1,42 @@
 # iOS Port — Plan & Progress
 
-Status as of 2026-06-20. Branch: `ios`. This doc is the handoff for continuing
-development on macOS.
+Status as of 2026-06-23. Branch: `ios` (ahead of `origin/ios`, not pushed).
+This doc is the handoff for continuing development on macOS.
 
 ## Goal
 
 Move the **receipt parser** (capture → OCR → parse → categorize → beancount) to a
 **fully on-device, serverless iOS app**. Bank-statement import, receipt↔transaction
 matching, and ledger writes stay on desktop.
+
+## Current status (2026-06-23)
+
+**The prototype is built, runs on the iOS simulator and on a real iPhone, and
+extracts receipts fully on-device.** What's done: UniFFI seam + `.xcframework`,
+SwiftUI app (VisionKit capture + photo picker + export + "Save scans to Photos"),
+Phase 5 validation, the `device_sim` macOS harness.
+
+**The live question is on-device OCR quality.** On a 80-receipt real-world corpus
+(`../beanbeaver-private-test`), the on-device pipeline scores ~61% critical-items
+/ 24% fully-correct, vs 84%/95% for the *same parser* fed desktop PaddleOCR
+detections. So the **parser is faithful; the gap is our Rust OCR pipeline**, not
+the weights (bigger models don't fix it). Localized to **detection box
+positions** (`imageproc` contours vs OpenCV); recognition + CTC + parsing are
+already faithful; deskew and `unclip` were ruled out as levers. One cheap win
+banked: detect at 1536 (was 960) → +10% items.
+
+**Open next steps (ranked):**
+1. Reconcile cached-84% vs desktop-100%: is `device_sim --cached` under-measuring
+   (coordinate/padding convention), which would confirm the parser is fully
+   faithful and 100% of the residual is OCR?
+2. Detection box-position fidelity in `db_postprocess.rs` (the deep lever).
+3. Confirm the `../beanbeaver-ocr` container's PP-OCRv5 variant (mobile vs server).
+4. Housekeeping: push `ios` to `origin`; consider excluding the DEBUG bundled
+   fixture from Release.
+
+**Key tool:** `cargo run -p ocr-paddle --example device_sim -- <dir-or-img>
+[--cached] [--detcmp] [--dump] [--models DIR]` — reproduces on-device behavior on
+macOS and scores vs `expected.json`. Needs `models/` populated.
 
 ## Locked decisions
 
