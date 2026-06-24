@@ -42,6 +42,7 @@ fn main() {
     let mut dump = false;
     let mut cached = false;
     let mut detcmp = false;
+    let mut attrib = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -51,6 +52,7 @@ fn main() {
             "--dump" => dump = true,
             "--cached" => cached = true,
             "--detcmp" => detcmp = true,
+            "--attrib" => attrib = true,
             _ => path = Some(PathBuf::from(a)),
         }
     }
@@ -72,6 +74,11 @@ fn main() {
 
     if detcmp {
         run_detcmp(engine.as_mut().expect("engine for detcmp"), &path);
+        return;
+    }
+
+    if attrib {
+        run_attrib(engine.as_mut().expect("engine for attrib"), &path);
         return;
     }
 
@@ -154,6 +161,234 @@ fn run_detcmp(engine: &mut OcrEngine, path: &Path) {
     println!("  our lines: {sum_ours}   paddle lines: {sum_pad}   (we find {:.0}% as many)", pct(sum_ours, sum_pad));
     println!("  box recall (paddle lines our boxes cover):   {:.0}%", if n > 0 { 100.0 * sum_recall / n as f64 } else { 0.0 });
     println!("  text recall (paddle lines we also read OK):  {:.0}%", if n > 0 { 100.0 * sum_txt / n as f64 } else { 0.0 });
+}
+
+/// Per-field tally of why live failures happened, vs the desktop OCR (`.ocr.json`)
+/// as the "winnable" reference and `expected.json` as ground truth.
+#[derive(Clone, Copy, Debug, Default)]
+struct CauseCounts {
+    miss: usize,         // line not detected at all (desktop found it, we didn't)
+    bad_crop: usize,     // detected but box mispositioned -> garbled crop
+    true_rec: usize,     // box well-placed but text still wrong -> recognition bug
+    pairing: usize,      // text read OK, parser produced wrong/no value (mis-pair / price misread)
+    desk_missing: usize, // desktop OCR also lacked it (not our gap)
+    unknown: usize,      // couldn't locate a desktop reference line (heuristic miss)
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Cause {
+    Miss,
+    BadCrop,
+    TrueRec,
+    Pairing,
+    DeskMissing,
+    Unknown,
+}
+
+fn bump(c: &mut CauseCounts, cause: Cause) {
+    match cause {
+        Cause::Miss => c.miss += 1,
+        Cause::BadCrop => c.bad_crop += 1,
+        Cause::TrueRec => c.true_rec += 1,
+        Cause::Pairing => c.pairing += 1,
+        Cause::DeskMissing => c.desk_missing += 1,
+        Cause::Unknown => c.unknown += 1,
+    }
+}
+
+type Bx = (f32, f32, f32, f32);
+
+fn det_bbox(points: &[[f32; 2]; 4]) -> Bx {
+    let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    for p in points {
+        x0 = x0.min(p[0]);
+        y0 = y0.min(p[1]);
+        x1 = x1.max(p[0]);
+        y1 = y1.max(p[1]);
+    }
+    (x0, y0, x1, y1)
+}
+
+fn iou(a: Bx, b: Bx) -> f32 {
+    let inter = (a.2.min(b.2) - a.0.max(b.0)).max(0.0) * (a.3.min(b.3) - a.1.max(b.1)).max(0.0);
+    let area = |x: Bx| (x.2 - x.0).max(0.0) * (x.3 - x.1).max(0.0);
+    let uni = area(a) + area(b) - inter;
+    if uni <= 0.0 { 0.0 } else { inter / uni }
+}
+
+fn digits(s: &str) -> String {
+    s.chars().filter(|c| c.is_ascii_digit()).collect()
+}
+
+/// Given the desktop "ground-truth" box for a failed line, classify what the live
+/// pipeline did with it. `recognized` = some overlapping live box already read the
+/// line's key text correctly, so the parser (not OCR) is at fault.
+fn classify_against_deskbox(desk_box: Bx, live: &[(Bx, String)], recognized: bool) -> Cause {
+    if recognized {
+        return Cause::Pairing;
+    }
+    let best = live
+        .iter()
+        .map(|(b, _)| iou(*b, desk_box))
+        .fold(0.0f32, f32::max);
+    if best <= 0.05 {
+        Cause::Miss
+    } else if best > 0.5 {
+        Cause::TrueRec
+    } else {
+        Cause::BadCrop
+    }
+}
+
+/// `--attrib`: for every live scoring failure, attribute it to a pipeline stage by
+/// diffing live detections against the desktop `.ocr.json` and `expected.json`.
+/// Sizes the detection-recall vs box-position vs recognition buckets. Set
+/// `ATTRIB_V=1` for a per-failure line.
+fn run_attrib(engine: &mut OcrEngine, path: &Path) {
+    let mut jpgs: Vec<PathBuf> = std::fs::read_dir(path)
+        .expect("read dir")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.extension().is_some_and(|x| x == "jpg")
+                && p.with_extension("ocr.json").exists()
+                && p.with_extension("expected.json").exists()
+        })
+        .collect();
+    jpgs.sort();
+
+    let today = (2026i32, 6u32, 21u32);
+    let verbose = std::env::var("ATTRIB_V").is_ok();
+    let (mut date_c, mut total_c, mut item_c) =
+        (CauseCounts::default(), CauseCounts::default(), CauseCounts::default());
+    let (mut date_fail, mut total_fail, mut item_miss) = (0usize, 0usize, 0usize);
+
+    for jpg in &jpgs {
+        let name = jpg.file_stem().and_then(|s| s.to_str()).unwrap_or("?");
+        let img = image::open(jpg).expect("decode").to_rgb8();
+
+        // Live detections (text + box, padded space — what process_image sees).
+        let live_raw = engine.recognize_image(&resize_and_pad(&img)).expect("detect");
+        let live: Vec<(Bx, String)> = live_raw.iter().map(|d| (det_bbox(&d.points), d.text.clone())).collect();
+
+        // Desktop detections from .ocr.json (also padded space).
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(jpg.with_extension("ocr.json")).unwrap()).unwrap();
+        let desk: Vec<(Bx, String)> = v["detections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|det| {
+                let bbox = det[0].as_array()?;
+                let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+                for p in bbox {
+                    let pa = p.as_array()?;
+                    let (x, y) = (pa[0].as_f64()?, pa[1].as_f64()?);
+                    x0 = x0.min(x);
+                    y0 = y0.min(y);
+                    x1 = x1.max(x);
+                    y1 = y1.max(y);
+                }
+                let text = det[1][0].as_str().unwrap_or_default().to_string();
+                Some(((x0 as f32, y0 as f32, x1 as f32, y1 as f32), text))
+            })
+            .collect();
+
+        // Live parsed result.
+        let pr = process_image(engine, &img, &format!("{name}.jpg"), today, "Liabilities:CreditCard", None).expect("process_image");
+        let d = &pr.parsed;
+        let expected: Value = serde_json::from_str(&std::fs::read_to_string(jpg.with_extension("expected.json")).unwrap()).unwrap();
+
+        // ---- items ----
+        if let Some(items) = expected.get("critical_items").and_then(Value::as_array) {
+            for ci in items {
+                let desc = ci.get("description").and_then(Value::as_str).unwrap_or_default();
+                let price = ci.get("price").and_then(Value::as_str).unwrap_or_default();
+                let parser_ok = d.items.iter().any(|it| item_desc_matches(&it.description, desc) && price_matches(price, &it.price));
+                if parser_ok {
+                    continue;
+                }
+                item_miss += 1;
+                let key = normalize_item(desc);
+                let key_hit = |t: &str| {
+                    let nt = normalize_item(t);
+                    !nt.is_empty() && (nt.contains(&key) || key.contains(&nt))
+                };
+                let cause = match desk.iter().find(|(_, t)| key_hit(t)).map(|(b, _)| *b) {
+                    None => Cause::DeskMissing,
+                    Some(b) => {
+                        let recognized = live.iter().any(|(lb, t)| iou(*lb, b) > 0.05 && key_hit(t));
+                        classify_against_deskbox(b, &live, recognized)
+                    }
+                };
+                bump(&mut item_c, cause);
+                if verbose {
+                    eprintln!("  [{name}] ITEM '{desc}' @{price} -> {cause:?}");
+                }
+            }
+        }
+
+        // ---- date ----
+        if let Some(exp) = expected.get("date").and_then(Value::as_str) {
+            let got = d.date.map(fmt_ymd);
+            if got.as_deref() != Some(exp) {
+                date_fail += 1;
+                let year = &exp[0..4];
+                let cause = match desk.iter().find(|(_, t)| t.contains(year)) {
+                    None => Cause::Unknown,
+                    Some((b, dt)) => {
+                        let key = digits(dt);
+                        let recognized = live.iter().any(|(_, t)| !key.is_empty() && digits(t).contains(&key));
+                        classify_against_deskbox(*b, &live, recognized)
+                    }
+                };
+                bump(&mut date_c, cause);
+                if verbose {
+                    eprintln!("  [{name}] DATE exp {exp} got {got:?} -> {cause:?}");
+                }
+            }
+        }
+
+        // ---- total ----
+        if let Some(exp) = expected.get("total").and_then(Value::as_str) {
+            if !price_matches(exp, &d.total) {
+                total_fail += 1;
+                let key = digits(exp);
+                let cause = match desk.iter().find(|(_, t)| !key.is_empty() && digits(t).contains(&key)) {
+                    None => Cause::Unknown,
+                    Some((b, _)) => {
+                        let recognized = live.iter().any(|(_, t)| digits(t).contains(&key));
+                        classify_against_deskbox(*b, &live, recognized)
+                    }
+                };
+                bump(&mut total_c, cause);
+                if verbose {
+                    eprintln!("  [{name}] TOTAL exp {exp} got {} -> {cause:?}", d.total);
+                }
+            }
+        }
+    }
+
+    let hdr = format!(
+        "{:<7} {:>6}   {:>8} {:>8} {:>8} {:>8} {:>9} {:>7}",
+        "field", "failed", "det-miss", "bad-crop", "true-rec", "pairing", "desk-miss", "unknown"
+    );
+    let row = |label: &str, n: usize, c: &CauseCounts| {
+        println!(
+            "{label:<7} {n:>6}   {:>8} {:>8} {:>8} {:>8} {:>9} {:>7}",
+            c.miss, c.bad_crop, c.true_rec, c.pairing, c.desk_missing, c.unknown
+        );
+    };
+    println!("\n=== failure attribution (live, {} fixtures) ===", jpgs.len());
+    println!("{hdr}");
+    row("date", date_fail, &date_c);
+    row("total", total_fail, &total_c);
+    row("items", item_miss, &item_c);
+    println!(
+        "\nlegend: det-miss=line not detected | bad-crop=detected, box mispositioned (->bad crop) |"
+    );
+    println!(
+        "        true-rec=box well-placed, text still wrong (rec bug) | pairing=text read OK, parser mis-paired/price-misread |"
+    );
+    println!("        desk-miss=desktop OCR also lacked it (not our gap) | unknown=no desktop reference line located");
 }
 
 /// Find the single `*<suffix>` ONNX in a model dir (works for both `mobile`
