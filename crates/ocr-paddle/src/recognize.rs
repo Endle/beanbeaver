@@ -15,10 +15,20 @@ use ort::value::Tensor;
 use crate::db_postprocess::Quad;
 
 const REC_HEIGHT: u32 = 48;
-/// Bundled PP-OCRv5 recognition dictionary (one character per line), extracted
-/// from the model's `inference.yml`. Index 0 of the model is the CTC blank, so
-/// model class `i` (>=1) maps to `DICT[i-1]`.
-const DICT_TEXT: &str = include_str!("../assets/ppocrv5_rec_dict.txt");
+/// Bundled recognition dictionary (one character per line), extracted from the
+/// model's `inference.yml`. Index 0 of the model is the CTC blank, so model class
+/// `i` (>=1) maps to `DICT[i-1]`.
+///
+/// We ship the **English** PP-OCRv5 mobile dict (436 Latin/digit/symbol classes),
+/// matching the desktop `beanbeaver-ocr` service, which runs `lang="en"` ->
+/// `en_PP-OCRv5_mobile_rec`. The target receipts are bilingual (CJK + English);
+/// the desktop pipeline ignores the CJK column and reads the English/numeric
+/// text, and every test fixture is scored on that. A small Latin-only CTC head is
+/// far less prone to digit/punctuation confusion than the 18,383-class
+/// multilingual model (the on-device gap was traced to exactly such garbles), and
+/// it is smaller + faster. The multilingual dict remains in `assets/` for a
+/// future opt-in CJK build.
+const DICT_TEXT: &str = include_str!("../assets/en_ppocrv5_rec_dict.txt");
 
 pub struct Recognizer {
     session: Session,
@@ -157,7 +167,7 @@ mod tests {
     #[test]
     fn dict_loads_with_expected_size() {
         let r = DICT_TEXT.lines().count();
-        assert_eq!(r, 18383, "PP-OCRv5 rec dict size");
+        assert_eq!(r, 436, "en_PP-OCRv5_mobile_rec dict size");
     }
 
     // Full det+rec on a real receipt. Run with:
