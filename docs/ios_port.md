@@ -1,6 +1,6 @@
 # iOS Port — Plan & Progress
 
-Status as of 2026-06-23. Branch: `ios` (ahead of `origin/ios`, not pushed).
+Status as of 2026-06-24. Branch: `ios` (ahead of `origin/ios`, not pushed).
 This doc is the handoff for continuing development on macOS.
 
 ## Goal
@@ -9,7 +9,7 @@ Move the **receipt parser** (capture → OCR → parse → categorize → beanco
 **fully on-device, serverless iOS app**. Bank-statement import, receipt↔transaction
 matching, and ledger writes stay on desktop.
 
-## Current status (2026-06-23)
+## Current status (2026-06-24)
 
 **The prototype is built, runs on the iOS simulator and on a real iPhone, and
 extracts receipts fully on-device.** What's done: UniFFI seam + `.xcframework`,
@@ -18,18 +18,26 @@ Phase 5 validation, the `device_sim` macOS harness.
 
 **The live question is on-device OCR quality.** On a 80-receipt real-world corpus
 (`../beanbeaver-private-test`), the on-device pipeline scores ~61% critical-items
-/ 24% fully-correct, vs 84%/95% for the *same parser* fed desktop PaddleOCR
-detections. So the **parser is faithful; the gap is our Rust OCR pipeline**, not
-the weights (bigger models don't fix it). Localized to **detection box
-positions** (`imageproc` contours vs OpenCV); recognition + CTC + parsing are
-already faithful; deskew and `unclip` were ruled out as levers. One cheap win
-banked: detect at 1536 (was 960) → +10% items.
+/ 24% fully-correct, vs **97%/89%** for the *same parser* fed desktop PaddleOCR
+detections — and that cached figure now **equals the desktop's honest score
+exactly** (71/71 of the non-`known_failures` fixtures pass; see "Scorer fix +
+corrected baseline" below). So the **parser is fully faithful; the gap is
+entirely our Rust OCR pipeline**, not the weights (bigger models don't fix it).
+Localized to **detection box positions** (`imageproc` contours vs OpenCV);
+recognition + CTC + parsing are already faithful; deskew and `unclip` were ruled
+out as levers. One cheap win banked: detect at 1536 (was 960) → +10% items.
+
+**Target (locked):** one scorer (`device_sim`, strict, no tolerance) for both
+modes; the goal is **live → cached**, currently **24% vs 89% fully** / **61% vs
+97% items**. The 9 genuinely-ambiguous `known_failures` are excluded for both
+(the desktop fails them too). `device_sim --live` is a *pessimistic* lower bound
+for real iOS: VisionKit deskews/crops/orients before our pipeline runs.
 
 **Open next steps (ranked):**
-1. Reconcile cached-84% vs desktop-100%: is `device_sim --cached` under-measuring
-   (coordinate/padding convention), which would confirm the parser is fully
-   faithful and 100% of the residual is OCR?
-2. Detection box-position fidelity in `db_postprocess.rs` (the deep lever).
+1. Detection box-position fidelity in `db_postprocess.rs` (the deep lever —
+   `imageproc` Suzuki contours vs OpenCV; gates both item coverage and
+   total/date recognition).
+2. Recognition accuracy on digit garbling (date/total misreads on degraded crops).
 3. Confirm the `../beanbeaver-ocr` container's PP-OCRv5 variant (mobile vs server).
 4. Housekeeping: push `ios` to `origin`; consider excluding the DEBUG bundled
    fixture from Release.
@@ -208,7 +216,42 @@ Not needed on macOS.
    re-baseline private fixtures **append-only** (never overwrite — see
    `PRIVATE_TESTS.md` / `e2e_test.md`).
 
+## Scorer fix + corrected baseline (2026-06-24) — CURRENT NUMBERS
+
+`device_sim`'s scorer (and `phase5_e2e.rs`) ignored the `expected.json`
+`category_optional` flag — it always enforced the category, even on items the
+test marks category-don't-care (items even the desktop pipeline mis-categorizes).
+The Python e2e harness honors the flag (`test_e2e_receipts.py`). Both Rust scorers
+were fixed to honor it. Corrected numbers (mobile det@1536, 80-receipt corpus):
+
+| metric | live (on-device) | cached (= desktop-honest baseline) |
+|---|---|---|
+| merchant | 90% | 100% |
+| date | 88% | 100% |
+| total | 82% | 99% |
+| critical items | **61%** (396/644) | **97%** (622/644) |
+| fully correct | **24%** (19/80) | **89%** (71/80) |
+
+**Two findings:**
+- **The old cached "84%/95%" was measurement error, not parser drift.** The 4
+  "residual" fixtures (`c_c_supermarket`, `costco_245_87`, `bestco_20260204c`,
+  `cnc_20260130`) failed only on 7 `category_optional` items whose desc+price the
+  Rust parser got *right*. With the flag honored, cached = **71/80 = 89%**, and the
+  only failures left are the 9 desktop `known_failures` — i.e. the Rust parser is
+  **71/71 faithful** on every fixture that should pass. **Cached now ==
+  desktop-honest.** This answers the prior Step-1 question ("is `device_sim
+  --cached` under-measuring?"): yes — via `known_failures` masking in pytest + the
+  `category_optional` scorer bug; both now accounted for.
+- **The fix did NOT move live.** It only rescues items with correct desc+price but
+  wrong category; on degraded live OCR those items fail upstream on desc/price, so
+  the leniency never applies. Net: the live→cached gap *widened* (fully −60→−65,
+  items −34→−36), reinforcing that the on-device OCR stage is the entire bottleneck.
+
 ## On-device OCR quality (measured 2026-06-21, private corpus, 80 receipts)
+
+> ⚠️ Superseded by the 2026-06-24 table above — the cached column here (95%/84%)
+> predates the `category_optional` scorer fix, and the live column predates the
+> 1536 detect-resize win. Kept for history.
 
 `cargo run -p ocr-paddle --example device_sim -- <dir-or-image> [--cached] [--dump]`
 runs the on-device pipeline on macOS (`live` = on-device ONNX models; `--cached`
@@ -246,9 +289,10 @@ the 80-receipt private corpus (`device_sim`, same parser/scoring, only OCR varie
 | crit-items | 51% | 60% | 68% | 95% |
 | **fully correct** | **18%** | **26%** | **24%** | **84%** |
 
-**Bigger weights are NOT the fix** — best heavy config reaches 26% vs the 84% the
-same parser gets on desktop OCR, at +80–160 MB and ~3.7× latency (18.8 s/img on
-Mac CPU), and they even regress date. The bottleneck is **our Rust OCR pipeline,
+**Bigger weights are NOT the fix** — best heavy config reaches 26% vs the 89% the
+same parser gets on desktop OCR (this table predates the 2026-06-24 scorer fix, so
+it shows the cached column as 84%/95%; corrected to 89%/97%), at +80–160 MB and
+~3.7× latency (18.8 s/img on Mac CPU), and they even regress date. The bottleneck is **our Rust OCR pipeline,
 not the weights**. The desktop (`../beanbeaver-ocr`, paddleocr 3.3.0,
 `PaddleOCR(use_textline_orientation=True, lang='en', ocr_version='PP-OCRv5')`,
 **CPU**) runs PaddleOCR's full mature pipeline (its resize, DB postprocess,
