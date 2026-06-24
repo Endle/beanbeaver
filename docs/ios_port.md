@@ -17,30 +17,38 @@ SwiftUI app (VisionKit capture + photo picker + export + "Save scans to Photos")
 Phase 5 validation, the `device_sim` macOS harness.
 
 **The live question is on-device OCR quality.** On a 80-receipt real-world corpus
-(`../beanbeaver-private-test`), the on-device pipeline scores ~61% critical-items
-/ 24% fully-correct, vs **97%/89%** for the *same parser* fed desktop PaddleOCR
-detections — and that cached figure now **equals the desktop's honest score
-exactly** (71/71 of the non-`known_failures` fixtures pass; see "Scorer fix +
-corrected baseline" below). So the **parser is fully faithful; the gap is
-entirely our Rust OCR pipeline**, not the weights (bigger models don't fix it).
-Localized to **detection box positions** (`imageproc` contours vs OpenCV);
-recognition + CTC + parsing are already faithful; deskew and `unclip` were ruled
-out as levers. One cheap win banked: detect at 1536 (was 960) → +10% items.
+(`../beanbeaver-private-test`), the on-device pipeline scores **82% critical-items
+/ 44% fully-correct**, vs **97%/89%** for the *same parser* fed desktop PaddleOCR
+detections — and that cached figure **equals the desktop's honest score exactly**
+(71/71 of the non-`known_failures` fixtures pass; see "Scorer fix + corrected
+baseline" below). The **parser is fully faithful**; the residual is our Rust OCR
+pipeline. Two findings closed most of the original gap:
+- **Recognition model was wrong** (the big one, 2026-06-24): we shipped the
+  18,383-class multilingual `PP-OCRv5_mobile_rec`, but the desktop baseline uses
+  `en_PP-OCRv5_mobile_rec` (436-class **English**). The huge vocabulary mis-read
+  digits/punct on clean crops. Switching to the English model lifted live
+  **24%→44% fully, 61%→82% items, date 88%→100%** (see "Recognition model
+  mismatch" below). Bigger *multilingual* weights never helped because the axis
+  was wrong — narrower/English, not bigger.
+- **Detection box positions** are now the dominant residual (`imageproc` Suzuki
+  contours vs OpenCV): clipped/mispositioned crops cause the remaining 8 `0.00`/
+  partial total misreads (Costco/NoFrills), not recognition. deskew + `unclip`
+  ruled out. Cheap win banked earlier: detect at 1536 → +10% items.
 
 **Target (locked):** one scorer (`device_sim`, strict, no tolerance) for both
-modes; the goal is **live → cached**, currently **24% vs 89% fully** / **61% vs
+modes; the goal is **live → cached**, currently **44% vs 89% fully** / **82% vs
 97% items**. The 9 genuinely-ambiguous `known_failures` are excluded for both
 (the desktop fails them too). `device_sim --live` is a *pessimistic* lower bound
 for real iOS: VisionKit deskews/crops/orients before our pipeline runs.
 
 **Open next steps (ranked):**
 1. Detection box-position fidelity in `db_postprocess.rs` (the deep lever —
-   `imageproc` Suzuki contours vs OpenCV; gates both item coverage and
-   total/date recognition).
-2. Recognition accuracy on digit garbling (date/total misreads on degraded crops).
-3. Confirm the `../beanbeaver-ocr` container's PP-OCRv5 variant (mobile vs server).
-4. Housekeeping: push `ios` to `origin`; consider excluding the DEBUG bundled
-   fixture from Release.
+   `imageproc` Suzuki contours vs OpenCV). Now the dominant residual: clipped
+   total-line crops (`72.41`→`2.41`) and `0.00` misreads on dense Costco/NoFrills.
+2. Item coverage on dense receipts (fresh / foody_mart) — detection recall on
+   small/faint lines.
+3. Housekeeping: rename the bundled rec model to its `en_` name; push `ios` to
+   `origin`; consider excluding the DEBUG bundled fixture from Release.
 
 **Key tool:** `cargo run -p ocr-paddle --example device_sim -- <dir-or-img>
 [--cached] [--detcmp] [--dump] [--models DIR]` — reproduces on-device behavior on
@@ -48,9 +56,14 @@ macOS and scores vs `expected.json`. Needs `models/` populated.
 
 ## Locked decisions
 
-- **On-device PaddleOCR (PP-OCRv5)** — same model as the desktop `beanbeaver-ocr`
-  service, so the parser needs no re-tuning (output is *close*, not byte-identical;
-  see "Parity" below).
+- **On-device PaddleOCR (PP-OCRv5)** — the **English** recognition model
+  (`en_PP-OCRv5_mobile_rec`, 436-class), matching the desktop `beanbeaver-ocr`
+  service (`lang="en"` → the same English model). The target receipts are
+  bilingual; both pipelines ignore the CJK column and read the English/numeric
+  text. (We initially mis-shipped the 18,383-class multilingual rec; corrected
+  2026-06-24 — see "Recognition model mismatch".) Detection + textline-orientation
+  are the PP-OCRv5 mobile models. Output is *close*, not byte-identical (see
+  "Parity").
 - **Native SwiftUI** app (iOS 17+, iPhone 15+). Not React Native — the hard parts
   (VisionKit, Rust FFI, ONNX Runtime) are all native; cross-platform isn't needed.
 - **"Fat-Rust" seam**: Swift does capture + Core Image preprocess; **everything else
@@ -149,35 +162,51 @@ bindings generate via `cargo run -p bb-receipt-ffi --bin uniffi-bindgen -- gener
 auto-categorized items. Detection alone: 43 boxes vs the server's 46 (~93%).
 `cargo test -p ocr-paddle -- --include-ignored` → 10 passed.
 
-## Model setup (REQUIRED — `models/` is git-ignored)
+## Model setup (models are committed to git)
 
-The ONNX models are **not committed** (large; bundle into the app instead). On the
-Mac, fetch + convert them once. The desktop service uses **PaddleOCR 3.3.0,
-PP-OCRv5, `lang='en'`, `use_textline_orientation=True`** — match it.
+NOTE: contrary to an earlier version of this doc, the ONNX models in `models/`
+**are tracked in git** (despite the `models/` `.gitignore` entry — they were
+force-added). This is a deliberate early-dev convenience for switching between the
+Linux workstation and the M1 Mac; a normal checkout has them and needs **no setup**
+to build/run. (Revisit at beta for a proper large-file strategy.) The desktop
+service uses **PaddleOCR 3.3.0, PP-OCRv5, `lang='en'`,
+`use_textline_orientation=True`**; the on-device models match it:
+
+- `PP-OCRv5_mobile_det.onnx` — detection (~4.8 MB)
+- `PP-OCRv5_mobile_rec.onnx` — recognition; holds the **English**
+  `en_PP-OCRv5_mobile_rec` weights (436-class, ~7.9 MB) under this filename to
+  avoid churn in `crates/ffi`/`process.rs`/`phase5_e2e`/the xcodeproj (rename at
+  beta). See "Recognition model mismatch".
+- `PP-LCNet_x1_0_textline_ori.onnx` — textline orientation (~6.7 MB)
+
+To **regenerate/upgrade** them (paddlepaddle needs Python 3.12):
 
 ```bash
-cd <repo>/models   # create if missing: mkdir -p models
+python3.12 -m venv /tmp/p2o && source /tmp/p2o/bin/activate
+pip install --upgrade pip && pip install paddlepaddle paddle2onnx packaging
 
-# 1. Download official PP-OCRv5 mobile inference models (Paddle 3.0 PIR format)
-for u in PP-OCRv5_mobile_det PP-OCRv5_mobile_rec PP-LCNet_x1_0_textline_ori; do
+# rec (ENGLISH): from the PaddleX cache, populated by running the desktop OCR once
+paddle2onnx --model_dir ~/.paddlex/official_models/en_PP-OCRv5_mobile_rec \
+  --model_filename inference.json --params_filename inference.pdiparams \
+  --save_file models/PP-OCRv5_mobile_rec.onnx --opset_version 14
+
+# det + textline-ori: official PP-OCRv5 mobile tarballs
+cd models
+for u in PP-OCRv5_mobile_det PP-LCNet_x1_0_textline_ori; do
   wget "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/${u}_infer.tar"
 done
 for t in *.tar; do tar xf "$t"; done
-
-# 2. Convert to ONNX. paddlepaddle needs Python 3.12 (no 3.13/3.14 wheels).
-python3.12 -m venv /tmp/p2o && source /tmp/p2o/bin/activate
-pip install --upgrade pip
-pip install paddlepaddle paddle2onnx packaging   # 'packaging' is a missing transitive dep
-for m in PP-OCRv5_mobile_det PP-OCRv5_mobile_rec PP-LCNet_x1_0_textline_ori; do
+for m in PP-OCRv5_mobile_det PP-LCNet_x1_0_textline_ori; do
   paddle2onnx --model_dir "${m}_infer" --model_filename inference.json \
     --params_filename inference.pdiparams --save_file "${m}.onnx" --opset_version 14
 done
 deactivate
-# Expect: PP-OCRv5_mobile_det.onnx (~4.8MB), _rec.onnx (~16.5MB), textline_ori.onnx (~6.7MB)
 ```
 
-The recognition dictionary is already extracted and committed
-(`crates/ocr-paddle/assets/ppocrv5_rec_dict.txt`) — no need to regenerate it.
+The recognition dictionary is committed:
+`crates/ocr-paddle/assets/en_ppocrv5_rec_dict.txt` (436-char English). The
+18,383-char multilingual `ppocrv5_rec_dict.txt` is retained for a future opt-in
+CJK build.
 
 ## Building & testing
 
@@ -216,7 +245,47 @@ Not needed on macOS.
    re-baseline private fixtures **append-only** (never overwrite — see
    `PRIVATE_TESTS.md` / `e2e_test.md`).
 
-## Scorer fix + corrected baseline (2026-06-24) — CURRENT NUMBERS
+## Recognition model mismatch + en swap (2026-06-24) — CURRENT LIVE NUMBERS
+
+The single biggest on-device lever turned out to be the **recognition model
+choice**, not our port or the detection contours. The desktop baseline runs
+`lang="en"` → **`en_PP-OCRv5_mobile_rec`** (436-class Latin CTC head); on-device
+we had shipped the **18,383-class multilingual `PP-OCRv5_mobile_rec`**. Evidence
+the desktop uses the English model: **0/80** cached `.ocr.json` snapshots contain
+any CJK, while our multilingual model emitted CJK (`猪簡`) on the same receipts;
+the cached rec dict is 436 Latin chars, ours was 18,383 (CJK).
+
+Why it matters: a 42×-larger output vocabulary mis-classifies digits/punctuation
+on clean crops. Localized with the `REC_DUMP_DIR` crop probe on three killers:
+- `bestco 184.64 → 1841.64`: **clean crop**, model inserted a digit (pure rec).
+- `tnt date 2026 → 0263`: digits read right but a **dropped space** (`26`+`3` →
+  `263`) made the parser read `263` as the year (rec space + parse).
+- `costco 72.41 → 2.41`: leading `7` **clipped** by a bad warp crop (box geometry,
+  not rec).
+
+Fix: switch the on-device rec to the same English model (convert
+`en_PP-OCRv5_mobile_rec`, ship its 436-char dict, decode against it). These are
+bilingual Canadian-Chinese grocery receipts; the desktop ignores the CJK column
+and reads the English/numerics, and every fixture is scored on that.
+
+`device_sim` live (80-receipt corpus), same parser + scorer, multilingual → en:
+
+| metric | live (multilingual) | live (en) | cached baseline | gap |
+|---|---|---|---|---|
+| merchant | 90% | **98%** | 100% | −2 |
+| date | 88% | **100%** | 100% | **0** |
+| total | 82% | **90%** | 99% | −9 |
+| critical items | 61% | **82%** | 97% | −15 |
+| fully correct | 24% | **44%** | 89% | −45 |
+
+Date is fully closed; fully-correct nearly doubled. The remaining gap is now
+**box-position / bad-crop on the total line** (8 `0.00`/partial total misreads,
+mostly Costco/NoFrills) plus item coverage on dense receipts — i.e. the
+`db_postprocess.rs` lever, *not* recognition. This also retires the old "bigger
+models don't fix it" framing as the wrong axis: the win was a *narrower* (English)
+model, not a bigger one.
+
+## Scorer fix + corrected baseline (2026-06-24) — CACHED BASELINE
 
 `device_sim`'s scorer (and `phase5_e2e.rs`) ignored the `expected.json`
 `category_optional` flag — it always enforced the category, even on items the
@@ -346,7 +415,7 @@ image conditioning before and the parse after.
 | DB postprocess | thresh .3/box .6/unclip 1.5; cv2 contours; minAreaRect; pyclipper | same params; imageproc contours; geo min-rect; analytic unclip | params+unclip ✓; **contours → box positions diverge** |
 | Textline-ori cls | PP-LCNet_x1_0_textline_ori | `classify.rs` | ✓ present |
 | Rec preprocess | `RecResizeImg` h48/dyn-W, `(x/255−.5)/.5` BGR | identical | ✓ **faithful** |
-| CTC decode | `CTCLabelDecode` greedy; blank0/dict1–18383/space18384 | identical | ✓ **faithful** |
+| CTC decode | `CTCLabelDecode` greedy; en model: blank0/dict1–436/space437 | identical | ✓ **faithful** (both now use the en rec model) |
 | Post-OCR | `transform_paddleocr_result` → `parse_receipt` | `process_receipt` (same receipt-core) | ✓ identical |
 
 **Conclusions:**
@@ -398,4 +467,8 @@ which gates both item coverage and total/date recognition. Deep, partly Bucket A
   Rust staticlib is plain arm64 Mach-O. NOTE: the Rust `.a` does **not** embed
   `libonnxruntime.a` — the xcframework step must ship/link the ORT static lib too
   (combine via `libtool`, or add it as a separate xcframework slice).
-- **Rec vocabulary**: `num_classes = blank(0) + dict(18383) + space` = 18385.
+- **Rec vocabulary** (current English model `en_PP-OCRv5_mobile_rec`):
+  `num_classes = blank(0) + dict(436) + space`. `class_char` derives the space
+  index from the model's output width at runtime, so it adapts if the dict
+  changes. (The retired multilingual model was `blank(0) + dict(18383) + space` =
+  18385.)
