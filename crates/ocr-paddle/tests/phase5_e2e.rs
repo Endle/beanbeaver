@@ -209,7 +209,10 @@ fn phase5_on_device_vs_expected() {
             for ci in items {
                 let desc = ci.get("description").and_then(Value::as_str).unwrap_or_default();
                 let price = ci.get("price").and_then(Value::as_str).unwrap_or_default();
-                let category = ci.get("category").and_then(Value::as_str);
+                // Honor `category_optional` like the Python harness: when set, only
+                // description+price are required and a category mismatch is tolerated.
+                let category_optional = ci.get("category_optional").and_then(Value::as_bool).unwrap_or(false);
+                let category = if category_optional { None } else { ci.get("category").and_then(Value::as_str) };
                 let is_known_gap = KNOWN_ON_DEVICE_GAPS.contains(&(name.as_str(), desc));
 
                 let matched: Vec<_> = d.items.iter().filter(|it| item_desc_matches(&it.description, desc)).collect();

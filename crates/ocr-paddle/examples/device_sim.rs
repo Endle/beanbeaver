@@ -360,7 +360,11 @@ fn score(
             items_total += 1;
             let desc = ci.get("description").and_then(Value::as_str).unwrap_or_default();
             let price = ci.get("price").and_then(Value::as_str).unwrap_or_default();
-            let category = ci.get("category").and_then(Value::as_str);
+            // Honor `category_optional` like the Python harness: when set, the
+            // item only needs the right description+price; a category mismatch is
+            // tolerated (these are items even the desktop pipeline mis-categorizes).
+            let category_optional = ci.get("category_optional").and_then(Value::as_bool).unwrap_or(false);
+            let category = if category_optional { None } else { ci.get("category").and_then(Value::as_str) };
             let matched: Vec<_> = d.items.iter().filter(|it| item_desc_matches(&it.description, desc)).collect();
             let ok = matched.iter().any(|it| price_matches(price, &it.price))
                 && category.is_none_or(|cat| {
