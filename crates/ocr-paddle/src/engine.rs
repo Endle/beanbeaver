@@ -48,8 +48,15 @@ impl OcrEngine {
     /// Detect + (orient) + recognize every text region in the image.
     pub fn recognize_image(&mut self, img: &RgbImage) -> ort::Result<Vec<Detection>> {
         let quads = self.detector.detect(img)?;
+        // Debug probe: REC_DUMP_DIR=<dir> saves every line's pre-rec crop PNG and
+        // logs box/conf/text (incl. dropped lines), to localize garbles to
+        // crop-extraction vs recognition. Off unless the env var is set.
+        let dump = std::env::var("REC_DUMP_DIR").ok();
+        if let Some(d) = &dump {
+            let _ = std::fs::create_dir_all(d);
+        }
         let mut out = Vec::with_capacity(quads.len());
-        for q in quads {
+        for (i, q) in quads.into_iter().enumerate() {
             let mut crop = rotate_crop(img, &q);
             if let Some(cls) = self.classifier.as_mut() {
                 if cls.is_flipped(&crop)? {
@@ -57,6 +64,18 @@ impl OcrEngine {
                 }
             }
             let (text, confidence) = self.recognizer.recognize_crop(&crop)?;
+            if let Some(d) = &dump {
+                let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+                for p in &q.points {
+                    x0 = x0.min(p[0]);
+                    y0 = y0.min(p[1]);
+                    x1 = x1.max(p[0]);
+                    y1 = y1.max(p[1]);
+                }
+                let safe: String = text.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).take(20).collect();
+                let _ = crop.save(format!("{d}/{i:03}_c{confidence:.2}_{safe}.png"));
+                eprintln!("REC {i:03} box=({x0:.0},{y0:.0},{x1:.0},{y1:.0}) conf={confidence:.2} text={text:?}");
+            }
             if text.is_empty() || confidence < DROP_SCORE {
                 continue;
             }
