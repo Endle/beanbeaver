@@ -162,7 +162,47 @@ fn extract_max_price_from_line(line: &str) -> Option<i64> {
         .max()
 }
 
+/// Public total extractor: the raw label-scan pick, then a guarded
+/// reconciliation against the payment block (see `reconcile_total_with_charge`).
 pub fn extract_total(lines: &[String]) -> i64 {
+    reconcile_total_with_charge(lines, extract_total_raw(lines))
+}
+
+/// When the on-device box-position artifact mis-pairs the TOTAL label with a
+/// neighbouring amount (the tax row, or nothing → 0), the printed charged amount
+/// is more reliable. Prefer an amount corroborated by **two** payment-block
+/// lines (a card tender and/or an "AMOUNT:" echo), but only when it **exceeds**
+/// the raw candidate — so cash-with-change and split-tender receipts, where the
+/// real total legitimately exceeds the card portion, are left untouched. On a
+/// correctly-paired receipt the candidate already equals the charged amount, so
+/// this never fires, keeping desktop output (cached baseline + parity) unchanged.
+fn reconcile_total_with_charge(lines: &[String], candidate: i64) -> i64 {
+    let mut payment_amounts: Vec<i64> = Vec::new();
+    for (idx, line) in lines.iter().enumerate() {
+        let upper = line.to_ascii_uppercase();
+        let is_payment = upper.contains("AMOUNT:") || matches!(classify_tender_line(&upper), Some("card"));
+        if is_payment {
+            if let Some(cents) = tender_amount_for_line(lines, idx) {
+                if cents > 0 {
+                    payment_amounts.push(cents);
+                }
+            }
+        }
+    }
+    let mut corroborated: Vec<i64> = payment_amounts
+        .iter()
+        .copied()
+        .filter(|&a| a > candidate && payment_amounts.iter().filter(|&&b| b == a).count() >= 2)
+        .collect();
+    corroborated.sort_unstable();
+    corroborated.dedup();
+    match corroborated.as_slice() {
+        [only] => *only,
+        _ => candidate,
+    }
+}
+
+fn extract_total_raw(lines: &[String]) -> i64 {
     const EXCLUDED_PHRASES: [&str; 6] = [
         "TOTAL DISCOUNT",
         "TOTAL DISCOUNT(S)",
@@ -513,6 +553,45 @@ mod tests {
         ];
 
         assert_eq!(extract_total(&lines), 7_455);
+    }
+
+    #[test]
+    fn total_reconciles_to_corroborated_charge_when_label_mispaired() {
+        // On-device box-position artifact: the TOTAL label paired with the tax
+        // row (20.14); the real total (245.87) is orphaned but corroborated by
+        // the card tender and the AMOUNT: echo. Reconciliation recovers it.
+        let lines = vec![
+            "TOTAL 20.14".to_string(),
+            "245.87".to_string(),
+            "AMOUNT: 245.87".to_string(),
+            "MasterCard 245.87".to_string(),
+        ];
+        assert_eq!(extract_total(&lines), 24_587);
+    }
+
+    #[test]
+    fn total_reconciliation_leaves_correct_total_unchanged() {
+        // Correctly paired: the candidate already equals the charged amount, so
+        // reconciliation must not fire (this is the desktop/cached-parity guard).
+        let lines = vec![
+            "TOTAL 50.00".to_string(),
+            "AMOUNT: 50.00".to_string(),
+            "VISA 50.00".to_string(),
+        ];
+        assert_eq!(extract_total(&lines), 5_000);
+    }
+
+    #[test]
+    fn total_reconciliation_ignores_split_tender_card_portion() {
+        // Split tender: the real total (50.00) exceeds the card portion (30.00),
+        // so the corroborated card+AMOUNT amount must NOT override it.
+        let lines = vec![
+            "TOTAL 50.00".to_string(),
+            "GIFT CARD 20.00".to_string(),
+            "AMOUNT: 30.00".to_string(),
+            "VISA 30.00".to_string(),
+        ];
+        assert_eq!(extract_total(&lines), 5_000);
     }
 
     #[test]
