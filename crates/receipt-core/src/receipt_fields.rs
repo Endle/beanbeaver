@@ -595,6 +595,41 @@ mod tests {
     }
 
     #[test]
+    fn total_reconciliation_holds_on_real_costco_split_tender() {
+        // Real Costco split tender (2026-03-07, $466.68 = $25.00 Shop Card +
+        // $441.68 MasterCard). The receipt carries two "AMOUNT:" echoes plus the
+        // card line, but neither charged amount exceeds the printed total, so the
+        // `> candidate` guard must leave 466.68 intact. Exercises the two-AMOUNT,
+        // gift-card-classified shape the synthetic split-tender case above misses.
+        let lines = vec![
+            "TOTAL 466.68".to_string(),
+            "Shop Card 25.00".to_string(),
+            "AMOUNT: $25.00".to_string(),
+            "MASTERCARD".to_string(),
+            "AMOUNT: 441.68".to_string(),
+            "MasterCard 441.68".to_string(),
+            "CHANGE 0.00".to_string(),
+        ];
+        assert_eq!(extract_total(&lines), 46_668);
+    }
+
+    #[test]
+    fn total_reconciliation_holds_on_real_costco_single_tender() {
+        // Real Costco desktop OCR (2026-03-05): TOTAL is already correctly paired
+        // and the AMOUNT:/MasterCard echoes equal it, so reconciliation never
+        // fires (charge == candidate, not >). Desktop/cached-parity guard.
+        let lines = vec![
+            "SUBTOTAL 225.73".to_string(),
+            "TAX 20.14".to_string(),
+            "TOTAL 245.87".to_string(),
+            "AMOUNT: 245.87".to_string(),
+            "MasterCard 245.87".to_string(),
+            "CHANGE 0.00".to_string(),
+        ];
+        assert_eq!(extract_total(&lines), 24_587);
+    }
+
+    #[test]
     fn total_after_tax_zero_prefers_following_standalone_amount() {
         let lines = vec![
             "Item Count: 33".to_string(),
