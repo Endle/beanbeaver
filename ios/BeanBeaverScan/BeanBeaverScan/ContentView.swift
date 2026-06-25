@@ -11,8 +11,11 @@ struct ContentView: View {
     /// When on, a copy of each camera-scanned receipt is saved to the camera roll.
     @AppStorage("saveScansToPhotos") private var saveScansToPhotos = false
 
-    /// CoreML/ANE on (default) vs forced CPU — for on-device latency A/B.
-    @AppStorage("useCoreML") private var useCoreML = true
+    /// Execution provider for OCR. Defaults to CPU: on real hardware CoreML
+    /// degrades the shipped (dynamic-shape) mobile models on both accuracy and
+    /// speed — the ANE path only ever helped the shelved fixed-shape server det.
+    /// The toggle stays for on-device A/B experiments.
+    @AppStorage("useCoreML") private var useCoreML = false
 
     /// Bundled DEBUG sample (a redacted Costco receipt fixture).
     private let sampleName = "costco_20260218_redact"

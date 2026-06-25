@@ -68,9 +68,11 @@ that was an artifact of comparing to the 3.3.0 container's output; corrected her
 4. Housekeeping: rename the bundled rec model to its `en_` name; push the branch to
    `origin`; consider excluding the DEBUG bundled fixture from Release.
 
-CoreML/ANE infra is wired + validated (~5× speedup on M1) and kept — useful if a
-future better fixed-shape detector is found — but server det is shelved on
-**accuracy** grounds (it doesn't transfer), not latency.
+CoreML/ANE is **off by default**: measured on a physical iPhone 15 (A16) it makes
+the shipped (dynamic-shape) mobile models **~3× slower AND wrong** (see "CoreML is
+OFF by default — measured on the iPhone 15" below). The infra stays compiled in
+(it drives an on-device A/B toggle), but the shipped path is CPU; the ANE only
+ever helped the shelved fixed-shape server det, not these mobile models.
 
 **Key tool:** `cargo run -p ocr-paddle --example device_sim -- <dir-or-img>
 [--cached] [--by-merchant] [--detcmp] [--attrib] [--reccached] [--probdump DIR] [--dump]
@@ -202,6 +204,47 @@ future option.) On iPhone 15 (A16 ANE ≈ 17 TOPS vs M1 ≈ 11) server det shoul
   the app caches dir from Swift (avoids per-launch recompile).
 - Profile on the device with `CoreML::with_profile_compute_plan(true)` to confirm
   ANE dispatch + measure real latency; verify accuracy with the letterboxed input.
+
+## CoreML is OFF by default — measured on the iPhone 15 (2026-06-25)
+
+Deployed the metrics build (per-stage timings + an `OCR_COREML` toggle, commit
+`d80a728`) to a **physical iPhone 15 (A16)** and ran the bundled Costco sample
+with CoreML on vs off — same image, only the execution provider differs.
+**CoreML is ~3× slower at every stage AND produces wrong output:**
+
+| stage (ms) | CPU (`OCR_COREML=0`) | CoreML ANE | ratio |
+|---|---|---|---|
+| detect | 207 | 901 | 4.4× |
+| recognize | 544 | 1463 | 2.7× |
+| classify | (small) | 1052 | — |
+| parse | 174 | ~174 | — |
+| **wall (end-to-end)** | **1195** | **3488** | **2.9×** |
+| result | **correct** | **wrong** | |
+
+**Root cause:** the shipped det/rec/cls models are **dynamic-shape**. The CoreML
+EP can't run those on the ANE cleanly — it re-partitions / recompiles per input
+shape (every photo is a different size) and runs the offloaded pieces in **fp16**,
+which both costs more than it saves and degrades the detection prob-map /
+recognition logits enough to misread. This is the on-device confirmation of the
+`session.rs` "dynamic shape → CoreML can't take the node" note, and it matches the
+simulator (CoreML on → garbage parse, CPU → correct).
+
+**Decision: default to CPU** — `useCoreML = false` in the app (and `coreMLEnabled`
+in `ReceiptPipeline`), i.e. `OCR_COREML=0`. The `coreml` feature stays compiled
+into the xcframework so the toggle can still drive an A/B, but the shipped path is
+CPU. At beta, consider dropping the `coreml` feature from the Release xcframework
+entirely (smaller binary). The CoreML/ANE work isn't wasted — it remains the path
+for any future **fixed-shape** detector — it's just shelved for what we ship.
+
+**Bonus finding — the "~7 s parse" may be a debug artifact.** End-to-end CPU
+latency on this (medium, ~7-item) Costco receipt is **~1.2 s, with parse only
+174 ms** in a Release on-device build. The doc's earlier "~7 s parse on a dense
+(~120-line) Costco" was a `device_sim` (default **debug**, unoptimized) Mac
+measurement. Before treating parser latency as a real on-device bug, re-measure
+the dense ~120-line receipt in a **Release** build on-device — release Rust is
+~10–50× faster than debug for this compute, so the real number is likely far
+under 7 s. (`device_sim` itself should be run with `--release` for any latency
+claim.)
 
 ## Server det doesn't transfer + good-enough metric (2026-06-25)
 

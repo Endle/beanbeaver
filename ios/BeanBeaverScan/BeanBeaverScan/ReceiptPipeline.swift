@@ -27,11 +27,13 @@ final class ReceiptPipeline {
     /// in `ReceiptResult.timings`. The user-perceived scan latency.
     private(set) var lastWallMs: Double?
 
-    /// When false, forces the CPU execution provider (`OCR_COREML=0`) for an
-    /// on-device CoreML/ANE-vs-CPU A/B. Changing it drops the loaded session so
-    /// the next scan rebuilds the ONNX sessions with the chosen provider (the EP
-    /// is selected at session-construction time from the env var).
-    var coreMLEnabled = true {
+    /// When false (the default), forces the CPU execution provider
+    /// (`OCR_COREML=0`); CPU beats CoreML on the shipped mobile models on real
+    /// hardware. Toggle it on for an on-device CoreML/ANE-vs-CPU A/B. Changing
+    /// it drops the loaded session so the next scan rebuilds the ONNX sessions
+    /// with the chosen provider (the EP is selected at session-construction time
+    /// from the env var).
+    var coreMLEnabled = false {
         didSet {
             guard coreMLEnabled != oldValue else { return }
             session = nil
