@@ -46,6 +46,7 @@ fn main() {
     let mut detcmp = false;
     let mut attrib = false;
     let mut reccached = false;
+    let mut by_merchant = false;
     let mut probdump: Option<PathBuf> = None;
 
     let mut args = std::env::args().skip(1);
@@ -58,6 +59,7 @@ fn main() {
             "--detcmp" => detcmp = true,
             "--attrib" => attrib = true,
             "--reccached" => reccached = true,
+            "--by-merchant" => by_merchant = true,
             "--probdump" => probdump = Some(PathBuf::from(args.next().expect("--probdump needs an out dir"))),
             _ => path = Some(PathBuf::from(a)),
         }
@@ -102,7 +104,7 @@ fn main() {
 
     println!("mode: {}", if cached { "cached (desktop PaddleOCR)" } else { "live (on-device ONNX)" });
     if path.is_dir() {
-        run_corpus(&mut engine, cached, &mapping, today, &path, dump);
+        run_corpus(&mut engine, cached, &mapping, today, &path, dump, by_merchant);
     } else {
         run_single(&mut engine, cached, &mapping, today, &path, true);
     }
@@ -540,6 +542,7 @@ fn run_single(
 }
 
 /// A directory: run every `<stem>.jpg` that has a `<stem>.expected.json`.
+#[allow(clippy::too_many_arguments)]
 fn run_corpus(
     engine: &mut Option<OcrEngine>,
     cached: bool,
@@ -547,6 +550,7 @@ fn run_corpus(
     today: (i32, u32, u32),
     dir: &Path,
     dump: bool,
+    by_merchant: bool,
 ) {
     let mut jpgs: Vec<PathBuf> = std::fs::read_dir(dir)
         .expect("read dir")
@@ -580,6 +584,108 @@ fn run_corpus(
         return;
     }
     print_summary(if cached { "cached" } else { "live" }, &scores);
+    if by_merchant {
+        print_by_merchant(&scores);
+    }
+}
+
+/// Per-merchant breakdown: groups fixtures by canonical merchant and reports the
+/// same readouts as [`print_summary`]. Surfaces which merchants already reach
+/// 100% (easy) vs which dense layouts drag item recall down.
+fn print_by_merchant(scores: &[FixtureScore]) {
+    use std::collections::BTreeMap;
+    #[derive(Default)]
+    struct Agg {
+        n: usize,
+        items_ok: usize,
+        items_total: usize,
+        header: usize,
+        good: usize,
+        full: usize,
+        recall: f64,
+    }
+    let mut groups: BTreeMap<String, Agg> = BTreeMap::new();
+    for s in scores {
+        let a = groups.entry(s.merchant_group.clone()).or_default();
+        let frac = if s.items_total == 0 { 1.0 } else { s.items_ok as f64 / s.items_total as f64 };
+        let header = s.merchant_ok && s.date_ok && s.total_ok;
+        a.n += 1;
+        a.items_ok += s.items_ok;
+        a.items_total += s.items_total;
+        a.recall += frac;
+        if header {
+            a.header += 1;
+        }
+        if header && frac >= 0.8 - 1e-9 {
+            a.good += 1;
+        }
+        if s.is_fully_ok() {
+            a.full += 1;
+        }
+    }
+    // Hardest last: sort by fully-fraction descending, then by size.
+    let mut rows: Vec<(String, Agg)> = groups.into_iter().collect();
+    rows.sort_by(|a, b| {
+        let fa = a.1.full as f64 / a.1.n as f64;
+        let fb = b.1.full as f64 / b.1.n as f64;
+        fb.partial_cmp(&fa).unwrap().then(b.1.n.cmp(&a.1.n))
+    });
+
+    println!("\n=== by merchant (sorted by fully-correct rate) ===");
+    println!("{:<22}{:>3}{:>10}{:>7}{:>8}{:>7}{:>9}", "merchant", "n", "items", "hdrOK", "good80", "FULL", "recall");
+    for (m, a) in &rows {
+        println!(
+            "{:<22}{:>3}{:>10}{:>7}{:>8}{:>7}{:>8.0}%",
+            trunc(m, 21),
+            a.n,
+            format!("{}/{}", a.items_ok, a.items_total),
+            a.header,
+            a.good,
+            a.full,
+            100.0 * a.recall / a.n as f64
+        );
+    }
+}
+
+/// Canonical merchant key for the private corpus (collapses spelling variants like
+/// `NOFRILLS`/`NO FRILLS`, `FRESH`/`Bestco Fresh Foodmart`, the `FOODY MART…`
+/// locations). Unknown merchants pass through unchanged.
+fn merchant_group_key(m: &str) -> String {
+    let u = m.to_uppercase();
+    let g = if u.contains("COSTCO") {
+        "Costco"
+    } else if u.contains("FOODY") {
+        "Foody Mart"
+    } else if u.contains("FRESHCO") {
+        "FreshCo"
+    } else if u.contains("BESTCO") || u.trim() == "FRESH" {
+        "Bestco Fresh"
+    } else if u.contains("FRILL") {
+        "No Frills"
+    } else if u.contains("T&T") {
+        "T&T"
+    } else if u.contains("C&C") {
+        "C&C"
+    } else if u.contains("JIN LIAN") {
+        "Jin Lian"
+    } else if u.contains("LOBLAW") {
+        "Loblaw"
+    } else if u.contains("LCBO") {
+        "LCBO"
+    } else if u.contains("WALMART") {
+        "Walmart"
+    } else if u.contains("SHOPPERS") {
+        "Shoppers"
+    } else if u.contains("SUNNY") {
+        "Sunny Foodmart"
+    } else if u.contains("PREMIUM") {
+        "Al-Premium"
+    } else if u.contains("REAL CANADIAN") || u.contains("RCSS") {
+        "Real Canadian"
+    } else {
+        return if m.is_empty() { "(unknown)".to_string() } else { m.to_string() };
+    };
+    g.to_string()
 }
 
 /// Rec-isolation: feed the DESKTOP-detected boxes (cached `.ocr.json`) through
@@ -702,6 +808,7 @@ struct FixtureScore {
     total_ok: bool,
     items_ok: usize,
     items_total: usize,
+    merchant_group: String,
 }
 
 impl FixtureScore {
@@ -774,6 +881,13 @@ fn score(
         }
     }
 
+    // Group by the verified merchant when present, else the parsed one.
+    let raw_merchant = expected
+        .get("merchant")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(d.merchant.as_str());
+
     FixtureScore {
         name: name.to_string(),
         merchant: d.merchant.clone(),
@@ -784,6 +898,7 @@ fn score(
         total_ok,
         items_ok,
         items_total,
+        merchant_group: merchant_group_key(raw_merchant),
     }
 }
 

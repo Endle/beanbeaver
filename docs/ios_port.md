@@ -73,7 +73,7 @@ future better fixed-shape detector is found — but server det is shelved on
 **accuracy** grounds (it doesn't transfer), not latency.
 
 **Key tool:** `cargo run -p ocr-paddle --example device_sim -- <dir-or-img>
-[--cached] [--detcmp] [--attrib] [--reccached] [--probdump DIR] [--dump]
+[--cached] [--by-merchant] [--detcmp] [--attrib] [--reccached] [--probdump DIR] [--dump]
 [--models DIR]`. `OCR_RESIZE_LONG=<n>` overrides the detection resize (default
 1536; use 960 to match PaddleOCR). Diagnostics: `--attrib` buckets each live
 failure by stage (det-miss / bad-crop / true-rec / pairing — note bad-crop is
@@ -229,6 +229,12 @@ missed line. `device_sim`'s summary now also reports, per corpus:
 - **good enough** = header-correct **and** items ≥ 80% (and a ≥90% variant),
 - mean per-receipt item recall, and a not-full breakdown (miss-items-only vs
   miss-a-header-field).
+
+`--by-merchant` groups the corpus by canonical merchant and prints the same
+readouts, surfacing which merchants already reach 100% (easy) vs which dense
+layouts drag recall. Cached (desktop OCR) hits ~100% fully on nearly every
+merchant — so per-merchant 100% is reachable with better OCR; the mobile gaps are
+OCR quality, not the parser.
 
 Mobile client (shipped) on the 80-case verified corpus:
 
