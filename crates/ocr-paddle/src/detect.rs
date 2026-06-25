@@ -7,11 +7,26 @@ use ort::session::Session;
 use ort::value::Tensor;
 
 use crate::db_postprocess::{boxes_from_bitmap, DbConfig, Quad};
-use crate::preprocess::preprocess_det;
+use crate::preprocess::{preprocess_det, preprocess_det_fixed};
 
 pub struct Detector {
     session: Session,
     cfg: DbConfig,
+    /// `Some((H, W))` when the model has a static input shape (e.g. the
+    /// CoreML/ANE server det export) — then detection letterboxes to it.
+    fixed: Option<(usize, usize)>,
+}
+
+/// Read a static `(H, W)` from the model's first input, or `None` if dynamic.
+fn static_input_hw(session: &Session) -> Option<(usize, usize)> {
+    let inp = session.inputs().first()?;
+    if let ort::value::ValueType::Tensor { shape, .. } = inp.dtype() {
+        let r = shape.len();
+        if r >= 4 && shape[r - 2] > 0 && shape[r - 1] > 0 {
+            return Some((shape[r - 2] as usize, shape[r - 1] as usize));
+        }
+    }
+    None
 }
 
 /// Raw DB probability map plus the geometry needed to post-process it. Exposed
@@ -31,9 +46,11 @@ pub struct DetProb {
 impl Detector {
     pub fn from_path<P: AsRef<Path>>(path: P) -> ort::Result<Self> {
         let session = crate::session::commit_from_file(path)?;
+        let fixed = static_input_hw(&session);
         Ok(Self {
             session,
             cfg: DbConfig::default(),
+            fixed,
         })
     }
 
@@ -61,8 +78,18 @@ impl Detector {
         })
     }
 
-    /// Detect text-region quads (original-image pixel coords).
+    /// Detect text-region quads (original-image pixel coords). Uses the
+    /// fixed-canvas letterbox path for static-shape models, else the variable
+    /// resize-long path.
     pub fn detect(&mut self, img: &RgbImage) -> ort::Result<Vec<Quad>> {
+        match self.fixed {
+            Some((th, tw)) => self.detect_fixed(img, th, tw),
+            None => self.detect_dynamic(img),
+        }
+    }
+
+    /// Variable resize-long path (PP-OCRv5 mobile/server dynamic-shape models).
+    fn detect_dynamic(&mut self, img: &RgbImage) -> ort::Result<Vec<Quad>> {
         let input = preprocess_det(img);
         let (orig_w, orig_h) = (img.width() as f32, img.height() as f32);
 
@@ -88,6 +115,29 @@ impl Detector {
             input.ratio_h,
             &self.cfg,
         ))
+    }
+
+    /// Fixed-canvas letterbox path (static-shape models). Boxes are extracted in
+    /// canvas coords (ratio 1), then mapped back via `(p - pad) / scale`.
+    fn detect_fixed(&mut self, img: &RgbImage, th: usize, tw: usize) -> ort::Result<Vec<Quad>> {
+        let (orig_w, orig_h) = (img.width() as f32, img.height() as f32);
+        let fx = preprocess_det_fixed(img, th as u32, tw as u32);
+
+        let tensor = Tensor::from_array(([1_usize, 3, th, tw], fx.data.clone()))?;
+        let outputs = self.session.run(ort::inputs![tensor])?;
+        let (shape, data) = outputs[0].try_extract_tensor::<f32>()?;
+        let h = shape[shape.len() - 2] as usize;
+        let w = shape[shape.len() - 1] as usize;
+
+        // ratio 1 + canvas dims => boxes (incl. unclip) in canvas pixel coords.
+        let mut quads = boxes_from_bitmap(data, h, w, w as f32, h as f32, 1.0, 1.0, &self.cfg);
+        for q in quads.iter_mut() {
+            for p in q.points.iter_mut() {
+                p[0] = ((p[0] - fx.pad_x) / fx.scale).clamp(0.0, orig_w);
+                p[1] = ((p[1] - fx.pad_y) / fx.scale).clamp(0.0, orig_h);
+            }
+        }
+        Ok(quads)
     }
 }
 

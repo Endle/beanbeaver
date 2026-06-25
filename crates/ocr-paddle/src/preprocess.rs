@@ -101,6 +101,54 @@ pub fn preprocess_det(img: &RgbImage) -> DetInput {
     }
 }
 
+/// Fixed-canvas detection input for a **static-shape** model (e.g. the
+/// CoreML/ANE-friendly server det export). Letterboxes the image into a `th`×`tw`
+/// white canvas preserving aspect, and records the geometry to map boxes back:
+/// `original = (model_coord - pad) / scale`.
+#[derive(Clone, Debug)]
+pub struct DetInputFixed {
+    pub data: Vec<f32>,
+    /// resized / original (uniform; aspect preserved)
+    pub scale: f32,
+    /// left/top letterbox offset in model (canvas) pixels
+    pub pad_x: f32,
+    pub pad_y: f32,
+}
+
+/// Letterbox `img` into a fixed `th`×`tw` (H×W) NCHW tensor, white-padded, BGR
+/// normalized like [`preprocess_det`]. For static-input-shape detection models.
+pub fn preprocess_det_fixed(img: &RgbImage, th: u32, tw: u32) -> DetInputFixed {
+    let (ow, oh) = (img.width().max(1), img.height().max(1));
+    let scale = (tw as f32 / ow as f32).min(th as f32 / oh as f32);
+    let nw = ((ow as f32 * scale).round() as u32).clamp(1, tw);
+    let nh = ((oh as f32 * scale).round() as u32).clamp(1, th);
+    let resized = image::imageops::resize(img, nw, nh, image::imageops::FilterType::Triangle);
+    let pad_x = (tw - nw) / 2;
+    let pad_y = (th - nh) / 2;
+
+    let (tw_u, th_u) = (tw as usize, th as usize);
+    let plane = th_u * tw_u;
+    let mut data = vec![0f32; 3 * plane];
+    // White background (matches the white pad PaddleOCR's pipeline uses).
+    for c in 0..3 {
+        let v = (1.0 - MEAN_BGR[c]) / STD_BGR[c];
+        for slot in data[c * plane..(c + 1) * plane].iter_mut() {
+            *slot = v;
+        }
+    }
+    for y in 0..nh as usize {
+        for x in 0..nw as usize {
+            let px = resized.get_pixel(x as u32, y as u32);
+            let bgr = [px[2] as f32, px[1] as f32, px[0] as f32];
+            let idx = (y + pad_y as usize) * tw_u + (x + pad_x as usize);
+            for c in 0..3 {
+                data[c * plane + idx] = (bgr[c] / 255.0 - MEAN_BGR[c]) / STD_BGR[c];
+            }
+        }
+    }
+    DetInputFixed { data, scale, pad_x: pad_x as f32, pad_y: pad_y as f32 }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

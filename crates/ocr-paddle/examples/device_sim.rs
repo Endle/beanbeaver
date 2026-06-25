@@ -670,6 +670,26 @@ fn print_summary(label: &str, scores: &[FixtureScore]) {
     println!("  total    : {total_ok}/{n}  ({:.0}%)", pct(total_ok, n));
     println!("  crit-items: {items_ok}/{items_total}  ({:.0}%)", pct(items_ok, items_total));
     println!("  fully OK : {full_ok}/{n}  ({:.0}%)", pct(full_ok, n));
+
+    // Per-receipt item completeness (1.0 when a receipt has no critical items).
+    let frac = |s: &FixtureScore| if s.items_total == 0 { 1.0 } else { s.items_ok as f64 / s.items_total as f64 };
+    // "Header fields" = merchant + date + total all correct (the matching keys).
+    let header_ok = |s: &FixtureScore| s.merchant_ok && s.date_ok && s.total_ok;
+    let mean_recall = scores.iter().map(frac).sum::<f64>() / n as f64;
+    let header = scores.iter().filter(|s| header_ok(s)).count();
+    // "Good enough" = header fields correct AND >= T of the items captured.
+    let good = |t: f64| scores.iter().filter(|s| header_ok(s) && frac(s) >= t - 1e-9).count();
+    // Of the receipts that aren't fully-OK, why?
+    let fail_items_only = scores.iter().filter(|s| header_ok(s) && !s.is_fully_ok()).count();
+    let fail_header = n - header;
+
+    println!("\n  --- usefulness breakdown ({n} receipts) ---");
+    println!("  mean per-receipt item recall : {:.0}%", mean_recall * 100.0);
+    println!("  merchant+date+total all OK    : {header}/{n}  ({:.0}%)", pct(header, n));
+    println!("  good enough (m/d/t + items≥80%): {}/{n}  ({:.0}%)", good(0.80), pct(good(0.80), n));
+    println!("  good enough (m/d/t + items≥90%): {}/{n}  ({:.0}%)", good(0.90), pct(good(0.90), n));
+    println!("  fully OK    (m/d/t + items=100%): {full_ok}/{n}  ({:.0}%)", pct(full_ok, n));
+    println!("  not-full breakdown: {fail_items_only} miss only some items (header OK) | {fail_header} miss merchant/date/total");
 }
 
 struct FixtureScore {

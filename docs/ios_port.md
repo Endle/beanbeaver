@@ -42,31 +42,35 @@ residual is our Rust OCR pipeline. Three findings closed most of the original ga
   root cause is the **detection model: cached uses PP-OCRv5 server det, we ship
   mobile det.** See "Box-position hypothesis closed + ceiling finding" below.
 
-**Target (re-framed 2026-06-25):** the live→cached gap is the **server-vs-mobile
-detection model**, not our port and not image quality. Our whole mobile pipeline
-faithfully reproduces current PaddleOCR-mobile (`paddle_e2e` mobile 48%/80% ≈ our
-live 46%/82%); the cached baseline used **server det** (PP-OCRv5 container default
-for `lang='en'`). Same version+pipeline, only the detector differs: 3.3.0 server
-(= cached) **91%** vs 3.3.0 mobile **63%** text-recall on dense fixtures; corpus
-cached(server) **93%** vs our mobile **83%**. The input image is NOT degraded
-(verified — original high-res photo, committed with its cache). `device_sim --live`
-also remains a *pessimistic* raw-photo lower bound: real iOS feeds VisionKit-
-deskewed/cropped images.
+**Target (re-framed 2026-06-25, corrected):** measure the **shipped mobile client**
+against the verified `expected.json` with a realistic "good enough" bar (date +
+total correct, items ≥ 80%) — not all-or-nothing. By that bar the mobile client is
+**62% good-enough / 92% header-correct** (see "Good-enough metric" below); the
+"46% fully" is a misleadingly harsh readout. **Server det does NOT transfer** as a
+lever (see "Server det doesn't transfer"): in our pipeline it scores ~81–82% items
+at *any* resolution, same as mobile — the cached 93–97% is PaddleOCR-3.3.0-
+container-specific and unreproducible by current paddle or us. So **mobile det
+stays**; the remaining accuracy lever is **item recall on dense receipts**, not the
+detector. (Earlier same-day drafts wrongly called server det "the proven lever" —
+that was an artifact of comparing to the 3.3.0 container's output; corrected here.)
 
 **Open next steps (ranked):**
-1. **Port server det on-device** (the proven lever): convert `PP-OCRv5_server_det`
-   → ONNX, run `device_sim --live`, confirm items ~83%→~93%. The macOS server-det
-   bus-error is paddle-CPU-only (ONNX/iOS unaffected; the old `device_sim` server
-   run didn't crash). Cost: ~+80 MB + slower detection → likely gate on a CoreML/
-   ANE EP. (doc-unwarp is *unverified* — it regressed in 3.7.0; server det is the
-   clean lever.)
-2. **Validate with VisionKit-preprocessed inputs** (deskew/crop/perspective) — the
-   real product path; complements server det.
-3. **Parser latency:** `receipt_core::process_receipt` takes **~7s on a dense
+1. **Item recall on dense receipts** (fresh / foody / costco): ~24 header-OK
+   receipts land <80% items. Detection recall on small/faint lines is the lever
+   (mobile det at higher resize, or recall-oriented DB params), measured by the
+   good-enough breakdown in `device_sim`.
+2. **Parser latency:** `receipt_core::process_receipt` takes **~7s on a dense
    (~120-line Costco) receipt** (small receipts ~0.4s) — a real on-device UX bug,
    likely super-linear spatial pairing. Shared with desktop.
+3. **(Optional) VisionKit-preprocessed inputs** — `device_sim --live` is a
+   pessimistic raw-photo lower bound; on-device VisionKit deskews/crops, which may
+   help item recall. Validate on the real phone.
 4. Housekeeping: rename the bundled rec model to its `en_` name; push the branch to
    `origin`; consider excluding the DEBUG bundled fixture from Release.
+
+CoreML/ANE infra is wired + validated (~5× speedup on M1) and kept — useful if a
+future better fixed-shape detector is found — but server det is shelved on
+**accuracy** grounds (it doesn't transfer), not latency.
 
 **Key tool:** `cargo run -p ocr-paddle --example device_sim -- <dir-or-img>
 [--cached] [--detcmp] [--attrib] [--reccached] [--probdump DIR] [--dump]
@@ -198,6 +202,48 @@ future option.) On iPhone 15 (A16 ANE ≈ 17 TOPS vs M1 ≈ 11) server det shoul
   the app caches dir from Swift (avoids per-launch recompile).
 - Profile on the device with `CoreML::with_profile_compute_plan(true)` to confirm
   ANE dispatch + measure real latency; verify accuracy with the letterboxed input.
+
+## Server det doesn't transfer + good-enough metric (2026-06-25)
+
+Pulled the server-det lever end-to-end in our pipeline. It **does not transfer**:
+
+- Wired a fixed-shape detection path (`preprocess_det_fixed` letterboxes to a
+  static canvas; `detect_fixed` maps boxes back via `(p−pad)/scale`; `Detector`
+  auto-detects a static input shape). Ran the fixed server det
+  (`PP-OCRv5_server_det_fixed_1536x768.onnx`) live: **82% items / 46% fully** — same
+  as mobile.
+- Control (dynamic server det at its native **960**, matching the container
+  exactly): **81% items / 39% fully** — also no better.
+
+So **our pipeline scores ~81–82% items with server det at any resolution**, equal
+to mobile (82%) and current-paddle-mobile (80%). Only the **3.3.0 container** server
+det reaches 93–97%; that is version-specific and unreproducible by current paddle
+(3.7.0) or our Rust stack. **Conclusion: keep mobile det** (4.6 MB, fast, ANE
+headroom). The CoreML/ANE work stands (it's correct + reusable) but server det is
+shelved on accuracy, not latency.
+
+**Good-enough metric (the right product readout).** "Fully correct" (100% of items
++ merchant/date/total) is too harsh for a scan-assist UX where the user can add a
+missed line. `device_sim`'s summary now also reports, per corpus:
+- **header-correct** = merchant + date + total all right (the CC-matching keys),
+- **good enough** = header-correct **and** items ≥ 80% (and a ≥90% variant),
+- mean per-receipt item recall, and a not-full breakdown (miss-items-only vs
+  miss-a-header-field).
+
+Mobile client (shipped) on the 80-case verified corpus:
+
+| readout | mobile live |
+|---|---|
+| merchant+date+total all OK (header) | **74/80 (92%)** |
+| good enough (header + items ≥80%) | **50/80 (62%)** |
+| good enough (header + items ≥90%) | 39/80 (49%) |
+| fully OK (header + items =100%) | 37/80 (46%) |
+| mean per-receipt item recall | 82% |
+
+Of the 43 imperfect receipts, **37 get merchant/date/total right and only miss some
+items; just 6 miss a header field.** So 92% of scans nail the matching keys and 62%
+are good-enough; the lever is item recall on the ~24 header-OK receipts below 80%
+items (dense receipts).
 
 ## Locked decisions
 
