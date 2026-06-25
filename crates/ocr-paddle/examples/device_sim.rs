@@ -23,6 +23,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use ocr_paddle::db_postprocess::{boxes_from_bitmap, DbConfig};
+use ocr_paddle::detect::Detector;
 use ocr_paddle::engine::OcrEngine;
 use ocr_paddle::process::{process_image, resize_and_pad};
 use receipt_core::ocr_transform::RawDetection;
@@ -43,6 +45,8 @@ fn main() {
     let mut cached = false;
     let mut detcmp = false;
     let mut attrib = false;
+    let mut reccached = false;
+    let mut probdump: Option<PathBuf> = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -53,10 +57,19 @@ fn main() {
             "--cached" => cached = true,
             "--detcmp" => detcmp = true,
             "--attrib" => attrib = true,
+            "--reccached" => reccached = true,
+            "--probdump" => probdump = Some(PathBuf::from(args.next().expect("--probdump needs an out dir"))),
             _ => path = Some(PathBuf::from(a)),
         }
     }
     let path = path.expect("pass an image file or a directory");
+
+    // Dump the raw DB prob map + our boxes for an external mask-vs-contour diff
+    // (see scripts/contour_cmp.py). Needs only the detection model.
+    if let Some(outdir) = probdump {
+        run_probdump(&models, &path, &outdir);
+        return;
+    }
 
     // Live mode needs the models; cached mode reads .ocr.json and skips them.
     let mut engine = if cached {
@@ -82,12 +95,62 @@ fn main() {
         return;
     }
 
+    if reccached {
+        run_reccached(engine.as_mut().expect("engine for reccached"), &mapping, today, &path);
+        return;
+    }
+
     println!("mode: {}", if cached { "cached (desktop PaddleOCR)" } else { "live (on-device ONNX)" });
     if path.is_dir() {
         run_corpus(&mut engine, cached, &mapping, today, &path, dump);
     } else {
         run_single(&mut engine, cached, &mapping, today, &path, true);
     }
+}
+
+/// Dump the raw DB probability map + our resulting boxes for one image, so the
+/// SAME prob map can be fed through PaddleOCR's reference DBPostProcess in Python
+/// (`scripts/contour_cmp.py`). Any box difference is then purely the
+/// contour/min-rect/unclip algorithm (imageproc Suzuki vs OpenCV), isolated from
+/// the upstream mask/model/preprocessing. Coords are in the padded space that
+/// `process_image` (and `.ocr.json`) use.
+fn run_probdump(models: &Path, img_path: &Path, outdir: &Path) {
+    std::fs::create_dir_all(outdir).expect("create probdump dir");
+    let det_model = find_model(models, "_det.onnx");
+    let mut det = Detector::from_path(&det_model).expect("load det model");
+
+    let img = image::open(img_path).expect("decode image").to_rgb8();
+    let padded = resize_and_pad(&img);
+    let p = det.prob_map(&padded).expect("prob_map");
+
+    // Raw prob map: little-endian f32, row-major h*w.
+    let mut bytes = Vec::with_capacity(p.prob.len() * 4);
+    for v in &p.prob {
+        bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    std::fs::write(outdir.join("prob.f32"), &bytes).expect("write prob.f32");
+
+    let cfg = DbConfig::default();
+    let meta = serde_json::json!({
+        "h": p.h, "w": p.w,
+        "dest_w": p.orig_w, "dest_h": p.orig_h,   // padded-image dims (mapping target)
+        "ratio_w": p.ratio_w, "ratio_h": p.ratio_h,
+        "thresh": cfg.thresh, "box_thresh": cfg.box_thresh,
+        "unclip_ratio": cfg.unclip_ratio, "max_candidates": cfg.max_candidates,
+        "image": img_path.file_name().and_then(|s| s.to_str()),
+    });
+    std::fs::write(outdir.join("meta.json"), serde_json::to_string_pretty(&meta).unwrap())
+        .expect("write meta.json");
+
+    let quads = boxes_from_bitmap(&p.prob, p.h, p.w, p.orig_w, p.orig_h, p.ratio_w, p.ratio_h, &cfg);
+    let boxes: Vec<[[f32; 2]; 4]> = quads.iter().map(|q| q.points).collect();
+    std::fs::write(outdir.join("ours_boxes.json"), serde_json::to_string(&boxes).unwrap())
+        .expect("write ours_boxes.json");
+
+    println!(
+        "probdump: {} boxes | prob {}x{} | dest {}x{} -> {}",
+        boxes.len(), p.w, p.h, p.orig_w as u32, p.orig_h as u32, outdir.display()
+    );
 }
 
 /// Compare our detection (final recognized lines) against PaddleOCR's `.ocr.json`
@@ -512,9 +575,87 @@ fn run_corpus(
         }
     }
 
+    if scores.is_empty() {
+        println!("(no usable <stem>.jpg + expected.json{} pairs in {})", if cached { " + ocr.json" } else { "" }, dir.display());
+        return;
+    }
+    print_summary(if cached { "cached" } else { "live" }, &scores);
+}
+
+/// Rec-isolation: feed the DESKTOP-detected boxes (cached `.ocr.json`) through
+/// OUR recognizer, then parse + score. Splits the live<cached gap into
+/// detection-geometry vs recognition: result ≈ cached -> box geometry is the
+/// whole story (lever = crops/unclip/resolution); result ≈ live -> our rec model
+/// is the bottleneck.
+fn run_reccached(
+    engine: &mut OcrEngine,
+    mapping: &HashMap<String, String>,
+    today: (i32, u32, u32),
+    dir: &Path,
+) {
+    let mut jpgs: Vec<PathBuf> = std::fs::read_dir(dir)
+        .expect("read dir")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.extension().is_some_and(|x| x == "jpg")
+                && p.with_extension("ocr.json").exists()
+                && p.with_extension("expected.json").exists()
+        })
+        .collect();
+    jpgs.sort();
+
+    let mut scores = Vec::new();
+    for jpg in &jpgs {
+        let name = jpg.file_stem().and_then(|s| s.to_str()).unwrap_or("image");
+        let img = image::open(jpg).expect("decode image").to_rgb8();
+        let padded = resize_and_pad(&img);
+
+        // Cached desktop boxes -> quads (already in padded space, TL,TR,BR,BL).
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(jpg.with_extension("ocr.json")).unwrap()).unwrap();
+        let (w, h) = (v["image_width"].as_i64().unwrap(), v["image_height"].as_i64().unwrap());
+        let mut quads = Vec::new();
+        for det in v["detections"].as_array().unwrap() {
+            let Some(bbox) = det[0].as_array() else { continue };
+            if bbox.len() < 4 {
+                continue;
+            }
+            let mut pts = [[0f32; 2]; 4];
+            for (i, slot) in pts.iter_mut().enumerate() {
+                let p = bbox[i].as_array().unwrap();
+                *slot = [p[0].as_f64().unwrap() as f32, p[1].as_f64().unwrap() as f32];
+            }
+            quads.push(ocr_paddle::db_postprocess::Quad { points: pts });
+        }
+
+        // OUR recognizer (+ orientation cls) on the desktop boxes.
+        let dets = engine.recognize_quads(&padded, quads).expect("recognize_quads");
+        let raw: Vec<RawDetection> = dets
+            .into_iter()
+            .map(|d| RawDetection {
+                points: d.points.iter().map(|p| (p[0] as f64, p[1] as f64)).collect(),
+                text: d.text,
+                confidence: d.confidence as f64,
+            })
+            .collect();
+
+        let pr = process_receipt(raw, w, h, OCR_IMAGE_PADDING, &format!("{name}.jpg"), None, today, "Liabilities:CreditCard", None);
+        let expected: Value = serde_json::from_str(&std::fs::read_to_string(jpg.with_extension("expected.json")).unwrap()).unwrap();
+        let s = score(name, &expected, &pr.parsed, mapping);
+        let mark = if s.is_fully_ok() { "✓" } else { "✗" };
+        println!(
+            "{mark} {:<42} {:<22} items {}/{}{}",
+            s.name, format!("{} / {} / {}", trunc(&s.merchant, 14), s.date, s.total_got), s.items_ok, s.items_total, s.notes()
+        );
+        scores.push(s);
+    }
+    print_summary("reccached: desktop boxes + our rec", &scores);
+}
+
+/// Print the merchant/date/total/items/fully aggregate over a set of scores.
+fn print_summary(label: &str, scores: &[FixtureScore]) {
     let n = scores.len();
     if n == 0 {
-        println!("(no usable <stem>.jpg + expected.json{} pairs in {})", if cached { " + ocr.json" } else { "" }, dir.display());
+        println!("(no usable fixtures)");
         return;
     }
     let merchant_ok = scores.iter().filter(|s| s.merchant_ok).count();
@@ -523,8 +664,7 @@ fn run_corpus(
     let full_ok = scores.iter().filter(|s| s.is_fully_ok()).count();
     let items_ok: usize = scores.iter().map(|s| s.items_ok).sum();
     let items_total: usize = scores.iter().map(|s| s.items_total).sum();
-
-    println!("\n=== device_sim summary ({}): {n} fixtures ===", if cached { "cached" } else { "live" });
+    println!("\n=== device_sim summary ({label}): {n} fixtures ===");
     println!("  merchant : {merchant_ok}/{n}  ({:.0}%)", pct(merchant_ok, n));
     println!("  date     : {date_ok}/{n}  ({:.0}%)", pct(date_ok, n));
     println!("  total    : {total_ok}/{n}  ({:.0}%)", pct(total_ok, n));

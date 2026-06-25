@@ -1,6 +1,6 @@
 # iOS Port — Plan & Progress
 
-Status as of 2026-06-24. Branch: `ios` (ahead of `origin/ios`, not pushed).
+Status as of 2026-06-25. Branch: `ios_v2`.
 This doc is the handoff for continuing development on macOS.
 
 ## Goal
@@ -36,39 +36,115 @@ residual is our Rust OCR pipeline. Three findings closed most of the original ga
   card-tender / `AMOUNT:` echo, recovering the Costco totals: **live total
   90%→95%, fully 44%→46%**, cached unchanged (parity-safe). The 4 remaining
   total-fails read `0.00` (fail-loud; flagged for confirmation in matching).
-- **Detection box positions** are the dominant *remaining* residual (`imageproc`
-  Suzuki contours vs OpenCV): box-Y mis-registration scrambles label↔amount
-  pairing — the ~87-item "pairing" bucket and the 3 non-Costco `0.00` totals
-  share this root. deskew + `unclip` ruled out. Cheap win banked earlier: detect
-  at 1536 → +10% items.
+- **Detection box positions** were *hypothesised* (2026-06-24) to be the dominant
+  residual (`imageproc` Suzuki contours vs OpenCV). **DISPROVEN 2026-06-25** — our
+  contour path and mask are both faithful to current PaddleOCR-*mobile*. The real
+  root cause is the **detection model: cached uses PP-OCRv5 server det, we ship
+  mobile det.** See "Box-position hypothesis closed + ceiling finding" below.
 
-**Target (locked):** one scorer (`device_sim`, strict, no tolerance) for both
-modes; the goal is **live → cached**, currently **46% vs 89% fully** / **82% vs
-97% items** / **95% vs 99% total**. The 9 genuinely-ambiguous `known_failures`
-are excluded for both (the desktop fails them too). `device_sim --live` is a
-*pessimistic* lower bound for real iOS: VisionKit deskews/crops/orients before
-our pipeline runs.
+**Target (re-framed 2026-06-25):** the live→cached gap is the **server-vs-mobile
+detection model**, not our port and not image quality. Our whole mobile pipeline
+faithfully reproduces current PaddleOCR-mobile (`paddle_e2e` mobile 48%/80% ≈ our
+live 46%/82%); the cached baseline used **server det** (PP-OCRv5 container default
+for `lang='en'`). Same version+pipeline, only the detector differs: 3.3.0 server
+(= cached) **91%** vs 3.3.0 mobile **63%** text-recall on dense fixtures; corpus
+cached(server) **93%** vs our mobile **83%**. The input image is NOT degraded
+(verified — original high-res photo, committed with its cache). `device_sim --live`
+also remains a *pessimistic* raw-photo lower bound: real iOS feeds VisionKit-
+deskewed/cropped images.
 
 **Open next steps (ranked):**
-1. Detection box-position fidelity in `db_postprocess.rs` (the deep lever —
-   `imageproc` Suzuki contours vs OpenCV). The shared root behind both remaining
-   gaps: the ~87-item "pairing" bucket and the 3 non-Costco `0.00` totals. Start
-   with the mask-vs-contour diagnostic (dump our DB binary mask vs PaddleOCR's on
-   a dense fixture: if the mask differs it's a cheap fix; if only contours differ
-   it's the hard `imageproc`-vs-OpenCV path).
-2. Item coverage on dense receipts (fresh / foody_mart) — detection recall on
-   small/faint lines.
-3. Housekeeping: rename the bundled rec model to its `en_` name; push `ios` to
+1. **Port server det on-device** (the proven lever): convert `PP-OCRv5_server_det`
+   → ONNX, run `device_sim --live`, confirm items ~83%→~93%. The macOS server-det
+   bus-error is paddle-CPU-only (ONNX/iOS unaffected; the old `device_sim` server
+   run didn't crash). Cost: ~+80 MB + slower detection → likely gate on a CoreML/
+   ANE EP. (doc-unwarp is *unverified* — it regressed in 3.7.0; server det is the
+   clean lever.)
+2. **Validate with VisionKit-preprocessed inputs** (deskew/crop/perspective) — the
+   real product path; complements server det.
+3. **Parser latency:** `receipt_core::process_receipt` takes **~7s on a dense
+   (~120-line Costco) receipt** (small receipts ~0.4s) — a real on-device UX bug,
+   likely super-linear spatial pairing. Shared with desktop.
+4. Housekeeping: rename the bundled rec model to its `en_` name; push the branch to
    `origin`; consider excluding the DEBUG bundled fixture from Release.
 
 **Key tool:** `cargo run -p ocr-paddle --example device_sim -- <dir-or-img>
-[--cached] [--detcmp] [--attrib] [--dump] [--models DIR]` — reproduces on-device
-behavior on macOS and scores vs `expected.json`. Diagnostics for the box-position
-work: `--attrib` buckets each live failure by stage (det-miss / bad-crop /
-true-rec / pairing, `ATTRIB_V=1` for a per-failure line); `--detcmp` compares our
-boxes vs the desktop `.ocr.json`; and `REC_DUMP_DIR=<dir> device_sim <img>` saves
-each line's pre-rec crop PNG + box/conf/text to separate crop-extraction from
-recognition. Needs `models/` populated.
+[--cached] [--detcmp] [--attrib] [--reccached] [--probdump DIR] [--dump]
+[--models DIR]`. `OCR_RESIZE_LONG=<n>` overrides the detection resize (default
+1536; use 960 to match PaddleOCR). Diagnostics: `--attrib` buckets each live
+failure by stage (det-miss / bad-crop / true-rec / pairing — note bad-crop is
+*contaminated* by the cached-geometry mismatch, treat with suspicion); `--detcmp`
+compares our boxes vs `.ocr.json`; `--reccached` runs OUR rec on the desktop boxes
+(invalidated by the cached-frame mismatch — kept for the record); `--probdump DIR`
+dumps the raw DB prob map + our boxes for `scripts/contour_cmp.py` (feeds the same
+prob map through PaddleOCR's reference DBPostProcess); `REC_DUMP_DIR=<dir>` saves
+each line's pre-rec crop PNG + box/conf/text. The ceiling experiments use a local
+PaddleOCR venv + `scripts/{contour_cmp,paddle_e2e,manual_server_e2e}.py`. Needs
+`models/` populated.
+
+## Box-position hypothesis closed + ceiling finding (2026-06-25)
+
+The 2026-06-24 "detection box positions diverge (imageproc vs OpenCV) → scrambled
+pairing" hypothesis is **disproven**. **Root cause: the detection model.** The
+cached baseline uses PP-OCRv5 **server det** (the container default for
+`lang='en'`); on-device we ship **mobile det**. A local PaddleOCR was used to run
+the reference pipeline — both 3.7.0 and the container's pinned **3.3.0** (from
+`../beanbeaver-ocr/.venv`). Evidence (same parser/scorer; "text-recall" = expected
+item desc+price present anywhere, pairing aside):
+
+| experiment | isolates | result |
+|---|---|---|
+| `contour_cmp.py` (same prob map → our vs PaddleOCR `DBPostProcess`) | contour/min-rect/unclip | IoU **0.94** → our postprocess ≈ OpenCV |
+| `mask_cmp.py` (ours vs paddle det, mobile @960) | our mask (preprocess+ONNX) | IoU **0.84**, no scale drift → our det ≈ paddle **mobile** det |
+| `paddle_e2e.py` mobile, full pipeline | our mobile pipeline ceiling | 48% fully / 80% items ≈ our live 46%/82% |
+| 3.3.0 **mobile** vs **server**, full pipeline, **corpus** | the detection model | **mobile 79% vs server 93% text-recall (+14)**; dense subset 63% vs 91% (+28) |
+| our live (3.7.0-equiv mobile) vs cached (server) | end-to-end | our mobile **83%** vs cached **93%** text-recall |
+
+**What's faithful (NOT the gap):** contours, mask, recognition model, and our whole
+mobile pipeline — all reproduce current PaddleOCR-*mobile* end-to-end (paddle_e2e
+mobile 48%/80% ≈ our live). ⚠️ An earlier 2026-06-25 draft of this section wrongly
+concluded "server det not a lever / the gap is input-image conditioning" — that
+came from a flawed **manual** server assembly (`manual_server_e2e.py`, no
+integrated pipeline). The integrated full-pipeline comparison below corrects it.
+
+**The gap IS the detection model (server vs mobile).** Same version, same pipeline,
+only the detector differs: 3.3.0 server (= cached) **91%** vs 3.3.0 mobile **63%**
+on the dense subset; corpus-wide cached(server) **93%** vs our mobile **~83%**.
+Proof the cache used server det: 3.3.0 *mobile* on the same images = 63% ≠ cached
+91%.
+
+**The input image is NOT degraded** (this was investigated directly). The stored
+jpg is the original high-res phone photo (e.g. 1298×5463, EXIF orientation normal),
+sharp and legible, **added in the same commit as its `.ocr.json`** — not
+re-saved/redacted after caching. Both cache and our pipeline OCR a same-resolution
+~813×3100 capped+padded image. The cached boxes not aligning with ours (Y scatter
+std ~11px) is explained by **server-det geometry + the container's doc-unwarp**,
+not image changes.
+
+**Lever (portable): ship server det on-device.** The macOS bus-error on server det
+is a *paddle-CPU* issue, not ONNX/iOS — the earlier on-device experiment already
+ran server det as ONNX (`device_sim`) without crashing. Convert
+`PP-OCRv5_server_det` to ONNX and re-measure with `device_sim --live`; expect items
+~83%→~93%. Cost: ~+80 MB model + slower detection (earlier note: ~3.7× latency),
+likely gated on a CoreML/ANE EP. NOTE: the container also runs doc-orientation +
+UVDoc dewarp by default; in *3.7.0* dewarp *hurt* (server+dewarp 63% on the subset,
+manual assembly), so treat dewarp as unverified — the clean, reproducible lever is
+the **server detector**. (This also corrects the stale "bigger models don't fix it"
+line: detection capability *is* the axis; the old test was confounded by the
+multilingual rec + scorer bug + 960 resize.)
+
+**Why `--reccached` is invalid:** feeding the cached boxes through our recognizer
+crops the wrong regions (the cached frame ≠ our image), so it scores ~0 on items
+even though, on crops that *do* land on text, our rec is exact (`1968518 WHITE
+RABBIT`, `3028018 GREEN ONIONS` matched byte-for-byte). Kept as a mode for the
+record; do not trust its score.
+
+**Side finding — parser latency:** `receipt_core::process_receipt` takes ~7s on a
+dense Costco receipt (~120 lines) vs ~0.4s on a small one — a real on-device
+latency bug (super-linear spatial pairing), shared with desktop.
+
+**Open:** the *exact* mechanism of the cache's better conditioning (deskew vs
+UVDoc dewarp vs different image bytes / redaction re-save) — under investigation.
 
 ## Locked decisions
 

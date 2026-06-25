@@ -14,12 +14,50 @@ pub struct Detector {
     cfg: DbConfig,
 }
 
+/// Raw DB probability map plus the geometry needed to post-process it. Exposed
+/// for diagnostics (`device_sim --probdump`): lets the same prob map be fed
+/// through both our `boxes_from_bitmap` and PaddleOCR's reference DBPostProcess,
+/// isolating the contour/min-rect/unclip algorithm from the upstream mask.
+pub struct DetProb {
+    pub prob: Vec<f32>,
+    pub h: usize,
+    pub w: usize,
+    pub orig_w: f32,
+    pub orig_h: f32,
+    pub ratio_w: f32,
+    pub ratio_h: f32,
+}
+
 impl Detector {
     pub fn from_path<P: AsRef<Path>>(path: P) -> ort::Result<Self> {
         let session = Session::builder()?.commit_from_file(path)?;
         Ok(Self {
             session,
             cfg: DbConfig::default(),
+        })
+    }
+
+    /// Run detection up to (and including) the DB probability map, returning it
+    /// raw — without the contour/box post-processing. Diagnostics only.
+    pub fn prob_map(&mut self, img: &RgbImage) -> ort::Result<DetProb> {
+        let input = preprocess_det(img);
+        let (orig_w, orig_h) = (img.width() as f32, img.height() as f32);
+        let tensor = Tensor::from_array((
+            [1_usize, 3, input.height, input.width],
+            input.data.clone(),
+        ))?;
+        let outputs = self.session.run(ort::inputs![tensor])?;
+        let (shape, data) = outputs[0].try_extract_tensor::<f32>()?;
+        let h = shape[shape.len() - 2] as usize;
+        let w = shape[shape.len() - 1] as usize;
+        Ok(DetProb {
+            prob: data.to_vec(),
+            h,
+            w,
+            orig_w,
+            orig_h,
+            ratio_w: input.ratio_w,
+            ratio_h: input.ratio_h,
         })
     }
 

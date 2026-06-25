@@ -48,6 +48,17 @@ impl OcrEngine {
     /// Detect + (orient) + recognize every text region in the image.
     pub fn recognize_image(&mut self, img: &RgbImage) -> ort::Result<Vec<Detection>> {
         let quads = self.detector.detect(img)?;
+        self.recognize_quads(img, quads)
+    }
+
+    /// Orient + recognize a caller-supplied set of quads (skips detection).
+    /// Used by the `device_sim --reccached` diagnostic to feed desktop-detected
+    /// boxes through our recognizer, isolating recognition from detection.
+    pub fn recognize_quads(
+        &mut self,
+        img: &RgbImage,
+        quads: Vec<crate::db_postprocess::Quad>,
+    ) -> ort::Result<Vec<Detection>> {
         // Debug probe: REC_DUMP_DIR=<dir> saves every line's pre-rec crop PNG and
         // logs box/conf/text (incl. dropped lines), to localize garbles to
         // crop-extraction vs recognition. Off unless the env var is set.

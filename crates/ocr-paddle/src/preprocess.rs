@@ -24,6 +24,17 @@ pub const RESIZE_LONG: u32 = 1536;
 /// DB models are fully convolutional but require H,W to be multiples of 32.
 pub const STRIDE: u32 = 32;
 
+/// Effective detection resize, overridable via `OCR_RESIZE_LONG` for diagnostics
+/// (e.g. match PaddleOCR's native 960 when comparing box geometry). Defaults to
+/// [`RESIZE_LONG`].
+fn resize_long() -> u32 {
+    std::env::var("OCR_RESIZE_LONG")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .filter(|&v| v > 0)
+        .unwrap_or(RESIZE_LONG)
+}
+
 /// ImageNet mean/std in the order PaddleOCR applies them to a BGR image.
 const MEAN_BGR: [f32; 3] = [0.485, 0.456, 0.406];
 const STD_BGR: [f32; 3] = [0.229, 0.224, 0.225];
@@ -46,7 +57,7 @@ pub struct DetInput {
 /// (PaddleOCR `DetResizeForTest` / `resize_image_type2`).
 pub fn resized_dims(orig_w: u32, orig_h: u32) -> (u32, u32) {
     let longer = orig_w.max(orig_h) as f32;
-    let ratio = RESIZE_LONG as f32 / longer;
+    let ratio = resize_long() as f32 / longer;
     let round_up = |v: f32| -> u32 {
         let n = (v.round() as u32).max(1);
         n.div_ceil(STRIDE) * STRIDE
