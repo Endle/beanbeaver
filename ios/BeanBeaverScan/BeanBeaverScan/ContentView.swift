@@ -11,6 +11,9 @@ struct ContentView: View {
     /// When on, a copy of each camera-scanned receipt is saved to the camera roll.
     @AppStorage("saveScansToPhotos") private var saveScansToPhotos = false
 
+    /// CoreML/ANE on (default) vs forced CPU — for on-device latency A/B.
+    @AppStorage("useCoreML") private var useCoreML = true
+
     /// Bundled DEBUG sample (a redacted Costco receipt fixture).
     private let sampleName = "costco_20260218_redact"
 
@@ -52,11 +55,16 @@ struct ContentView: View {
                             .font(.subheadline)
                     }
 
+                    Toggle("Use Neural Engine (CoreML)", isOn: $useCoreML)
+                        .font(.subheadline)
+
                     statusView
                 }
                 .padding()
             }
             .navigationTitle("BeanBeaver Scan")
+            .onAppear { pipeline.coreMLEnabled = useCoreML }
+            .onChange(of: useCoreML) { _, enabled in pipeline.coreMLEnabled = enabled }
             .fullScreenCover(isPresented: $showScanner) {
                 DocumentScanner(
                     onScan: { data in
@@ -103,6 +111,7 @@ struct ContentView: View {
         case .done(let result):
             VStack(alignment: .leading, spacing: 12) {
                 ReceiptResultView(result: result)
+                ScanTimingsView(timings: result.timings, wallMs: pipeline.lastWallMs)
                 capturedImageExport
             }
         }
@@ -162,6 +171,39 @@ struct ReceiptResultView: View {
     }
 }
 
+/// Compact per-stage latency readout under a result, for the real-device test.
+/// `wallMs` is the Swift-observed total (incl. decode + FFI); the stage rows are
+/// the Rust `ScanTimings` (prep → detect → recognize → classify → parse).
+struct ScanTimingsView: View {
+    let timings: ScanTimings
+    var wallMs: Double?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Scan time").font(.caption).foregroundStyle(.secondary)
+            if let wallMs { row("total (wall)", wallMs, emphasized: true) }
+            row("prep", timings.prepMs)
+            row("detect", timings.detectMs)
+            row("recognize", timings.recognizeMs)
+            row("classify", timings.classifyMs)
+            row("parse", timings.parseMs)
+            row("rust total", timings.totalMs)
+        }
+        .font(.system(.caption2, design: .monospaced))
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func row(_ label: String, _ ms: Double, emphasized: Bool = false) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text("\(Int(ms.rounded())) ms").fontWeight(emphasized ? .bold : .regular)
+        }
+    }
+}
+
 // MARK: - Previews
 
 #if DEBUG
@@ -171,6 +213,13 @@ extension ContentView {
     init(previewPipeline: ReceiptPipeline) {
         _pipeline = State(initialValue: previewPipeline)
     }
+}
+
+extension ScanTimings {
+    /// Plausible on-device stage split for previews/screenshots.
+    static let preview = ScanTimings(
+        prepMs: 28, detectMs: 322, classifyMs: 41,
+        recognizeMs: 408, parseMs: 17, totalMs: 816)
 }
 
 extension ReceiptResult {
@@ -196,7 +245,8 @@ extension ReceiptResult {
           Expenses:Household          24.99 USD
           Expenses:Uncategorized      58.40 USD
           Liabilities:CreditCard     -148.73 USD
-        """
+        """,
+        timings: .preview
     )
 
     /// A sparse result: no line items, inferred date, parser warnings.
@@ -213,7 +263,8 @@ extension ReceiptResult {
         2026-06-24 * "Corner Cafe"
           Expenses:Uncategorized       6.50 USD
           Liabilities:CreditCard      -6.50 USD
-        """
+        """,
+        timings: .preview
     )
 }
 

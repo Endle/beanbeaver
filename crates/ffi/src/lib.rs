@@ -10,7 +10,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 
 use ocr_paddle::engine::OcrEngine;
-use ocr_paddle::process::process_image;
+use ocr_paddle::process::{process_image_timed, ScanTimings as CoreScanTimings};
 use receipt_core::process::ProcessedReceipt;
 
 uniffi::setup_scaffolding!();
@@ -38,6 +38,33 @@ pub struct ReceiptItem {
     pub category: Option<String>,
 }
 
+/// Per-stage on-device timings (milliseconds) for one scan, for profiling.
+/// `total_ms` is the whole Rust pipeline (prep → OCR → parse); it excludes the
+/// JPEG/PNG decode that happens before `process_image` (and the Swift-observed
+/// wall time, which the app measures separately).
+#[derive(uniffi::Record)]
+pub struct ScanTimings {
+    pub prep_ms: f64,
+    pub detect_ms: f64,
+    pub classify_ms: f64,
+    pub recognize_ms: f64,
+    pub parse_ms: f64,
+    pub total_ms: f64,
+}
+
+impl From<CoreScanTimings> for ScanTimings {
+    fn from(t: CoreScanTimings) -> Self {
+        Self {
+            prep_ms: t.prep_ms,
+            detect_ms: t.detect_ms,
+            classify_ms: t.classify_ms,
+            recognize_ms: t.recognize_ms,
+            parse_ms: t.parse_ms,
+            total_ms: t.total_ms,
+        }
+    }
+}
+
 /// Flattened, Swift-friendly view of `ProcessedReceipt`.
 #[derive(uniffi::Record)]
 pub struct ReceiptResult {
@@ -51,6 +78,8 @@ pub struct ReceiptResult {
     pub items: Vec<ReceiptItem>,
     pub warnings: Vec<String>,
     pub beancount: String,
+    /// Per-stage timings for this scan (on-device profiling).
+    pub timings: ScanTimings,
 }
 
 /// Errors surfaced to Swift as a typed exception.
@@ -115,7 +144,7 @@ impl OcrSession {
             .lock()
             .map_err(|e| ScanError::Inference { msg: format!("engine lock poisoned: {e}") })?;
 
-        let processed = process_image(
+        let (processed, timings) = process_image_timed(
             &mut engine,
             &img,
             "receipt.jpg",
@@ -125,12 +154,12 @@ impl OcrSession {
         )
         .map_err(|e| ScanError::Inference { msg: e.to_string() })?;
 
-        Ok(to_result(processed))
+        Ok(to_result(processed, timings.into()))
     }
 }
 
 /// Flatten the rich `ProcessedReceipt` into the FFI record.
-fn to_result(p: ProcessedReceipt) -> ReceiptResult {
+fn to_result(p: ProcessedReceipt, timings: ScanTimings) -> ReceiptResult {
     let d = p.parsed;
     ReceiptResult {
         merchant: d.merchant,
@@ -151,6 +180,7 @@ fn to_result(p: ProcessedReceipt) -> ReceiptResult {
             .collect(),
         warnings: d.warnings.into_iter().map(|w| w.message).collect(),
         beancount: p.beancount,
+        timings,
     }
 }
 
@@ -183,5 +213,15 @@ mod tests {
         assert!(!r.items.is_empty());
         assert!(r.beancount.contains("COSTCO"));
         println!("{}", r.beancount);
+
+        // Timings are populated and internally consistent.
+        let t = &r.timings;
+        println!(
+            "timings(ms): prep={:.1} detect={:.1} classify={:.1} recognize={:.1} parse={:.1} total={:.1}",
+            t.prep_ms, t.detect_ms, t.classify_ms, t.recognize_ms, t.parse_ms, t.total_ms
+        );
+        assert!(t.total_ms > 0.0, "total_ms should be positive");
+        let stages = t.prep_ms + t.detect_ms + t.classify_ms + t.recognize_ms + t.parse_ms;
+        assert!(t.total_ms + 1.0 >= stages, "total {} < sum of stages {}", t.total_ms, stages);
     }
 }

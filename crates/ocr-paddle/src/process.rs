@@ -2,11 +2,26 @@
 //! beancount, fully on-device. Mirrors the desktop flow
 //! (`resize_image_bytes` -> OCR service -> `process_receipt`).
 
+use std::time::Instant;
+
 use image::{Rgb, RgbImage};
 use receipt_core::ocr_transform::RawDetection;
 use receipt_core::process::{process_receipt, ProcessedReceipt};
 
 use crate::engine::OcrEngine;
+
+/// End-to-end per-stage timings (milliseconds) for one `process_image` call.
+/// `total_ms` is the whole Rust pipeline (prep → OCR → parse); it excludes the
+/// image decode, which happens in the FFI seam before `process_image`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ScanTimings {
+    pub prep_ms: f64,
+    pub detect_ms: f64,
+    pub classify_ms: f64,
+    pub recognize_ms: f64,
+    pub parse_ms: f64,
+    pub total_ms: f64,
+}
 
 /// Matches `image_pipeline.MAX_IMAGE_DIMENSION` / `OCR_IMAGE_PADDING`.
 pub const MAX_IMAGE_DIMENSION: u32 = 3000;
@@ -44,8 +59,27 @@ pub fn process_image(
     credit_card_account: &str,
     image_sha256: Option<&str>,
 ) -> ort::Result<ProcessedReceipt> {
+    Ok(process_image_timed(engine, img, image_filename, today, credit_card_account, image_sha256)?.0)
+}
+
+/// Like [`process_image`] but also returns per-stage [`ScanTimings`] for
+/// on-device profiling.
+#[allow(clippy::too_many_arguments)]
+pub fn process_image_timed(
+    engine: &mut OcrEngine,
+    img: &RgbImage,
+    image_filename: &str,
+    today: (i32, u32, u32),
+    credit_card_account: &str,
+    image_sha256: Option<&str>,
+) -> ort::Result<(ProcessedReceipt, ScanTimings)> {
+    let t_all = Instant::now();
+
+    let t = Instant::now();
     let prepared = resize_and_pad(img);
-    let detections = engine.recognize_image(&prepared)?;
+    let prep_ms = ms_since(t);
+
+    let (detections, ocr) = engine.recognize_image_timed(&prepared)?;
 
     let raw: Vec<RawDetection> = detections
         .into_iter()
@@ -56,7 +90,8 @@ pub fn process_image(
         })
         .collect();
 
-    Ok(process_receipt(
+    let t = Instant::now();
+    let processed = process_receipt(
         raw,
         prepared.width() as i64,
         prepared.height() as i64,
@@ -66,7 +101,23 @@ pub fn process_image(
         today,
         credit_card_account,
         image_sha256,
-    ))
+    );
+    let parse_ms = ms_since(t);
+
+    let timings = ScanTimings {
+        prep_ms,
+        detect_ms: ocr.detect_ms,
+        classify_ms: ocr.classify_ms,
+        recognize_ms: ocr.recognize_ms,
+        parse_ms,
+        total_ms: ms_since(t_all),
+    };
+    Ok((processed, timings))
+}
+
+#[inline]
+fn ms_since(t: Instant) -> f64 {
+    t.elapsed().as_secs_f64() * 1e3
 }
 
 #[cfg(test)]

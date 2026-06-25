@@ -3,6 +3,7 @@
 //! desktop `beanbeaver-ocr` service output.
 
 use std::path::Path;
+use std::time::Instant;
 
 use image::RgbImage;
 
@@ -19,6 +20,20 @@ pub struct Detection {
     pub points: [[f32; 2]; 4],
     pub text: String,
     pub confidence: f32,
+}
+
+/// Per-stage wall-clock timings (milliseconds) for one `recognize_image` call.
+/// Used for on-device profiling (which stage dominates det vs cls vs rec).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct OcrTimings {
+    pub detect_ms: f64,
+    pub classify_ms: f64,
+    pub recognize_ms: f64,
+}
+
+#[inline]
+fn ms_since(t: Instant) -> f64 {
+    t.elapsed().as_secs_f64() * 1e3
 }
 
 pub struct OcrEngine {
@@ -47,8 +62,23 @@ impl OcrEngine {
 
     /// Detect + (orient) + recognize every text region in the image.
     pub fn recognize_image(&mut self, img: &RgbImage) -> ort::Result<Vec<Detection>> {
+        Ok(self.recognize_image_timed(img)?.0)
+    }
+
+    /// Like [`recognize_image`] but also returns per-stage timings (det/cls/rec)
+    /// for on-device profiling.
+    pub fn recognize_image_timed(
+        &mut self,
+        img: &RgbImage,
+    ) -> ort::Result<(Vec<Detection>, OcrTimings)> {
+        let t = Instant::now();
         let quads = self.detector.detect(img)?;
-        self.recognize_quads(img, quads)
+        let detect_ms = ms_since(t);
+        let (out, classify_ms, recognize_ms) = self.recognize_quads_timed(img, quads)?;
+        Ok((
+            out,
+            OcrTimings { detect_ms, classify_ms, recognize_ms },
+        ))
     }
 
     /// Orient + recognize a caller-supplied set of quads (skips detection).
@@ -59,6 +89,16 @@ impl OcrEngine {
         img: &RgbImage,
         quads: Vec<crate::db_postprocess::Quad>,
     ) -> ort::Result<Vec<Detection>> {
+        Ok(self.recognize_quads_timed(img, quads)?.0)
+    }
+
+    /// `recognize_quads`, additionally accumulating classify + recognize wall
+    /// time (ms) across the crops. Returns `(detections, classify_ms, recognize_ms)`.
+    fn recognize_quads_timed(
+        &mut self,
+        img: &RgbImage,
+        quads: Vec<crate::db_postprocess::Quad>,
+    ) -> ort::Result<(Vec<Detection>, f64, f64)> {
         // Debug probe: REC_DUMP_DIR=<dir> saves every line's pre-rec crop PNG and
         // logs box/conf/text (incl. dropped lines), to localize garbles to
         // crop-extraction vs recognition. Off unless the env var is set.
@@ -67,14 +107,21 @@ impl OcrEngine {
             let _ = std::fs::create_dir_all(d);
         }
         let mut out = Vec::with_capacity(quads.len());
+        let mut classify_ms = 0.0;
+        let mut recognize_ms = 0.0;
         for (i, q) in quads.into_iter().enumerate() {
             let mut crop = rotate_crop(img, &q);
             if let Some(cls) = self.classifier.as_mut() {
-                if cls.is_flipped(&crop)? {
+                let t = Instant::now();
+                let flipped = cls.is_flipped(&crop)?;
+                classify_ms += ms_since(t);
+                if flipped {
                     crop = image::imageops::rotate180(&crop);
                 }
             }
+            let t = Instant::now();
             let (text, confidence) = self.recognizer.recognize_crop(&crop)?;
+            recognize_ms += ms_since(t);
             if let Some(d) = &dump {
                 let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
                 for p in &q.points {
@@ -96,6 +143,6 @@ impl OcrEngine {
                 confidence,
             });
         }
-        Ok(out)
+        Ok((out, classify_ms, recognize_ms))
     }
 }
