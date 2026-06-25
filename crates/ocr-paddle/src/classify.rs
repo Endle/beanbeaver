@@ -26,7 +26,7 @@ pub struct Classifier {
 
 impl Classifier {
     pub fn from_path<P: AsRef<Path>>(path: P) -> ort::Result<Self> {
-        let session = Session::builder()?.commit_from_file(path)?;
+        let session = crate::session::commit_from_file(path)?;
         Ok(Self {
             session,
             thresh: CLS_THRESH,

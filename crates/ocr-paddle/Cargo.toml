@@ -20,6 +20,12 @@ ort = "=2.0.0-rc.12"
 # Downstream parsing/formatting (detections -> structured receipt + beancount).
 receipt-core = { path = "../receipt-core" }
 
+[features]
+# Apple-only: register the CoreML execution provider (Neural Engine / GPU) for
+# det/rec/cls. Off by default so Linux/desktop builds don't link CoreML; the iOS
+# xcframework build enables it. See src/session.rs for runtime tuning env vars.
+coreml = ["ort/coreml"]
+
 [dev-dependencies]
 # Parse the e2e `.expected.json` fixtures in the Phase 5 validation test.
 serde_json = "1"

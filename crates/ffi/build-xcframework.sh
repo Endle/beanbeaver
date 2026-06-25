@@ -32,6 +32,9 @@ SIM_TARGETS=(aarch64-apple-ios-sim)
 
 cargo_flags=(--lib -p "$CRATE")
 [ "$PROFILE" = "release" ] && cargo_flags+=(--release)
+# Enable CoreML EP (Apple Neural Engine / GPU) on the device/sim slices unless
+# COREML=0. The prebuilt libonnxruntime.a already ships the CoreML provider.
+[ "${COREML:-1}" = "1" ] && cargo_flags+=(--features coreml)
 profile_dir="$PROFILE"; [ "$PROFILE" = "debug" ] && profile_dir=debug
 
 rm -rf "$WORK"; mkdir -p "$WORK"

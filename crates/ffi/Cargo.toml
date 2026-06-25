@@ -24,3 +24,8 @@ receipt-core = { path = "../receipt-core" }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 # UniFFI proc-macro bindings ("cli" provides uniffi_bindgen_main for the bin).
 uniffi = { version = "0.28", features = ["cli"] }
+
+[features]
+# Forward CoreML (Apple Neural Engine / GPU) acceleration to ocr-paddle. Enabled
+# by the iOS xcframework build (build-xcframework.sh); off for host bindgen.
+coreml = ["ocr-paddle/coreml"]

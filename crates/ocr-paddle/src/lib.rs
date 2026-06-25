@@ -14,3 +14,4 @@ pub mod engine;
 pub mod preprocess;
 pub mod process;
 pub mod recognize;
+pub(crate) mod session;

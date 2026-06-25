@@ -146,6 +146,59 @@ latency bug (super-linear spatial pairing), shared with desktop.
 **Open:** the *exact* mechanism of the cache's better conditioning (deskew vs
 UVDoc dewarp vs different image bytes / redaction re-save) — under investigation.
 
+## CoreML / Neural Engine acceleration for server det (2026-06-25)
+
+To make the server-det lever viable on-device (it's ~11× mobile det: ~3.2 s/img
+on M1 CPU, est. ~6 s on iPhone 15 CPU), wired up Apple's ML acceleration and
+validated it.
+
+**iPhone 15+ has a 16-core Apple Neural Engine** (A16 ~17 TOPS; A17 Pro/A18 ~35
+TOPS) plus Metal GPU. **Our shipped iOS `libonnxruntime.a` already contains the
+CoreML execution provider** (verified via `nm`; ~11.8k CoreML symbols; no XNNPACK),
+and the `ort` crate exposes it behind a `coreml` feature.
+
+**Done (steps 1 + 2):**
+1. **CoreML EP wired into the engine** — `crates/ocr-paddle/src/session.rs`
+   centralises session construction; det/rec/cls all go through it. Behind the
+   `ocr-paddle` `coreml` feature (→ `ort/coreml`), off by default (Linux/desktop
+   unaffected), enabled by `build-xcframework.sh` (`COREML=1` default) and
+   `bb-receipt-ffi`'s `coreml` feature. Registration is best-effort → graceful CPU
+   fallback. Runtime env knobs (no rebuild): `OCR_COREML=0` (force CPU),
+   `OCR_COREML_UNITS=ane|gpu|cpu|all` (default ane), `OCR_COREML_FORMAT=
+   neuralnetwork|mlprogram` (default **neuralnetwork**), `OCR_COREML_CACHE_DIR=<dir>`
+   (cache compiled model across launches). Validated on M1: identical detections
+   vs CPU.
+2. **Fixed-shape server det ONNX** — CoreML/ANE needs static input shapes, so
+   exported `models/PP-OCRv5_server_det_fixed_1536x768.onnx` (input `[1,3,1536,768]`,
+   88 MB, gitignored). H=1536 = our resize-long; W=768 letterboxes the widest
+   receipt aspect (~1:2) with margin. Regenerate: `paddle2onnx` from
+   `~/.paddlex/official_models/PP-OCRv5_server_det` → then `python -m
+   onnxruntime.tools.make_dynamic_shape_fixed --input_name x --input_shape
+   1,3,1536,768`.
+
+**M1 validation (fixed server det, the iPhone proxy):**
+
+| compute | latency/inference |
+|---|---|
+| CPU | 2170 ms |
+| CoreML **ANE** (NeuralNetwork) | **579 ms** (3.7×) |
+| CoreML GPU | 646 ms |
+| CoreML **ALL** (ANE+GPU+CPU) | **432 ms** (5.0×) |
+
+261/264 nodes offload to CoreML. ⚠️ **MLProgram format fails** to compile this
+model (`MaxPool` `ceil_mode=True` + SAME padding) → default to **NeuralNetwork**.
+(Fixing that MaxPool to `ceil_mode=False` would unlock MLProgram, possibly faster —
+future option.) On iPhone 15 (A16 ANE ≈ 17 TOPS vs M1 ≈ 11) server det should land
+~0.4–0.6 s — vs ~6 s on CPU. **Server det becomes viable with the ANE.**
+
+**Remaining before on-device profiling (step 3, needs the physical iPhone 15):**
+- Letterbox preprocessing to feed the fixed 1536×768 canvas (white-pad, preserve
+  aspect) — the current `preprocess_det` is variable-shape.
+- Bundle the 88 MB model + xcodeproj resource entry; set `OCR_COREML_CACHE_DIR` to
+  the app caches dir from Swift (avoids per-launch recompile).
+- Profile on the device with `CoreML::with_profile_compute_plan(true)` to confirm
+  ANE dispatch + measure real latency; verify accuracy with the letterboxed input.
+
 ## Locked decisions
 
 - **On-device PaddleOCR (PP-OCRv5)** — the **English** recognition model
