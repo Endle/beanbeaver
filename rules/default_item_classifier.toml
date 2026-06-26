@@ -17,7 +17,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0001"
-keywords = ["CHICKEN", "BEEF", "BEAF", "PORK", "BACON", "SAUSAGE", "HAM", "TURKEY", "LAMB", "STEAK", "GROUND MEAT", "MEATBALL", "SALAMI", "PEPPERONI", "PROSCIUTTO", "ROTISSERIE", "DRUMSTICK", "MEAT", "BEEF BELLY", "BEEF BELLY ROLL", "ANGUS", "DUCK FEET", "DUCK LEG", "DUCK WING", "DUCK BREAST"]
+keywords = ["CHICKEN", "BEEF", "BEAF", "PORK", "BACON", "SAUSAGE", "HAM", "TURKEY", "LAMB", "STEAK", "GROUND MEAT", "MEATBALL", "SALAMI", "PEPPERONI", "PROSCIUTTO", "ROTISSERIE", "DRUMSTICK", "MEAT", "BEEF BELLY", "BEEF BELLY ROLL", "ANGUS", "DUCK FEET", "DUCK LEG", "DUCK WING", "DUCK BREAST", "BRISKET"]
 category = "grocery_meat"
 tags = ["grocery", "meat"]
 priority = 0
@@ -120,7 +120,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0015"
-keywords = ["BREAD", "BAGEL", "CROISSANT", "MUFFIN", "DONUT", "DOUGHNUT", "PASTRY", "CAKE", "PIE", "COOKIE", "COOKIES", "BAGUETTE", "BUN", "BUNS", "TOAST", "ENGLISH MUFFIN", "TORTILLA", "PITA", "NAAN", "FLATBREAD", "WAFFLE", "PANCAKE"]
+keywords = ["BREAD", "BAGEL", "CROISSANT", "MUFFIN", "DONUT", "DOUGHNUT", "PASTRY", "CAKE", "PIE", "COOKIE", "COOKIES", "BAGUETTE", "BUN", "BUNS", "TOAST", "ENGLISH MUFFIN", "TORTILLA", "PITA", "NAAN", "FLATBREAD", "WAFFLE", "PANCAKE", "PORTUGUESE TART", "EGG TART"]
 category = "grocery_bakery"
 tags = ["grocery", "bakery"]
 priority = 0
