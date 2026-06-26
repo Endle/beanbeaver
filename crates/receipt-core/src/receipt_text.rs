@@ -59,7 +59,7 @@ fn re_skip_patterns() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(
-            r"(?i)TOTAL|SUBTOTAL|SUB\s+TOTAL|TOTALS?\s+ON|^TAX$|^HST|^GST|^PST|AFTER\s+TAX|^\s*\d+\s*%$|^CASH\b|^CREDIT\b|^DEBIT\b|^CHANGE\b|^BALANCE|^VISA\b|^MASTERCARD\b|^AMEX\b|^APPROVED\b|^ACTIVATED\b|^PC\s+\d|^ACCT:|^ACCOUNT:|^REFERENCE|THANK YOU|WELCOME|RECEIPT|TRANSACTION|^POINTS\b|^REWARDS\b|^EARNED\b|^SAVED$|^YOU SAVED|^CARD|AUTH|REF\s*#|SLIP\s*#|^TILL|CASHIER|\bSTORE\b|^PHONE|ADDRESS|SIGNATURE|Merchant|^QTY$|^UNIT$|^SAV$|ITEM\s+COUNT|NUMBER\s+OF\s+ITEMS|XXXX+|^CAD|VERIFIED|^PIN$|CUSTOMER\s+COPY|COPY$|Optimum|Redeemed",
+            r"(?i)TOTAL|SUBTOTAL|SUB\s+TOTAL|TOTALS?\s+ON|^TAX$|^HST|^GST|^PST|AFTER\s+TAX|^\s*\d+\s*%$|^CASH\b|^CREDIT\b|^DEBIT\b|^CHANGE\b|^BALANCE|^VISA\b|^MASTERCARD\b|^AMEX\b|^APPROVED\b|^ACTIVATED\b|^PC\s+\d|^ACCT:|^ACCOUNT:|^REFERENCE|THANK YOU|WELCOME|RECEIPT|TRANSACTION|^POINTS\b|^REWARDS\b|^EARNED\b|^SAVED$|^YOU SAVED|PRICE\s+MATCH|^CARD|AUTH|REF\s*#|SLIP\s*#|^TILL|CASHIER|\bSTORE\b|^PHONE|ADDRESS|SIGNATURE|Merchant|^QTY$|^UNIT$|^SAV$|ITEM\s+COUNT|NUMBER\s+OF\s+ITEMS|XXXX+|^CAD|VERIFIED|^PIN$|CUSTOMER\s+COPY|COPY$|Optimum|Redeemed",
         )
         .unwrap()
     })
@@ -268,6 +268,22 @@ fn re_negative_unit_qty() -> &'static Regex {
 fn re_compact_offer_fragment() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"(?i)^\d+\s*@\s*\d+\s*/\s*\$?\d+\.\d{2}\b").unwrap())
+}
+
+// Compact "<qty>/$<price>" deal notation with no "@" and no "for", optionally
+// prefixed by a bundle quantity -- e.g. FreshCo's "1/ $1.99" (the unit price
+// printed under a multi-buy item) and "2  1/$6.44". These are unit-price
+// detail rows, not items; without recognizing them they leak through as
+// phantom items that inflate the total. The pattern is digits/punctuation only
+// (no alphabetic content), so real product names can never match it.
+fn re_compact_slash_deal() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(&format!(
+            r"^(?:\d+\s+)?\d+\s*/\s*\$?\d+\.\d{{2}}\s*{TAX_FLAG_CLASS}\s*$"
+        ))
+        .unwrap()
+    })
 }
 
 fn re_parenthetical_offer_prefix() -> &'static Regex {
@@ -651,6 +667,7 @@ fn looks_like_quantity_expression(text: &str) -> bool {
             .unwrap()
             .is_match(&normalized)
         || re_compact_offer_fragment().is_match(&normalized)
+        || re_compact_slash_deal().is_match(&normalized)
         || re_multi_for_price().is_match(&normalized)
         || re_parenthetical_offer_prefix().is_match(&normalized)
 }
@@ -1756,6 +1773,49 @@ mod tests {
                 .iter()
                 .any(|it| it.description.contains("Natrel") && it.price_cents == 1119),
             "expected Natrel paired at 11.19, got {items:?}"
+        );
+    }
+
+    #[test]
+    fn skips_compact_slash_deal_unit_rows_and_price_match_promo() {
+        // FreshCo 2026-06-17_freshco_135_46: the unit-price detail rows
+        // "1/ $1.99" (under Tomatos, 6 @ $1.99) and "2  1/$6.44" (under Milk
+        // 2%, 2 @ $6.44) lack the "@" that the existing offer patterns key on,
+        // so they leaked through as phantom items. Likewise the savings note
+        // "YOU PRICE MATCHED & SAVED $6.02" is not an item. All three together
+        // inflated the total by exactly $14.45 over the $132.09 subtotal.
+        let lines: Vec<String> = [
+            "Tomatos Diced No Slt $11.94 C",
+            "1/ $1.99",
+            "Milk 2% IXAL $12.88 C",
+            "2  1/$6.44",
+            "CocaCola Zero Can $25.96*HC",
+            "2 @ $12.98",
+            "YOU PRICE MATCHED & SAVED $6.02",
+            "SUBTOTAL $50.78",
+            "TOTAL $50.78",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let summary_amounts = HashSet::from([5078i64]);
+        let (items, _warnings) = extract_text_items(&lines, &summary_amounts);
+        let total: i64 = items.iter().map(|it| it.price_cents).sum();
+        assert_eq!(
+            total, 5078,
+            "real items must sum to the $50.78 subtotal with no phantoms, got {items:?}"
+        );
+        assert!(
+            !items.iter().any(|it| it.price_cents == 199),
+            "compact \"1/ $1.99\" unit row must not become an item, got {items:?}"
+        );
+        assert!(
+            !items.iter().any(|it| it.price_cents == 644),
+            "compact \"2  1/$6.44\" unit row must not become an item, got {items:?}"
+        );
+        assert!(
+            !items.iter().any(|it| it.price_cents == 602),
+            "\"PRICE MATCHED & SAVED\" promo must not become an item, got {items:?}"
         );
     }
 
