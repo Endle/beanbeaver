@@ -63,7 +63,7 @@ struct ContentView: View {
                     // dynamic-shape models (slower + misreads — see
                     // docs/ios_port.md). Hidden in Release; kept in dev builds
                     // for the on-device CoreML-vs-CPU A/B.
-                    Toggle("Use Neural Engine (CoreML)", isOn: $useCoreML)
+                    Toggle("CoreML (keep disabled)", isOn: $useCoreML)
                         .font(.subheadline)
 #endif
 
