@@ -294,6 +294,36 @@ items; just 6 miss a header field.** So 92% of scans nail the matching keys and 
 are good-enough; the lever is item recall on the ~24 header-OK receipts below 80%
 items (dense receipts).
 
+## Branch & sharing contract (master ⇄ ios_v2)
+
+The parser/categorizer/formatter lives in **one crate, `receipt-core`**, consumed
+by BOTH desktop (PyO3 `_rust_matcher`, `src/python_receipt_process.rs`) and iOS
+(`crates/ffi` → `process_image`). So **parser improvements are shared**: desktop
+accuracy work that lands in `receipt-core` on `master` benefits iOS for free.
+
+**OCR is NOT shared, by design.** Desktop uses the external PaddleOCR container
+(`../beanbeaver-ocr`); iOS uses the on-device Rust port `ocr-paddle`. Desktop OCR
+work does not transfer to iOS — and the iOS accuracy gap (item recall on dense
+receipts) lives in `ocr-paddle`, which is iOS-only. So unification gives free
+*parser* transfer, not *OCR* transfer.
+
+State (2026-06-25): **already unified for the parser.** `ios_v2` = `origin/master`
++ iOS-only commits; `receipt-core`/`src`/`rules` are identical between them (0
+drift). The 5 parser fixes once on `ios_v2` (total reconciliation, DD-Mon dates,
+`%`-items, char-boundary panic) are all on `origin/master` now (landed via
+`receipt-core-fixes`).
+
+Contract to keep it that way:
+- **Never fork `receipt-core`.** All parser logic changes go in that crate.
+- Desktop/shared parser fixes land on **`master`** (e.g. via `receipt-core-fixes`),
+  desktop parity verified (`pixi run test`).
+- **`ios_v2` merges `origin/master` forward** whenever it adopts new parser work
+  (a no-op today; do it before/after any `receipt-core` change on master).
+- **Full unification (merge `ios_v2` → `master`) is deferred** until: a large-file
+  plan for the ~73 MB of committed `models/` (drop the `.tar`/`_infer/` inputs —
+  only the 3 `.onnx` are needed at runtime — or Git LFS / fetch-on-build), CI that
+  builds the iOS crates (`ocr-paddle`/`ffi`) green, and the app past prototype.
+
 ## Locked decisions
 
 - **On-device PaddleOCR (PP-OCRv5)** — the **English** recognition model
