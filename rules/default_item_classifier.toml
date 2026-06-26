@@ -205,7 +205,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0026"
-keywords = ["COFFEE BEAN", "GROUND COFFEE", "INSTANT COFFEE", "COFFEE PODS", "K-CUP", "NESPRESSO", "TEA", "TEA BAG", "GREEN TEA", "BLACK TEA", "HERBAL TEA", "CHAMOMILE", "EARL GREY"]
+keywords = ["COFFEE BEAN", "GROUND COFFEE", "INSTANT COFFEE", "COFFEE PODS", "K-CUP", "NESPRESSO", "TEA", "TEA BAG", "GREEN TEA", "BLACK TEA", "HERBAL TEA", "CHAMOMILE", "EARL GREY", "OOLONG TEA", "OOLONG"]
 category = "grocery_drink_coffee"
 tags = ["grocery", "drink", "coffee"]
 priority = 0
@@ -390,6 +390,16 @@ exact_only = false
 [[rules]]
 id = "legacy_0051"
 keywords = ["1944033 CHAMP SHORT", "CHAMP SHORT"]
+category = "shopping_clothing"
+tags = ["shopping", "clothing"]
+priority = -80
+exact_only = false
+
+[[rules]]
+# Low priority: "BOXER" is apparel (Costco "PUMA BOXER"), but the word also
+# names a dog breed/boxing, so let any more specific rule win first.
+id = "boxer_apparel"
+keywords = ["PUMA BOXER", "BOXER"]
 category = "shopping_clothing"
 tags = ["shopping", "clothing"]
 priority = -80
