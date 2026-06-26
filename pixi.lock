@@ -494,20 +494,22 @@ packages:
 - pypi: ./
   name: beanbeaver
   version: 0.1.0
-  sha256: 46b2d3b622df8f9570395d57afb5cfed4b7951105077027dfce4b1387f65c9bf
+  sha256: 7a6152e2f68e02b8fe9428705266b8ac6069a10b7aae5c6b9b0446cea18b6dda
   requires_dist:
   - beancount>=2.3,<3
   - httpx>=0.24.0
-  - pillow>=10.0.0
   - fastapi>=0.110.0
   - uvicorn>=0.29.0
   - python-multipart>=0.0.9
   - pandas>=2.0.0
+  - pillow>=10.0.0 ; extra == 'imaging'
   - pytest>=8.0 ; extra == 'test'
   - pytest-cov>=5.0 ; extra == 'test'
+  - beanbeaver[imaging] ; extra == 'test'
   - maturin>=1.7 ; extra == 'dev'
   - mypy>=1.8 ; extra == 'dev'
   - ruff>=0.6 ; extra == 'dev'
+  - beanbeaver[imaging] ; extra == 'dev'
   requires_python: '>=3.12'
 - pypi: https://files.pythonhosted.org/packages/19/50/eae6f011bfdcb327070639e51f6b91c8db1bb796d9e52d90ffc3cc221d4a/beancount-2.3.6-cp312-cp312-win_amd64.whl
   name: beancount

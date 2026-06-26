@@ -1,24 +1,14 @@
 """Pure OCR transformation helpers for receipt parsing."""
 
 import hashlib
-import io
-import json
 import os
 import time
 from pathlib import Path
 from typing import Any, cast
 
-from PIL import Image
-
 from ._rust import require_rust_matcher
 from .detection_normalization import default_detection_pipeline, normalize_detections
-from .image_pipeline import (
-    MAX_IMAGE_DIMENSION,
-    OCR_IMAGE_PADDING,
-    ImagePipelineContext,
-    default_image_pipeline,
-    run_image_pipeline,
-)
+from .image_constants import JPEG_QUALITY, MAX_IMAGE_DIMENSION, OCR_IMAGE_PADDING
 from .ocr_schema import OCR_ENGINE_NAME_PADDLE, OCR_SCHEMA_VERSION, OcrBBox, OcrDocument, OcrLine
 
 PREOCR_DUMP_DIR_ENV = "BEANBEAVER_PREOCR_DUMP_DIR"
@@ -52,32 +42,26 @@ def resize_image_bytes(
 ) -> bytes:
     """Run the pre-OCR image pipeline on ``image_bytes`` and return JPEG bytes.
 
-    Thin shim over ``run_image_pipeline``: decode bytes, run the default
-    pass list (EXIF -> deskew -> resize -> pad), encode back to JPEG. The
-    PIL.Image IR stays in memory between passes; JPEG only at boundaries.
+    Pure-Rust path (``receipt-image`` via the ``_rust_matcher`` extension):
+    decode -> EXIF transpose -> Lanczos resize (cap the long side) -> white pad
+    -> JPEG. Deskew is excluded, matching the previous ``default_image_pipeline``.
+    No Pillow/numpy on this path.
 
     When ``debug_dir`` is set (or the ``BEANBEAVER_PREOCR_DUMP_DIR`` env var
-    points to a parent directory), each pass's output is snapshotted as
-    JPEG alongside the original input and a ``trace.json`` recording every
-    pass's metadata (deskew angle, resize ratio, etc).
+    points to a parent directory), the input and output JPEGs are snapshotted for
+    inspection. (Per-pass snapshots/trace were a Pillow-IR feature and are no
+    longer emitted.)
     """
     resolved_dir = _resolve_dump_dir(image_bytes, debug_dir)
     if resolved_dir is not None:
         resolved_dir.mkdir(parents=True, exist_ok=True)
         (resolved_dir / "input.jpg").write_bytes(image_bytes)
 
-    img = Image.open(io.BytesIO(image_bytes))
-    ctx = ImagePipelineContext(debug_dir=resolved_dir)
-    ops = default_image_pipeline(max_dimension=max_dimension, padding=padding)
-    final, _ = run_image_pipeline(img, ops, ctx)
-
-    buffer = io.BytesIO()
-    final.convert("RGB").save(buffer, format="JPEG", quality=95)
-    out_bytes = buffer.getvalue()
+    rust = require_rust_matcher()
+    out_bytes: bytes = rust.preprocess_image_bytes(image_bytes, max_dimension, padding, JPEG_QUALITY)
 
     if resolved_dir is not None:
         (resolved_dir / "output.jpg").write_bytes(out_bytes)
-        (resolved_dir / "trace.json").write_text(json.dumps(ctx.trace, indent=2, default=str) + "\n")
 
     return out_bytes
 

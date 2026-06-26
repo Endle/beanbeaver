@@ -16,10 +16,11 @@ path = "src/main.rs"
 name = "beanbeaver._rust_matcher"
 
 [workspace]
-members = ["crates/receipt-core"]
+members = ["crates/receipt-core", "crates/receipt-image"]
 
 [dependencies]
 receipt-core = { path = "crates/receipt-core" }
+receipt-image = { path = "crates/receipt-image" }
 crossterm = "0.28"
 pyo3 = { version = "0.28", features = ["extension-module"] }
 ratatui = "0.29"

@@ -1,0 +1,9 @@
+[package]
+name = "receipt-image"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Pre-OCR image preprocessing (EXIF + resize + pad + JPEG), shared by desktop (PyO3) and iOS."
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

@@ -2,6 +2,7 @@ mod match_domain;
 mod match_service;
 mod matcher;
 mod python_detection_normalization;
+mod python_image_pipeline;
 mod python_ledger_access;
 mod python_ocr_line_grouping;
 mod python_match_service;
@@ -187,6 +188,7 @@ fn _rust_matcher(module: &Bound<'_, PyModule>) -> PyResult<()> {
     python_match_service::register(module)?;
     python_ledger_access::register(module)?;
     python_detection_normalization::register(module)?;
+    python_image_pipeline::register(module)?;
     python_ocr_line_grouping::register(module)?;
     python_receipt_categories::register(module)?;
     python_receipt_common::register(module)?;

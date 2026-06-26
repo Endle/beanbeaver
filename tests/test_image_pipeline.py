@@ -143,9 +143,7 @@ def test_resize_image_bytes_respects_max_dimension() -> None:
     assert out_img.size == (expected_w, expected_h)
 
 
-def test_env_var_triggers_per_pass_dump(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
-    import json
-
+def test_env_var_triggers_input_output_dump(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     from beanbeaver.receipt.ocr_helpers import PREOCR_DUMP_DIR_ENV
 
     img = _striped_text_image(width=400, height=600)
@@ -160,20 +158,10 @@ def test_env_var_triggers_per_pass_dump(tmp_path: Path, monkeypatch: MonkeyPatch
     assert len(subdirs) == 1, f"expected one per-receipt subdir, got: {subdirs}"
     dump_dir = subdirs[0]
 
+    # The Rust pre-OCR path dumps the input and output JPEGs. Per-pass snapshots
+    # and trace.json were a Pillow-IR feature (intermediate PIL images) and are no
+    # longer emitted now the pipeline runs in one shot in Rust.
     assert (dump_dir / "input.jpg").exists()
     assert (dump_dir / "output.jpg").exists()
-    assert (dump_dir / "trace.json").exists()
-
-    pass_files = sorted(p.name for p in dump_dir.glob("pass_*.jpg"))
-    assert pass_files == [
-        "pass_00_exif_transpose_op.jpg",
-        "pass_01_resize_max_dim_op.jpg",
-        "pass_02_pad_white_op.jpg",
-    ]
-
-    trace = json.loads((dump_dir / "trace.json").read_text())
-    assert [r["pass"] for r in trace] == [
-        "exif_transpose",
-        "resize_max_dim",
-        "pad_white",
-    ]
+    assert not list(dump_dir.glob("pass_*.jpg"))
+    assert not (dump_dir / "trace.json").exists()

@@ -20,8 +20,7 @@ from typing import Any
 import numpy as np
 from PIL import Image, ImageOps
 
-MAX_IMAGE_DIMENSION = 3000
-OCR_IMAGE_PADDING = 50
+from .image_constants import MAX_IMAGE_DIMENSION, OCR_IMAGE_PADDING
 
 DESKEW_MAX_ANGLE_DEG = 10.0
 DESKEW_ANGLE_STEP_DEG = 0.5
