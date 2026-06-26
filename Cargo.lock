@@ -38,6 +38,7 @@ dependencies = [
  "pyo3-build-config",
  "ratatui",
  "receipt-core",
+ "receipt-image",
  "regex",
  "serde",
  "serde_json",
