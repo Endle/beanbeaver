@@ -59,9 +59,12 @@ that was an artifact of comparing to the 3.3.0 container's output; corrected her
    receipts land <80% items. Detection recall on small/faint lines is the lever
    (mobile det at higher resize, or recall-oriented DB params), measured by the
    good-enough breakdown in `device_sim`.
-2. **Parser latency:** `receipt_core::process_receipt` takes **~7s on a dense
-   (~120-line Costco) receipt** (small receipts ~0.4s) — a real on-device UX bug,
-   likely super-linear spatial pairing. Shared with desktop.
+2. ~~**Parser latency ~7s on dense Costco**~~ — **DEBUG ARTIFACT, resolved
+   2026-06-25.** The release `device_sim` scorecard over the 80-receipt corpus
+   shows **mean parse 244 ms** (worst total 3578 ms); the dominant stage is
+   **recognition (889 ms mean)**, not the parser. The old "~7s" was an unoptimized
+   debug measurement (same fixture: parse 2484 ms debug vs 244 ms release). No
+   parser bug. (`device_sim` now guards this — see "Key tool".)
 3. **(Optional) VisionKit-preprocessed inputs** — `device_sim --live` is a
    pessimistic raw-photo lower bound; on-device VisionKit deskews/crops, which may
    help item recall. Validate on the real phone.
@@ -74,7 +77,15 @@ OFF by default — measured on the iPhone 15" below). The infra stays compiled i
 (it drives an on-device A/B toggle), but the shipped path is CPU; the ANE only
 ever helped the shelved fixed-shape server det, not these mobile models.
 
-**Key tool:** `cargo run -p ocr-paddle --example device_sim -- <dir-or-img>
+**Key tool:** `device_sim`. The easy path is
+**`crates/ocr-paddle/scripts/scorecard.sh [corpus-dir] [extra flags]`** — it always
+builds `--release` (debug latency is ~10-50× inflated and not trustworthy) and runs
+the standard accuracy + latency scorecard. Every run prints a **self-describing
+header** (build profile, OCR source, det model, `OCR_RESIZE_LONG`, `today`, corpus
+counts incl. how many were scored vs skipped) and, in live mode, a **latency block**
+(per-stage mean + worst-case total). `--help` lists everything; unknown flags are
+rejected (no longer silently swallowed as the path). Raw form:
+`cargo run --release -p ocr-paddle --example device_sim -- <dir-or-img>
 [--cached] [--by-merchant] [--detcmp] [--attrib] [--reccached] [--probdump DIR] [--dump]
 [--models DIR]`. `OCR_RESIZE_LONG=<n>` overrides the detection resize (default
 1536; use 960 to match PaddleOCR). Diagnostics: `--attrib` buckets each live
@@ -236,15 +247,14 @@ CPU. At beta, consider dropping the `coreml` feature from the Release xcframewor
 entirely (smaller binary). The CoreML/ANE work isn't wasted — it remains the path
 for any future **fixed-shape** detector — it's just shelved for what we ship.
 
-**Bonus finding — the "~7 s parse" may be a debug artifact.** End-to-end CPU
-latency on this (medium, ~7-item) Costco receipt is **~1.2 s, with parse only
-174 ms** in a Release on-device build. The doc's earlier "~7 s parse on a dense
-(~120-line) Costco" was a `device_sim` (default **debug**, unoptimized) Mac
-measurement. Before treating parser latency as a real on-device bug, re-measure
-the dense ~120-line receipt in a **Release** build on-device — release Rust is
-~10–50× faster than debug for this compute, so the real number is likely far
-under 7 s. (`device_sim` itself should be run with `--release` for any latency
-claim.)
+**Bonus finding — the "~7 s parse" was a DEBUG artifact (confirmed).** End-to-end
+CPU latency on this (medium, ~7-item) Costco receipt is **~1.2 s, with parse only
+174 ms** in a Release on-device build. The release `device_sim` scorecard over the
+full 80-receipt corpus then confirmed it: **mean parse 244 ms**, the dominant stage
+is **recognition (889 ms mean)**, worst total 3578 ms — no parser bug. Same fixture
+in debug shows parse 2484 ms (≈10× the release 244 ms), which is where the "~7 s"
+came from (an unoptimized `device_sim` run). `device_sim` now refuses to mislead:
+it reports latency only with a build-profile banner and warns loudly in debug.
 
 ## Server det doesn't transfer + good-enough metric (2026-06-25)
 

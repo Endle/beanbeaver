@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use ocr_paddle::db_postprocess::{boxes_from_bitmap, DbConfig};
 use ocr_paddle::detect::Detector;
 use ocr_paddle::engine::OcrEngine;
-use ocr_paddle::process::{process_image, resize_and_pad};
+use ocr_paddle::process::{process_image, process_image_timed, resize_and_pad, ScanTimings};
 use receipt_core::ocr_transform::RawDetection;
 use receipt_core::process::{process_receipt, ProcessedReceipt};
 use receipt_core::receipt_categories::resolve_account_target;
@@ -61,10 +61,25 @@ fn main() {
             "--reccached" => reccached = true,
             "--by-merchant" => by_merchant = true,
             "--probdump" => probdump = Some(PathBuf::from(args.next().expect("--probdump needs an out dir"))),
+            "--help" | "-h" => {
+                print_usage();
+                return;
+            }
+            // Reject unknown flags loudly instead of silently treating them as the
+            // path (a typo'd flag used to become the "image" arg).
+            other if other.starts_with('-') => {
+                eprintln!("error: unknown flag: {other}\n");
+                print_usage();
+                std::process::exit(2);
+            }
             _ => path = Some(PathBuf::from(a)),
         }
     }
-    let path = path.expect("pass an image file or a directory");
+    let Some(path) = path else {
+        eprintln!("error: pass an image file or a directory\n");
+        print_usage();
+        std::process::exit(2);
+    };
 
     // Dump the raw DB prob map + our boxes for an external mask-vs-contour diff
     // (see scripts/contour_cmp.py). Needs only the detection model.
@@ -102,12 +117,57 @@ fn main() {
         return;
     }
 
-    println!("mode: {}", if cached { "cached (desktop PaddleOCR)" } else { "live (on-device ONNX)" });
+    print_config_header(cached, &models, today);
     if path.is_dir() {
         run_corpus(&mut engine, cached, &mapping, today, &path, dump, by_merchant);
     } else {
-        run_single(&mut engine, cached, &mapping, today, &path, true);
+        let _ = run_single(&mut engine, cached, &mapping, today, &path, true);
     }
+}
+
+/// Usage/help. Leads with the `--release` caveat because debug latency is a trap.
+fn print_usage() {
+    eprintln!(
+        "device_sim — score & diagnose the on-device OCR pipeline on macOS\n\
+         \n\
+         USAGE: cargo run --release -p ocr-paddle --example device_sim -- <image|dir> [flags]\n\
+         \n\
+         ⚠  Build with --release for ANY latency number (debug is ~10-50× slower).\n\
+         \n\
+         SCORING:\n\
+         \x20 <dir>           score every <stem>.jpg that has a <stem>.expected.json\n\
+         \x20 --cached        feed desktop PaddleOCR <stem>.ocr.json instead of live ONNX\n\
+         \x20 --by-merchant   add a per-merchant breakdown\n\
+         \x20 --dump          full extraction (+ per-image latency) for each image\n\
+         \x20 --today YMD     date used for inference (default 2026-06-21)\n\
+         \x20 --models DIR    model dir (default ./models)\n\
+         \n\
+         DIAGNOSTICS: --detcmp  --attrib  --reccached  --probdump DIR\n\
+         \n\
+         Standard scorecard (always release):  crates/ocr-paddle/scripts/scorecard.sh [corpus-dir]"
+    );
+}
+
+/// One self-describing header per run, so a printed scorecard records exactly what
+/// produced it (build profile, OCR source, det model, resize, EP, date).
+fn print_config_header(cached: bool, models: &Path, today: (i32, u32, u32)) {
+    println!("\n=== device_sim ===");
+    if cfg!(debug_assertions) {
+        println!("  build  : DEBUG  ⚠ latency is ~10-50× inflated — rebuild with --release for timing");
+    } else {
+        println!("  build  : release");
+    }
+    if cached {
+        println!("  mode   : cached (desktop PaddleOCR .ocr.json → parser; OCR held constant)");
+    } else {
+        let det = find_model(models, "_det.onnx");
+        let det_name = det.file_name().and_then(|s| s.to_str()).unwrap_or("?");
+        let resize = std::env::var("OCR_RESIZE_LONG").ok();
+        println!("  mode   : live (on-device ONNX, CPU EP — matches the shipped iOS default)");
+        println!("  models : {}  (det={det_name})", models.display());
+        println!("  resize : OCR_RESIZE_LONG={}", resize.as_deref().unwrap_or("(detector default)"));
+    }
+    println!("  today  : {}", fmt_ymd(today));
 }
 
 /// Dump the raw DB probability map + our resulting boxes for one image, so the
@@ -472,7 +532,7 @@ fn extract(
     cached: bool,
     today: (i32, u32, u32),
     jpg: &Path,
-) -> Option<ProcessedReceipt> {
+) -> Option<(ProcessedReceipt, Option<ScanTimings>)> {
     let name = jpg.file_stem().and_then(|s| s.to_str()).unwrap_or("image");
     let filename = format!("{name}.jpg");
     if cached {
@@ -500,11 +560,13 @@ fn extract(
                 confidence: tc.get(1).and_then(Value::as_f64).unwrap_or(1.0),
             });
         }
-        Some(process_receipt(raw, w, h, OCR_IMAGE_PADDING, &filename, None, today, "Liabilities:CreditCard", None))
+        Some((process_receipt(raw, w, h, OCR_IMAGE_PADDING, &filename, None, today, "Liabilities:CreditCard", None), None))
     } else {
         let img = image::open(jpg).expect("decode image").to_rgb8();
         let engine = engine.as_mut().expect("engine for live mode");
-        Some(process_image(engine, &img, &filename, today, "Liabilities:CreditCard", None).expect("process_image"))
+        let (pr, t) = process_image_timed(engine, &img, &filename, today, "Liabilities:CreditCard", None)
+            .expect("process_image");
+        Some((pr, Some(t)))
     }
 }
 
@@ -516,8 +578,8 @@ fn run_single(
     today: (i32, u32, u32),
     jpg: &Path,
     dump: bool,
-) -> Option<FixtureScore> {
-    let pr = extract(engine, cached, today, jpg)?;
+) -> Option<(FixtureScore, Option<ScanTimings>)> {
+    let (pr, timings) = extract(engine, cached, today, jpg)?;
     let d = &pr.parsed;
     let name = jpg.file_stem().and_then(|s| s.to_str()).unwrap_or("image");
 
@@ -531,6 +593,9 @@ fn run_single(
             println!("  {:>9}  {:<32}  {}", it.price, it.description, it.category.as_deref().unwrap_or("-"));
         }
         println!("\n{}", pr.beancount);
+        if let Some(t) = &timings {
+            println!("\n{}", fmt_timings_line(t));
+        }
     }
 
     let expected_path = jpg.with_extension("expected.json");
@@ -538,7 +603,7 @@ fn run_single(
         return None;
     }
     let expected: Value = serde_json::from_str(&std::fs::read_to_string(&expected_path).ok()?).ok()?;
-    Some(score(name, &expected, d, mapping))
+    Some((score(name, &expected, d, mapping), timings))
 }
 
 /// A directory: run every `<stem>.jpg` that has a `<stem>.expected.json`.
@@ -552,20 +617,33 @@ fn run_corpus(
     dump: bool,
     by_merchant: bool,
 ) {
+    let all_jpg = std::fs::read_dir(dir)
+        .expect("read dir")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "jpg"))
+        .count();
     let mut jpgs: Vec<PathBuf> = std::fs::read_dir(dir)
         .expect("read dir")
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "jpg") && p.with_extension("expected.json").exists())
         .collect();
     jpgs.sort();
+    println!(
+        "  corpus : {}  ({all_jpg} .jpg, {} with expected.json)",
+        dir.display(),
+        jpgs.len()
+    );
 
     let mut scores = Vec::new();
+    let mut timings: Vec<ScanTimings> = Vec::new();
+    let mut skipped_no_ocr = 0usize;
     for jpg in &jpgs {
         // In cached mode, fixtures without an .ocr.json are simply skipped.
         if cached && !jpg.with_extension("ocr.json").exists() {
+            skipped_no_ocr += 1;
             continue;
         }
-        if let Some(s) = run_single(engine, cached, mapping, today, jpg, dump) {
+        if let Some((s, t)) = run_single(engine, cached, mapping, today, jpg, dump) {
             let mark = if s.is_fully_ok() { "✓" } else { "✗" };
             println!(
                 "{mark} {:<42} {:<22} items {}/{}{}",
@@ -575,6 +653,9 @@ fn run_corpus(
                 s.items_total,
                 s.notes()
             );
+            if let Some(t) = t {
+                timings.push(t);
+            }
             scores.push(s);
         }
     }
@@ -583,7 +664,17 @@ fn run_corpus(
         println!("(no usable <stem>.jpg + expected.json{} pairs in {})", if cached { " + ocr.json" } else { "" }, dir.display());
         return;
     }
+    // Make the denominator explicit: never silently score a subset.
+    println!(
+        "\nscored {}/{} fixtures-with-expected{}",
+        scores.len(),
+        jpgs.len(),
+        if skipped_no_ocr > 0 { format!("  (cached: skipped {skipped_no_ocr} with no .ocr.json)") } else { String::new() }
+    );
     print_summary(if cached { "cached" } else { "live" }, &scores);
+    if !timings.is_empty() {
+        print_latency(&timings);
+    }
     if by_merchant {
         print_by_merchant(&scores);
     }
@@ -755,6 +846,33 @@ fn run_reccached(
         scores.push(s);
     }
     print_summary("reccached: desktop boxes + our rec", &scores);
+}
+
+/// One-line per-stage latency for a single receipt (used in `--dump`).
+fn fmt_timings_line(t: &ScanTimings) -> String {
+    let warn = if cfg!(debug_assertions) { "  ⚠ DEBUG — rebuild with --release" } else { "" };
+    format!(
+        "latency: total {:.0} ms  (prep {:.0} · detect {:.0} · classify {:.0} · recognize {:.0} · parse {:.0}){warn}",
+        t.total_ms, t.prep_ms, t.detect_ms, t.classify_ms, t.recognize_ms, t.parse_ms
+    )
+}
+
+/// Aggregate on-device latency over the corpus (live mode only). Mean per stage +
+/// the worst-case total (the dense-receipt tail that drives the on-device UX).
+fn print_latency(t: &[ScanTimings]) {
+    let n = t.len() as f64;
+    let mean = |sel: fn(&ScanTimings) -> f64| t.iter().map(sel).sum::<f64>() / n;
+    let worst = t.iter().map(|x| x.total_ms).fold(0.0f64, f64::max);
+    println!("\n  --- latency ({} receipts, CPU) ---", t.len());
+    if cfg!(debug_assertions) {
+        println!("  ⚠ DEBUG BUILD — these are ~10-50× inflated; rebuild with --release for real numbers");
+    }
+    println!(
+        "  mean/receipt : {:.0} ms  (prep {:.0} · detect {:.0} · classify {:.0} · recognize {:.0} · parse {:.0})",
+        mean(|x| x.total_ms), mean(|x| x.prep_ms), mean(|x| x.detect_ms),
+        mean(|x| x.classify_ms), mean(|x| x.recognize_ms), mean(|x| x.parse_ms)
+    );
+    println!("  worst total  : {:.0} ms", worst);
 }
 
 /// Print the merchant/date/total/items/fully aggregate over a set of scores.
