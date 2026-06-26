@@ -58,8 +58,14 @@ struct ContentView: View {
                             .font(.subheadline)
                     }
 
+#if DEBUG
+                    // Diagnostic only: CoreML loses to CPU on the shipped
+                    // dynamic-shape models (slower + misreads — see
+                    // docs/ios_port.md). Hidden in Release; kept in dev builds
+                    // for the on-device CoreML-vs-CPU A/B.
                     Toggle("Use Neural Engine (CoreML)", isOn: $useCoreML)
                         .font(.subheadline)
+#endif
 
                     statusView
                 }
