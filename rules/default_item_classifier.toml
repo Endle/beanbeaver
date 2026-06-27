@@ -260,6 +260,14 @@ priority = 0
 exact_only = false
 
 [[rules]]
+id = "huggies_wipes_pet"
+keywords = ["HUGG WIPE"]
+category = "pet_supply"
+tags = ["pet", "supply"]
+priority = 0
+exact_only = false
+
+[[rules]]
 id = "legacy_0033"
 keywords = ["XL EGGS", "KS ORG 2%", "CHOC.MILK", "CHOC MILK", "FINE-FILT"]
 category = "grocery_dairy"

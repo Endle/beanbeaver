@@ -40,6 +40,16 @@ def test_coors_maps_to_alcoholic_beverage() -> None:
     )
 
 
+def test_huggies_wipes_map_to_pet_supply() -> None:
+    assert (
+        categorize_item(
+            "2130150 HUGG WIPE",
+            rule_layers=load_item_category_rule_layers(),
+        )
+        == "Expenses:Pet:Supply"
+    )
+
+
 def test_semantic_classification_includes_explicit_tags() -> None:
     classification = classify_item_semantic(
         "347937 CHICKEN",
