@@ -12,20 +12,8 @@ from .item_categories import ItemCategoryRuleLayers
 from .ocr_schema import OcrDocument
 
 
-def parse_receipt(
-    ocr_result: OcrDocument | dict[str, Any],
-    item_category_rule_layers: ItemCategoryRuleLayers,
-    image_filename: str = "",
-    known_merchants: list[str] | tuple[str, ...] | None = None,
-    reference_date: date | None = None,
-) -> Receipt:
-    native = require_rust_matcher().receipt_parse_receipt(
-        ocr_result,
-        item_category_rule_layers,
-        image_filename,
-        list(known_merchants) if known_merchants is not None else None,
-        (reference_date or date.today()).year,
-    )
+def _native_to_receipt(native: dict[str, Any]) -> Receipt:
+    """Map the Rust parser's output dict into a domain :class:`Receipt`."""
     resolved_date = native.get("date")
     receipt_date = (
         date(int(resolved_date[0]), int(resolved_date[1]), int(resolved_date[2]))
@@ -69,3 +57,44 @@ def parse_receipt(
         ],
         tenders=tenders,
     )
+
+
+def parse_receipt(
+    ocr_result: OcrDocument | dict[str, Any],
+    item_category_rule_layers: ItemCategoryRuleLayers,
+    image_filename: str = "",
+    known_merchants: list[str] | tuple[str, ...] | None = None,
+    reference_date: date | None = None,
+) -> Receipt:
+    """Parse an already-transformed OCR document (full_text + pages) into a Receipt."""
+    native = require_rust_matcher().receipt_parse_receipt(
+        ocr_result,
+        item_category_rule_layers,
+        image_filename,
+        list(known_merchants) if known_merchants is not None else None,
+        (reference_date or date.today()).year,
+    )
+    return _native_to_receipt(native)
+
+
+def parse_receipt_from_raw(
+    raw_result: dict[str, Any],
+    item_category_rule_layers: ItemCategoryRuleLayers,
+    image_filename: str = "",
+    known_merchants: list[str] | tuple[str, ...] | None = None,
+    reference_date: date | None = None,
+) -> Receipt:
+    """Parse a raw OCR result (``{image_width, image_height, detections}``) directly.
+
+    The detection→parser transform runs in Rust (`receipt-core`), so this needs no
+    Python ``transform_paddleocr_result`` step — the desktop live path, unified
+    with the iOS pipeline.
+    """
+    native = require_rust_matcher().receipt_parse_receipt_from_raw(
+        raw_result,
+        item_category_rule_layers,
+        image_filename,
+        list(known_merchants) if known_merchants is not None else None,
+        (reference_date or date.today()).year,
+    )
+    return _native_to_receipt(native)

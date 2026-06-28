@@ -16,11 +16,19 @@ path = "src/main.rs"
 name = "beanbeaver._rust_matcher"
 
 [workspace]
-members = ["crates/receipt-core", "crates/receipt-image"]
+members = ["crates/receipt-core", "crates/receipt-image", "crates/ocr-paddle"]
+
+[features]
+default = ["native-ocr"]
+# In-process ONNX OCR (no PaddleOCR container). Pulls in `ocr-paddle` + ONNX
+# Runtime; disable with `--no-default-features` for a container-only build.
+native-ocr = ["dep:ocr-paddle", "dep:image"]
 
 [dependencies]
 receipt-core = { path = "crates/receipt-core" }
 receipt-image = { path = "crates/receipt-image" }
+ocr-paddle = { path = "crates/ocr-paddle", optional = true }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"], optional = true }
 crossterm = "0.28"
 pyo3 = { version = "0.28", features = ["extension-module"] }
 ratatui = "0.29"

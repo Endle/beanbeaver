@@ -6,6 +6,8 @@ mod python_image_pipeline;
 mod python_ledger_access;
 mod python_ocr_line_grouping;
 mod python_match_service;
+#[cfg(feature = "native-ocr")]
+mod python_native_ocr;
 mod python_receipt_categories;
 mod python_receipt_common;
 mod python_receipt_fields;
@@ -186,6 +188,8 @@ fn _rust_matcher(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(match_receipt_to_transactions, module)?)?;
     module.add_function(wrap_pyfunction!(match_transaction_to_receipts, module)?)?;
     python_match_service::register(module)?;
+    #[cfg(feature = "native-ocr")]
+    python_native_ocr::register(module)?;
     python_ledger_access::register(module)?;
     python_detection_normalization::register(module)?;
     python_image_pipeline::register(module)?;

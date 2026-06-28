@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import httpx
 from fastapi import FastAPI, Request
@@ -16,8 +16,8 @@ from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from beanbeaver.domain.receipt import Receipt
-from beanbeaver.receipt.ocr_extraction import resize_image_bytes, transform_paddleocr_result
-from beanbeaver.receipt.receipt_structuring import parse_receipt
+from beanbeaver.receipt.ocr_extraction import resize_image_bytes
+from beanbeaver.receipt.receipt_structuring import parse_receipt_from_raw
 from beanbeaver.runtime import get_logger, get_paths, load_known_merchant_keywords, load_receipt_structuring_rule_layers
 from beanbeaver.runtime.receipt_pipeline import create_debug_overlay
 from beanbeaver.runtime.receipt_storage import (
@@ -228,11 +228,10 @@ async def upload_receipt(request: Request) -> JSONResponse:
                 error_message = f"OCR service returned HTTP {response.status_code}"
             else:
                 raw_ocr_result = response.json()
-                ocr_result = transform_paddleocr_result(raw_ocr_result)
 
                 try:
-                    receipt = parse_receipt(
-                        ocr_result,
+                    receipt = parse_receipt_from_raw(
+                        raw_ocr_result,
                         image_filename=filename,
                         known_merchants=load_known_merchant_keywords(),
                         item_category_rule_layers=load_receipt_structuring_rule_layers(),
@@ -252,7 +251,6 @@ async def upload_receipt(request: Request) -> JSONResponse:
                     output_path = save_scanned_receipt(
                         receipt,
                         raw_ocr_payload=raw_ocr_result,
-                        stage1_ocr_payload=cast(dict[str, Any], ocr_result),
                         image_sha256=image_sha256,
                         source_image_path=filepath,
                         resized_image_bytes=resized_contents,
