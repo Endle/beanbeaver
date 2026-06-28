@@ -17,7 +17,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0001"
-keywords = ["CHICKEN", "BEEF", "BEAF", "PORK", "BACON", "SAUSAGE", "HAM", "TURKEY", "LAMB", "STEAK", "GROUND MEAT", "MEATBALL", "SALAMI", "PEPPERONI", "PROSCIUTTO", "ROTISSERIE", "DRUMSTICK", "MEAT", "BEEF BELLY", "BEEF BELLY ROLL", "ANGUS", "DUCK FEET", "DUCK LEG", "DUCK WING", "DUCK BREAST"]
+keywords = ["CHICKEN", "BEEF", "BEAF", "PORK", "BACON", "SAUSAGE", "HAM", "TURKEY", "LAMB", "STEAK", "GROUND MEAT", "MEATBALL", "SALAMI", "PEPPERONI", "PROSCIUTTO", "ROTISSERIE", "DRUMSTICK", "MEAT", "BEEF BELLY", "BEEF BELLY ROLL", "ANGUS", "DUCK FEET", "DUCK LEG", "DUCK WING", "DUCK BREAST", "BRISKET"]
 category = "grocery_meat"
 tags = ["grocery", "meat"]
 priority = 0
@@ -120,7 +120,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0015"
-keywords = ["BREAD", "BAGEL", "CROISSANT", "MUFFIN", "DONUT", "DOUGHNUT", "PASTRY", "CAKE", "PIE", "COOKIE", "COOKIES", "BAGUETTE", "BUN", "BUNS", "TOAST", "ENGLISH MUFFIN", "TORTILLA", "PITA", "NAAN", "FLATBREAD", "WAFFLE", "PANCAKE"]
+keywords = ["BREAD", "BAGEL", "CROISSANT", "MUFFIN", "DONUT", "DOUGHNUT", "PASTRY", "CAKE", "PIE", "COOKIE", "COOKIES", "BAGUETTE", "BUN", "BUNS", "TOAST", "ENGLISH MUFFIN", "TORTILLA", "PITA", "NAAN", "FLATBREAD", "WAFFLE", "PANCAKE", "PORTUGUESE TART", "EGG TART"]
 category = "grocery_bakery"
 tags = ["grocery", "bakery"]
 priority = 0
@@ -152,7 +152,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0019"
-keywords = ["VEGETABLE OIL", "CORN OIL", "SESAME OIL", "SESAMEOIL", "GARLIC", "GINGER", "GREEN ONION", "GREEN ONIONS", "CHILI PEPPER", "RED CHILI PEPPER", "CHILLI", "DRIED CHILLI", "CRUSHED CHILLI", "SPICE", "SEASONING", "PAPRIKA", "CUMIN", "CORIANDER", "TURMERIC", "CINNAMON", "NUTMEG", "OREGANO", "THYME", "ROSEMARY", "BAY LEAF", "CURRY", "CHILI POWDER", "CAYENNE", "SOY SAUCE", "FISH SAUCE", "OYSTER SAUCE", "HOISIN", "WASABI", "SRIRACHA", "HOT SAUCE", "KETCHUP", "MUSTARD", "MAYONNAISE", "MAYO", "RELISH", "BBQ SAUCE", "TERIYAKI", "WORCESTERSHIRE", "PERICARPIUM ZANTHOXYLI", "PERICARPIURN ZANTHOXYLI", "SALSA", "HUMMUS", "GUACAMOLE", "PESTO", "CHINA TIME HONORED BRAND", "YUQUAN FRESH PRESERVED", "SOYBEAN PASTE"]
+keywords = ["VEGETABLE OIL", "CORN OIL", "SESAME OIL", "SESAMEOIL", "GARLIC", "GINGER", "GREEN ONION", "GREEN ONIONS", "CHILI PEPPER", "RED CHILI PEPPER", "CHILLI", "DRIED CHILLI", "CRUSHED CHILLI", "SPICE", "SEASONING", "PAPRIKA", "CUMIN", "CORIANDER", "TURMERIC", "CINNAMON", "NUTMEG", "OREGANO", "THYME", "ROSEMARY", "BAY LEAF", "CURRY", "CHILI POWDER", "CAYENNE", "SOY SAUCE", "FISH SAUCE", "OYSTER SAUCE", "HOISIN", "WASABI", "SRIRACHA", "HOT SAUCE", "KETCHUP", "MUSTARD", "MAYONNAISE", "MAYO", "RELISH", "BBQ SAUCE", "TERIYAKI", "WORCESTERSHIRE", "PERICARPIUM ZANTHOXYLI", "PERICARPIURN ZANTHOXYLI", "SALSA", "HUMMUS", "GUACAMOLE", "PESTO", "CHINA TIME HONORED BRAND", "YUQUAN FRESH PRESERVED", "SOYBEAN PASTE", "MONOSODIUM", "MSG", "VEGOIL"]
 category = "grocery_seasoning"
 tags = ["grocery", "seasoning"]
 priority = 0
@@ -191,10 +191,13 @@ priority = 0
 exact_only = false
 
 [[rules]]
-# Juice brands that also contain a fruit-flavour word (e.g. "Tropicana -
-# Blackberry"); priority 1 so the brand wins over the longer fruit keyword.
+# Juice brands/varieties that also collide with another category keyword:
+# - "Tropicana - Blackberry" would otherwise match the longer fruit keyword.
+# - "Alphonso Juice Mango" embeds "SOJU" across the "...honSO JUice..." word
+#   boundary (the matcher compacts spaces), so the priority-1 alcohol rule
+#   would otherwise win. Priority 1 + the longer ALPHONSO exact match wins.
 id = "juice_brands"
-keywords = ["TROPICANA"]
+keywords = ["TROPICANA", "ALPHONSO"]
 category = "grocery_drink_juice"
 tags = ["grocery", "drink", "juice"]
 priority = 1
@@ -202,7 +205,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0026"
-keywords = ["COFFEE BEAN", "GROUND COFFEE", "INSTANT COFFEE", "COFFEE PODS", "K-CUP", "NESPRESSO", "TEA", "TEA BAG", "GREEN TEA", "BLACK TEA", "HERBAL TEA", "CHAMOMILE", "EARL GREY"]
+keywords = ["COFFEE BEAN", "GROUND COFFEE", "INSTANT COFFEE", "COFFEE PODS", "K-CUP", "NESPRESSO", "TEA", "TEA BAG", "GREEN TEA", "BLACK TEA", "HERBAL TEA", "CHAMOMILE", "EARL GREY", "OOLONG TEA", "OOLONG"]
 category = "grocery_drink_coffee"
 tags = ["grocery", "drink", "coffee"]
 priority = 0
@@ -257,6 +260,14 @@ priority = 0
 exact_only = false
 
 [[rules]]
+id = "huggies_wipes_pet"
+keywords = ["HUGG WIPE"]
+category = "pet_supply"
+tags = ["pet", "supply"]
+priority = 0
+exact_only = false
+
+[[rules]]
 id = "legacy_0033"
 keywords = ["XL EGGS", "KS ORG 2%", "CHOC.MILK", "CHOC MILK", "FINE-FILT"]
 category = "grocery_dairy"
@@ -306,7 +317,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0041"
-keywords = ["KS IBU", "KIRKLAND IBU", "IBUPROFEN", "IBU 400M", "LUTEIN", "IRONKIDS", "MULTIVITAMIN", "VITAMIN"]
+keywords = ["KS IBU", "KIRKLAND IBU", "IBUPROFEN", "IBU 400M", "LUTEIN", "IRONKIDS", "MULTIVITAMIN", "VITAMIN", "VIT B100", "VIT B12"]
 category = "health_pharmacy"
 tags = ["health", "pharmacy"]
 priority = 0
@@ -387,6 +398,16 @@ exact_only = false
 [[rules]]
 id = "legacy_0051"
 keywords = ["1944033 CHAMP SHORT", "CHAMP SHORT"]
+category = "shopping_clothing"
+tags = ["shopping", "clothing"]
+priority = -80
+exact_only = false
+
+[[rules]]
+# Low priority: "BOXER" is apparel (Costco "PUMA BOXER"), but the word also
+# names a dog breed/boxing, so let any more specific rule win first.
+id = "boxer_apparel"
+keywords = ["PUMA BOXER", "BOXER"]
 category = "shopping_clothing"
 tags = ["shopping", "clothing"]
 priority = -80

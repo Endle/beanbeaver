@@ -224,7 +224,14 @@ fn extract_total_raw(lines: &[String]) -> i64 {
         {
             continue;
         }
-        if line_upper.contains("TOTAL") && !line_upper.contains("SUBTOTAL") {
+        // An "AFTER TAX" line is the grand total even when OCR mangles the
+        // word "Total" itself (e.g. Foody Mart's "lotal after Tax 163.95",
+        // T->l). Match on that phrase too. Exclude any subtotal label via the
+        // OCR-tolerant regex so a spaced "Sub Total" row is never mistaken for
+        // the grand total when the real total line is unreadable.
+        if (line_upper.contains("TOTAL") || line_upper.contains("AFTER TAX"))
+            && !re_subtotal_label().is_match(&line_upper)
+        {
             let prev_upper = if idx > 0 {
                 lines[idx - 1].to_ascii_uppercase()
             } else {
@@ -317,7 +324,10 @@ pub fn extract_tax(lines: &[String]) -> Option<i64> {
         if line_upper.contains("TAXED") || line_upper.contains("TAXABLE") {
             continue;
         }
-        if line_upper.contains("TOTAL") && line_upper.contains("AFTER TAX") {
+        // An "after tax" line is a grand total, never the tax amount — skip it
+        // regardless of whether OCR preserved the literal word "Total" (Foody
+        // Mart's "lotal after Tax 163.95" would otherwise be read as the tax).
+        if line_upper.contains("AFTER TAX") {
             continue;
         }
 
@@ -520,7 +530,7 @@ pub fn extract_subtotal(lines: &[String]) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_date, extract_subtotal, extract_tenders, extract_total};
+    use super::{extract_date, extract_subtotal, extract_tax, extract_tenders, extract_total};
 
     #[test]
     fn date_parses_day_first_hyphenated_month_name() {
@@ -643,6 +653,27 @@ mod tests {
         ];
 
         assert_eq!(extract_total(&lines), 15_355);
+    }
+
+    #[test]
+    fn total_and_tax_survive_ocr_mangled_total_after_tax_label() {
+        // Foody Mart 2026 receipt footer where OCR mangled "Total" -> "lotal":
+        //   Sub Total 159.41 / HST 4.54 / list5% 0.00 / lotal after Tax 163.95
+        // The grand total is the "after tax" line (163.95) even though "Total"
+        // is unreadable, the tax is the HST line (4.54) not the after-tax
+        // amount, and the spaced "Sub Total" must not be taken as the total.
+        let lines = vec![
+            "1iem Count: 40".to_string(),
+            "Sub Total 159.41".to_string(),
+            "HST 4.54".to_string(),
+            "list5% 0.00".to_string(),
+            "lotal after Tax 163.95".to_string(),
+            "Credit Cand 163.95".to_string(),
+        ];
+
+        assert_eq!(extract_total(&lines), 16_395);
+        assert_eq!(extract_tax(&lines), Some(454));
+        assert_eq!(extract_subtotal(&lines), Some(15_941));
     }
 
     #[test]
