@@ -14,7 +14,7 @@ from beanbeaver.receipt.ocr_extraction import (
     resize_image_bytes,
 )
 from beanbeaver.runtime import get_logger
-from beanbeaver.runtime.ocr_models import MissingModelsError, require_models_dir
+from beanbeaver.runtime.ocr_models import MissingModelsError, require_models_dir, resolve_models_dir
 from beanbeaver.runtime.receipt_storage import receipt_ocr_overlay_path, receipt_ocr_raw_path
 
 logger = get_logger(__name__)
@@ -35,6 +35,21 @@ def _native_models_dir() -> Path:
         return require_models_dir()
     except MissingModelsError as exc:
         raise OCRServiceUnavailable(str(exc)) from exc
+
+
+def select_ocr_backend() -> str:
+    """Resolve the active OCR backend: ``"native"`` or ``"container"``.
+
+    An explicit ``OCR_BACKEND`` env var wins. When it is unset, default to
+    ``native`` if model weights are already available (resolvable via the cache
+    chain), otherwise fall back to the ``container``. This makes native the
+    turnkey default once ``bb fetch-models`` has run, without breaking hosts that
+    only have the container.
+    """
+    explicit = os.environ.get(OCR_BACKEND_ENV, "").strip()
+    if explicit:
+        return explicit.lower()
+    return "native" if resolve_models_dir() is not None else "container"
 
 
 def call_ocr_native(receipt_path: Path) -> dict[str, Any]:
@@ -72,11 +87,11 @@ def call_ocr_service(receipt_path: Path, ocr_url: str) -> dict[str, Any]:
     """
     Run OCR and return the raw result dict (``{image_width, image_height, detections}``).
 
-    Backend is chosen by the ``OCR_BACKEND`` env var: ``container`` (default,
-    PaddleOCR over HTTP at ``ocr_url``) or ``native`` (in-process ONNX, no
-    container). The transform→parse step runs in Rust downstream.
+    Backend is chosen by :func:`select_ocr_backend`: ``native`` (in-process ONNX)
+    when models are available or forced, else ``container`` (PaddleOCR over HTTP
+    at ``ocr_url``). The transform→parse step runs in Rust downstream.
     """
-    backend = os.environ.get(OCR_BACKEND_ENV, "container").strip().lower()
+    backend = select_ocr_backend()
     if backend == "native":
         return call_ocr_native(receipt_path)
     if backend != "container":

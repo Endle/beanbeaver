@@ -77,7 +77,13 @@ image bytes
   → domain.Receipt
 ```
 
-`OCR_BACKEND=native|container` (default `container`) selects the backend; the
+`OCR_BACKEND=native|container` selects the backend. When **unset** it resolves
+via `select_ocr_backend()`: **native if models are present** (after
+`bb fetch-models`), else **container** — so native is the turnkey default without
+breaking container-only hosts. Both live OCR paths honor this: `receipt_server.py`
+(the `serve`/upload flow) runs native via `asyncio.to_thread` (the ONNX call is
+CPU-bound), and `bb-tui` skips auto-starting the container when the resolved
+backend is native (reported through `bb api get-config` → `ocr_backend`). The
 `raw_result` contract and everything after it are identical.
 
 ---
@@ -128,12 +134,13 @@ pixi run bb fetch-models
 #    (dev alternative: drop them in ./models-desktop/ or point
 #     BEANBEAVER_OCR_MODELS_DIR=/abs/path at a dir with *_det/_rec/_ori.onnx)
 
-# 3. Use native OCR
-export OCR_BACKEND=native
-pixi run bb scan <image.jpg>      # or bb-tui / bb serve
+# 3. Use native OCR — automatic once models are present (no env var needed):
+#    bb serve / bb-tui resolve the backend via select_ocr_backend() = native when
+#    models exist, else container. Force it explicitly with OCR_BACKEND=native|container.
+pixi run bb-tui                   # or bb serve
 
-# 4. (No container needed.) To compare against the container, run podman as
-#    usual and set OCR_BACKEND=container.
+# 4. (No container needed.) To force the container instead, run podman as usual
+#    and set OCR_BACKEND=container.
 ```
 
 If `ort` cannot download ONNX Runtime in your environment, configure it to use a
@@ -273,18 +280,21 @@ every OS — it is NOT platform-driven.** The only platform-specific facts:
      `--set mobile|both` also available. Resolution precedence:
      `BEANBEAVER_OCR_MODELS_DIR` → repo `models-desktop/` → cache. When native is
      selected but weights are missing, the scan fails fast with a "run
-     `bb fetch-models`" message. **Open:** create the `ocr-models-v1` GitHub
-     Release and upload the 4 assets (the manifest's pinned SHA-256s already match
-     the bytes), then a live end-to-end fetch.
+     `bb fetch-models`" message. ✅ The `ocr-models-v1` GitHub Release is live
+     with all 4 SHA-256-pinned assets; `bb fetch-models` (server + mobile) was
+     verified end-to-end (download → verify → cache → native OCR from cache).
 3. **Measurement honesty**: switch the e2e item scorer to fuzzy/price matching
    (and/or regenerate a neutral ground truth not seeded from the container). This
    alone "closes" ~half the apparent gap and makes future native numbers honest.
 4. **Housekeeping**: exclude `crates/ocr-paddle/scripts/*.py` from `mypy`
    (pre-existing errors); rename the bundled rec model to its `en_` name; decide
    whether `native-ocr` stays a default feature for Linux/Windows CI.
-5. **Decision (product)**: ship native opt-in as-is (recommended). The engine
-   investigation is effectively closed — no cheap single lever exists; the last
-   itemization points require the full server stack (the container).
+5. ✅ **Decided — native is the smart default.** `select_ocr_backend()` picks
+   native when models are present (post `bb fetch-models`), else container; both
+   live paths (`receipt_server.py` + `bb-tui` container auto-start) honor it, and
+   `OCR_BACKEND` still forces either backend. The container stays as the opt-in
+   higher-itemization backend — the engine investigation is closed (no cheap
+   single lever; the last itemization points require the full server stack).
 
 ---
 
