@@ -45,6 +45,7 @@ Commands:
   edit                       Edit a scanned receipt (interactive)
   re-edit                    Re-edit an approved receipt (interactive)
   match [ledger]             Match approved receipts against ledger
+  fetch-models [--set]       Download native-OCR model weights (OCR_BACKEND=native)
 
 Notes:
   receipts/<receipt-dir>/stages/000_parsed.receipt.json = OCR+parser succeeded, not reviewed
@@ -94,6 +95,24 @@ Notes:
         nargs="?",
         default=None,
         help="Path to beancount ledger file (default: main.beancount)",
+    )
+
+    # fetch-models (download native-OCR model weights into the per-user cache)
+    fetch_models_parser = subparsers.add_parser(
+        "fetch-models",
+        help="Download native-OCR model weights (for OCR_BACKEND=native)",
+    )
+    fetch_models_parser.add_argument(
+        "--set",
+        dest="model_set",
+        choices=["server", "mobile", "both"],
+        default="server",
+        help="Model set to download (default: server, 88 MB matching-grade detector)",
+    )
+    fetch_models_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-download even if a verified copy already exists",
     )
 
     api_parser = subparsers.add_parser("api", help="Machine-readable backend commands")
@@ -225,6 +244,10 @@ Notes:
         from beanbeaver.cli.receipt import cmd_re_edit
 
         return _run_legacy_command(cmd_re_edit, args)
+    elif args.command == "fetch-models":
+        from beanbeaver.cli.receipt import cmd_fetch_models
+
+        return _run_legacy_command(cmd_fetch_models, args)
     elif args.command == "api":
         from beanbeaver.cli import api as cli_api
 

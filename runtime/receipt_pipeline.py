@@ -14,17 +14,15 @@ from beanbeaver.receipt.ocr_extraction import (
     resize_image_bytes,
 )
 from beanbeaver.runtime import get_logger
+from beanbeaver.runtime.ocr_models import MissingModelsError, require_models_dir
 from beanbeaver.runtime.receipt_storage import receipt_ocr_overlay_path, receipt_ocr_raw_path
 
 logger = get_logger(__name__)
 
 # OCR backend selection: "container" (PaddleOCR over HTTP, the default) or
 # "native" (in-process ONNX via the `_rust_matcher` extension, no podman/docker).
+# Model resolution + download lives in `runtime.ocr_models` (`bb fetch-models`).
 OCR_BACKEND_ENV = "OCR_BACKEND"
-OCR_MODELS_DIR_ENV = "BEANBEAVER_OCR_MODELS_DIR"
-# Repo-root default: server det + en mobile rec + textline cls (mirrors the
-# container's `PaddleOCR(lang="en", ocr_version="PP-OCRv5")` model selection).
-_DEFAULT_MODELS_DIR = Path(__file__).resolve().parents[1] / "models-desktop"
 
 
 class OCRServiceUnavailable(RuntimeError):
@@ -32,8 +30,11 @@ class OCRServiceUnavailable(RuntimeError):
 
 
 def _native_models_dir() -> Path:
-    override = os.environ.get(OCR_MODELS_DIR_ENV)
-    return Path(override) if override else _DEFAULT_MODELS_DIR
+    """Resolve the native-OCR model dir, or raise with `bb fetch-models` guidance."""
+    try:
+        return require_models_dir()
+    except MissingModelsError as exc:
+        raise OCRServiceUnavailable(str(exc)) from exc
 
 
 def call_ocr_native(receipt_path: Path) -> dict[str, Any]:
