@@ -87,8 +87,34 @@ image bytes
 Native ONNX is plain cross-platform Rust (`ort`, `image`, `imageproc`, `geo`);
 ONNX Runtime is first-class on Linux. **The `coreml` feature is Apple-only and
 OFF by default** — Linux runs pure CPU ONNX, exactly what was measured on Mac.
-**Caveat: this has only been built/run on Apple-Silicon macOS. Linux is expected
-to work but is UNVERIFIED — verifying it is step 1.**
+
+**VERIFIED on Linux (Fedora 43, x86_64, 2026-06-28).** `ort` downloads the Linux
+ONNX Runtime fine; the det+cls+rec pipeline builds and runs in-process; and BOTH
+model sets reproduce the Mac numbers within ~1 receipt (deltas explained by the
+corpus growing 80→90):
+- **server-det** (the recommended default): merchant/date 100%/100%, total 97%
+  (Mac 98%), crit-items 84% (Mac 83%), header 97% (Mac 98%), fully-correct 51%
+  (Mac 51%). **Latency 1.96 s/receipt (detect 0.53 s)** — ~1.8× FASTER than the
+  Apple-Silicon Mac's ~3.6 s (detect 1.9 s), since Linux runs x86_64 CPU natively.
+- **mobile-det**: crit-items 83% vs 82%, total 96% vs 95%, header 92% = 92%,
+  ~1.5 s/receipt.
+
+CPU ORT is deterministic across OS, as expected — Linux == Mac on accuracy, and
+faster.
+
+**Linux build fix (`-lstdc++`):** a bare `cargo build` for the `device_sim`
+example fails at link with `rust-lld: unable to find library -lstdc++` when the
+host has only the runtime `libstdc++.so.6` (no `-devel` symlink, e.g. stock
+Fedora). Put the pixi/conda libstdc++ on the linker path — it's an env var, so it
+only re-links (no rebuild):
+
+```bash
+LIBRARY_PATH="$PWD/.pixi/envs/default/lib" cargo build --release -p ocr-paddle --example device_sim
+LD_LIBRARY_PATH="$PWD/.pixi/envs/default/lib" ./target/release/examples/device_sim ...
+```
+
+Building through `pixi run` (as below) avoids this — the conda toolchain already
+has libstdc++ on its path.
 
 ```bash
 # 1. Build the extension (native-ocr is a default feature; ort downloads the
@@ -96,11 +122,14 @@ to work but is UNVERIFIED — verifying it is step 1.**
 pixi install
 pixi run maturin-develop          # = maturin develop + editable pip install
 
-# 2. Put the models in place (see "Models" below) → ./models-desktop/
+# 2. Get the models (downloads into ~/.cache/beanbeaver/models/, SHA-256 verified).
+#    Default set is server-det (88 MB); --set mobile|both also available.
+pixi run bb fetch-models
+#    (dev alternative: drop them in ./models-desktop/ or point
+#     BEANBEAVER_OCR_MODELS_DIR=/abs/path at a dir with *_det/_rec/_ori.onnx)
 
 # 3. Use native OCR
 export OCR_BACKEND=native
-# optional: export BEANBEAVER_OCR_MODELS_DIR=/abs/path/to/models-desktop
 pixi run bb scan <image.jpg>      # or bb-tui / bb serve
 
 # 4. (No container needed.) To compare against the container, run podman as
@@ -129,6 +158,12 @@ The native path needs a `models-desktop/` dir with exactly one each of
 > The recognizer hardcodes the **436-class English dict** (`crates/ocr-paddle/
 > assets/en_ppocrv5_rec_dict.txt`), so it MUST be paired with the **English
 > mobile rec**, NOT the 18,383-class server rec (that would decode garbage).
+>
+> ⚠️ **Use `ios_v2`, not `ios`.** The `origin/ios` branch ships a *different*
+> `models/PP-OCRv5_mobile_rec.onnx` (**16.5 MB**, the multilingual rec) that
+> decodes pure garbage with the English dict. The correct English rec is the
+> **7.9 MB** blob on `ios_v2` (verified 2026-06-28). The det (4.8 MB) and
+> textline-ori (6.8 MB) are identical on both branches.
 
 **Server det provenance**: it is untracked (gitignored, ~88 MB). Either:
 - copy `models-desktop/` from this Mac (e.g. `scp`/`rsync`), or
@@ -166,7 +201,10 @@ The gap is **item recall on dense receipts only** (small/clean receipts are at
 100% native). Every single-root-cause hypothesis was tested and **rejected**:
 
 - **Detection recall** — NOT it. `device_sim --attrib` on 110 item-failures:
-  det-miss 9, bad-crop 36, true-rec 13, pairing 48, desk-miss 4. Only 9 are
+  det-miss 9, bad-crop 36, true-rec 13, pairing 48, desk-miss 4. (Linux x86_64
+  reproduces this distribution: 116 item-failures, det-miss 9, bad-crop 40,
+  true-rec 14, pairing 49, desk-miss 4 — same shape, scaled by the 80→90 corpus.)
+  Only 9 are
   "line not found."
 - **Global geometry / affine scale** — NOT it. Box diff vs container is a clean
   anisotropic affine (X≈0.88, Y≈0.96, same 789×3100 frame) with tiny non-affine
@@ -217,13 +255,27 @@ every OS — it is NOT platform-driven.** The only platform-specific facts:
 
 ## Open work / next steps (ranked)
 
-1. **Verify native on Linux** (build + run + a `device_sim` corpus run). Expect
-   the same numbers as Mac (CPU ORT is deterministic across OS). This is the main
-   reason for this handoff.
-2. **Packaging** (platform-agnostic, currently the real blocker to turnkey
-   native on ANY OS): bundle/locate the ONNX Runtime lib + ship the ~90 MB
-   models (recommend download-on-first-run into a cache dir + a `bb fetch-models`
-   helper).
+1. ✅ **DONE — Verify native on Linux** (Fedora 43 x86_64, 2026-06-28): build +
+   run + corpus run all pass; **both** server-det and mobile-det match Mac within
+   ~1 receipt (server-det even faster: 1.96 s vs ~3.6 s/receipt), and the cached
+   baseline reproduces the container column. See the verification numbers above.
+   Two Linux gotchas surfaced and are documented above: the `-lstdc++` link fix,
+   and the nested corpus needing a flat dir.
+2. **Packaging** (platform-agnostic). Two halves, and the first is already done:
+   - ✅ **ONNX Runtime lib**: `ort` links `libonnxruntime.a` (a ~90 MB *static*
+     archive) directly into `_rust_matcher` (`nm`/`ldd` show no dynamic
+     `libonnxruntime` dependency). The engine ships inside the extension — nothing
+     separate to bundle or locate on the desktop path.
+   - 🚧 **Model weights** (the only real gap, ~90 MB of `.onnx`): fetched on
+     demand by **`bb fetch-models`** (`runtime/ocr_models.py`) into a per-user
+     cache (`~/.cache/beanbeaver/models/<set>/`, XDG/Library/LOCALAPPDATA), pinned
+     + verified by SHA-256. Default set is `server` (88 MB, matching-grade);
+     `--set mobile|both` also available. Resolution precedence:
+     `BEANBEAVER_OCR_MODELS_DIR` → repo `models-desktop/` → cache. When native is
+     selected but weights are missing, the scan fails fast with a "run
+     `bb fetch-models`" message. **Open:** create the `ocr-models-v1` GitHub
+     Release and upload the 4 assets (the manifest's pinned SHA-256s already match
+     the bytes), then a live end-to-end fetch.
 3. **Measurement honesty**: switch the e2e item scorer to fuzzy/price matching
    (and/or regenerate a neutral ground truth not seeded from the container). This
    alone "closes" ~half the apparent gap and makes future native numbers honest.
@@ -250,16 +302,26 @@ every OS — it is NOT platform-driven.** The only platform-specific facts:
 
 ## Reproduce the measurements
 
+> **Corpus layout:** `device_sim`'s corpus mode does a **non-recursive**
+> `read_dir`. The current `../beanbeaver-private-test/receipts_e2e` checkout nests
+> receipts in per-merchant subdirs (90 fixtures), so the commands below find 0 as
+> written — point them at a **flat dir of symlinks** (or a single merchant subdir).
+> Build one with:
+> `mkdir flat && find ../beanbeaver-private-test/receipts_e2e -type f \( -name '*.jpg' -o -name '*.ocr.json' -o -name '*.expected.json' \) -exec ln -s {} flat/ \;`
+>
+> On Linux, prefix the `cargo`/`device_sim` lines with `LIBRARY_PATH`/
+> `LD_LIBRARY_PATH="$PWD/.pixi/envs/default/lib"` (see the `-lstdc++` fix above).
+
 ```bash
 # build the harness (always --release; debug latency is 10-50x inflated)
 cargo build --release -p ocr-paddle --example device_sim
 
 # container baseline (uses the committed .ocr.json), per-merchant:
-./target/release/examples/device_sim ../beanbeaver-private-test/receipts_e2e --cached --by-merchant
+./target/release/examples/device_sim <flat-corpus> --cached --by-merchant
 
 # native (server det), per-merchant + per-stage failure attribution:
-./target/release/examples/device_sim ../beanbeaver-private-test/receipts_e2e --models models-desktop --by-merchant
-./target/release/examples/device_sim ../beanbeaver-private-test/receipts_e2e --models models-desktop --attrib
+./target/release/examples/device_sim <flat-corpus> --models models-desktop --by-merchant
+./target/release/examples/device_sim <flat-corpus> --models models-desktop --attrib
 
 # native vs old-python parity (must be 0 mismatches):
 #   see appendix script equiv.py
