@@ -68,6 +68,7 @@ impl App {
                 receipts_dir: String::new(),
                 _scanned_dir: String::new(),
                 _approved_dir: String::new(),
+                ocr_backend: String::new(),
             },
             config_state: None,
             match_state: None,
@@ -1282,12 +1283,22 @@ impl App {
     /// demoted to the status log so a missing OCR runtime or a busy port does
     /// not abort the TUI; the user can recover from the OCR/serve/fava panes.
     pub(crate) fn autostart_services(&mut self) {
-        self.set_status("Auto-starting `bb serve`, OCR container, and Fava…");
+        // Native OCR runs in-process (no PaddleOCR container), so skip
+        // auto-managing the container when the backend resolves to native.
+        // Manual start (the `s` key) still works for forcing the container.
+        let native_ocr = self.config.ocr_backend == "native";
+        if native_ocr {
+            self.set_status("Auto-starting `bb serve` and Fava (native OCR — no container needed)…");
+        } else {
+            self.set_status("Auto-starting `bb serve`, OCR container, and Fava…");
+        }
         if let Err(error) = self.start_serve_process() {
             self.set_error(format!("Auto-start `bb serve` failed: {error}"));
         }
-        if let Err(error) = self.start_ocr_container() {
-            self.set_error(format!("Auto-start OCR container failed: {error}"));
+        if !native_ocr {
+            if let Err(error) = self.start_ocr_container() {
+                self.set_error(format!("Auto-start OCR container failed: {error}"));
+            }
         }
         // Fava needs a configured ledger path; skip silently when the project
         // root isn't set yet rather than dumping a predictable error.

@@ -1,5 +1,6 @@
 """FastAPI server for receiving receipt images from iPhone."""
 
+import asyncio
 import hashlib
 import os
 import re
@@ -8,7 +9,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import httpx
 from fastapi import FastAPI, Request
@@ -16,10 +17,15 @@ from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from beanbeaver.domain.receipt import Receipt
-from beanbeaver.receipt.ocr_extraction import resize_image_bytes, transform_paddleocr_result
-from beanbeaver.receipt.receipt_structuring import parse_receipt
+from beanbeaver.receipt.ocr_extraction import resize_image_bytes
+from beanbeaver.receipt.receipt_structuring import parse_receipt_from_raw
 from beanbeaver.runtime import get_logger, get_paths, load_known_merchant_keywords, load_receipt_structuring_rule_layers
-from beanbeaver.runtime.receipt_pipeline import create_debug_overlay
+from beanbeaver.runtime.receipt_pipeline import (
+    OCRServiceUnavailable,
+    call_ocr_native,
+    create_debug_overlay,
+    select_ocr_backend,
+)
 from beanbeaver.runtime.receipt_storage import (
     receipt_dir_from_stage_path,
     receipt_ocr_overlay_path,
@@ -34,12 +40,14 @@ OCR_SERVICE_URL = os.environ.get("OCR_SERVICE_URL", "http://localhost:8001")
 
 
 def _format_decimal(value: Decimal | None) -> str | None:
+    """Format a Decimal as a 2-dp string, or None when absent."""
     if value is None:
         return None
     return f"{value:.2f}"
 
 
 def _format_summary(receipt: Receipt) -> str:
+    """One-line human summary (merchant · date · total · item count)."""
     date_part = "UNKNOWN" if receipt.date_is_placeholder else receipt.date.isoformat()
     item_word = "item" if len(receipt.items) == 1 else "items"
     return f"{receipt.merchant} · {date_part} · ${receipt.total:.2f} · {len(receipt.items)} {item_word}"
@@ -168,6 +176,41 @@ app = FastAPI(title="Receipt Scanner", lifespan=lifespan)
 app.add_middleware(FixiOSMultipartMiddleware)
 
 
+async def _acquire_ocr_result(
+    filepath: Path, resized_contents: bytes, filename: str
+) -> tuple[dict[str, Any] | None, str, str]:
+    """Run OCR via the selected backend and return ``(raw_result, code, message)``.
+
+    Backend follows :func:`select_ocr_backend` — ``native`` runs the in-process
+    ONNX pipeline off the event loop (it is CPU-bound), ``container`` POSTs the
+    resized image to the PaddleOCR service. On success the error fields are empty.
+    """
+    if select_ocr_backend() == "native":
+        try:
+            result = await asyncio.to_thread(call_ocr_native, filepath)
+        except OCRServiceUnavailable as exc:
+            logger.error(f"Native OCR failed: {exc}")
+            return None, "ocr_unreachable", str(exc)
+        return result, "", ""
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                f"{OCR_SERVICE_URL}/ocr",
+                files={"file": (filename, resized_contents, "image/jpeg")},
+            )
+    except httpx.RequestError as exc:
+        logger.error(f"OCR service unavailable: {exc}")
+        return None, "ocr_unreachable", f"OCR service unreachable at {OCR_SERVICE_URL}"
+
+    if response.status_code != 200:
+        # TODO(security): response text may include OCR payload text with PII.
+        # Keep for localhost-only use; redact before non-localhost deployment.
+        logger.error(f"OCR service error: {response.status_code} {response.text}")
+        return None, "ocr_error", f"OCR service returned HTTP {response.status_code}"
+    return response.json(), "", ""
+
+
 @app.post("/upload")
 @app.post("/beanbeaver")
 @app.post("/bb")
@@ -207,84 +250,66 @@ async def upload_receipt(request: Request) -> JSONResponse:
         resized_filepath.write_bytes(resized_contents)
         logger.debug(f"Saved resized image to {resized_filepath}")
 
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    f"{OCR_SERVICE_URL}/ocr",
-                    files={"file": (filename, resized_contents, "image/jpeg")},
+        raw_ocr_result, ocr_error_code, ocr_error_message = await _acquire_ocr_result(
+            filepath, resized_contents, filename
+        )
+
+        if raw_ocr_result is None:
+            error_code = ocr_error_code
+            error_message = ocr_error_message
+        else:
+            try:
+                receipt = parse_receipt_from_raw(
+                    raw_ocr_result,
+                    image_filename=filename,
+                    known_merchants=load_known_merchant_keywords(),
+                    item_category_rule_layers=load_receipt_structuring_rule_layers(),
                 )
-        except httpx.RequestError as e:
-            logger.error(f"OCR service unavailable: {e}")
-            error_code = "ocr_unreachable"
-            error_message = f"OCR service unreachable at {OCR_SERVICE_URL}"
-            response = None
-
-        if response is not None:
-            if response.status_code != 200:
-                # TODO(security): This may include OCR payload text with PII.
-                # Keep only for localhost-only operation; redact before non-localhost deployment.
-                logger.error(f"OCR service error: {response.status_code} {response.text}")
-                error_code = "ocr_error"
-                error_message = f"OCR service returned HTTP {response.status_code}"
+            except Exception as e:
+                logger.error(f"Failed to parse/format receipt: {e}")
+                error_code = "parse_failed"
+                error_message = f"Could not parse receipt: {e}"
             else:
-                raw_ocr_result = response.json()
-                ocr_result = transform_paddleocr_result(raw_ocr_result)
-
+                # TODO(security): stdout below includes merchant/date/amount/path.
+                # Keep for localhost-only use; redact before non-localhost deploy.
+                print(f"\n{'=' * 60}")
+                print(f"Received: {filename}")
+                print(f"Parsed: {receipt.merchant}, {receipt.date}, ${receipt.total:.2f}, {len(receipt.items)} items")
+                output_path = save_scanned_receipt(
+                    receipt,
+                    raw_ocr_payload=raw_ocr_result,
+                    image_sha256=image_sha256,
+                    source_image_path=filepath,
+                    resized_image_bytes=resized_contents,
+                )
                 try:
-                    receipt = parse_receipt(
-                        ocr_result,
-                        image_filename=filename,
-                        known_merchants=load_known_merchant_keywords(),
-                        item_category_rule_layers=load_receipt_structuring_rule_layers(),
+                    receipt_dir = receipt_dir_from_stage_path(output_path)
+                    debug_image_path = create_debug_overlay(
+                        filepath,
+                        raw_ocr_result,
+                        output_path=receipt_ocr_overlay_path(receipt_dir),
                     )
+                    logger.debug(f"Created debug overlay: {debug_image_path}")
                 except Exception as e:
-                    logger.error(f"Failed to parse/format receipt: {e}")
-                    error_code = "parse_failed"
-                    error_message = f"Could not parse receipt: {e}"
-                else:
-                    # TODO(security): These stdout lines include merchant/date/amount/path details.
-                    # Keep only for localhost-only operation; redact before non-localhost deployment.
-                    print(f"\n{'=' * 60}")
-                    print(f"Received: {filename}")
-                    print(
-                        f"Parsed: {receipt.merchant}, {receipt.date}, ${receipt.total:.2f}, {len(receipt.items)} items"
-                    )
-                    output_path = save_scanned_receipt(
+                    logger.warning(f"Failed to create debug overlay: {e}")
+                draft_filename = output_path.name
+                print(f"Saved for review: {output_path}")
+                print(f"{'=' * 60}\n")
+
+                if filepath.exists():
+                    filepath.unlink()
+                if resized_filepath is not None and resized_filepath.exists():
+                    resized_filepath.unlink()
+
+                return JSONResponse(
+                    build_upload_success_payload(
                         receipt,
-                        raw_ocr_payload=raw_ocr_result,
-                        stage1_ocr_payload=cast(dict[str, Any], ocr_result),
+                        draft_filename=draft_filename,
+                        image_filename=filename,
                         image_sha256=image_sha256,
-                        source_image_path=filepath,
-                        resized_image_bytes=resized_contents,
+                        size_bytes=len(contents),
                     )
-                    try:
-                        receipt_dir = receipt_dir_from_stage_path(output_path)
-                        debug_image_path = create_debug_overlay(
-                            filepath,
-                            raw_ocr_result,
-                            output_path=receipt_ocr_overlay_path(receipt_dir),
-                        )
-                        logger.debug(f"Created debug overlay: {debug_image_path}")
-                    except Exception as e:
-                        logger.warning(f"Failed to create debug overlay: {e}")
-                    draft_filename = output_path.name
-                    print(f"Saved for review: {output_path}")
-                    print(f"{'=' * 60}\n")
-
-                    if filepath.exists():
-                        filepath.unlink()
-                    if resized_filepath is not None and resized_filepath.exists():
-                        resized_filepath.unlink()
-
-                    return JSONResponse(
-                        build_upload_success_payload(
-                            receipt,
-                            draft_filename=draft_filename,
-                            image_filename=filename,
-                            image_sha256=image_sha256,
-                            size_bytes=len(contents),
-                        )
-                    )
+                )
     except Exception as e:  # noqa: BLE001
         logger.error(f"Unexpected receipt processing failure: {e}")
         error_code = "internal_error"

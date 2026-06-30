@@ -649,6 +649,7 @@ def cmd_api_import_apply(args: argparse.Namespace) -> None:
 def cmd_api_get_config(args: argparse.Namespace) -> None:
     """Return TUI/backend configuration as JSON."""
     from beanbeaver.runtime import bootstrap_tui_config_path, get_paths
+    from beanbeaver.runtime.receipt_pipeline import select_ocr_backend
     from beanbeaver.runtime.tui_config import load_tui_config
 
     config = load_tui_config()
@@ -660,6 +661,9 @@ def cmd_api_get_config(args: argparse.Namespace) -> None:
             "resolved_project_root": str(paths.root),
             "resolved_main_beancount_path": str(paths.main_beancount),
             "receipts_dir": str(paths.receipts),
+            # Resolved OCR backend so the TUI knows whether to manage the
+            # container ("native" => in-process ONNX, no container needed).
+            "ocr_backend": select_ocr_backend(),
         }
     )
 
