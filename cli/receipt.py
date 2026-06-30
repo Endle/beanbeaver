@@ -18,6 +18,34 @@ def _receipt_chain_label(path: Path) -> str:
     return f"{receipt_dir}/{path.name}"
 
 
+def cmd_fetch_models(args: argparse.Namespace) -> None:
+    """Download native-OCR model weights into the per-user cache."""
+    from beanbeaver.runtime.ocr_models import (
+        DEFAULT_SET,
+        MODEL_SETS,
+        MissingModelsError,
+        fetch_set,
+        models_cache_dir,
+    )
+
+    selected = getattr(args, "model_set", DEFAULT_SET)
+    set_names = list(MODEL_SETS) if selected == "both" else [selected]
+
+    print(f"Fetching OCR model set(s): {', '.join(set_names)}")
+    print(f"Cache: {models_cache_dir()}")
+    try:
+        for name in set_names:
+            dest = fetch_set(name, force=getattr(args, "force", False))
+            print(f"  {name}: ready at {dest}")
+    except MissingModelsError as exc:
+        print(str(exc))
+        sys.exit(1)
+    except Exception as exc:  # noqa: BLE001 - surface download/network errors cleanly
+        print(f"Failed to fetch models: {exc}")
+        sys.exit(1)
+    print("Done. Native OCR is ready (set OCR_BACKEND=native).")
+
+
 def cmd_serve(args: argparse.Namespace) -> None:
     """Start the FastAPI server for receiving receipt uploads."""
     import uvicorn
