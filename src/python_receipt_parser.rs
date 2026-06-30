@@ -1,9 +1,10 @@
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyList};
 use pyo3::wrap_pyfunction;
 use std::collections::HashSet;
 
+use receipt_core::ocr_transform::{self, RawDetection};
 use receipt_core::receipt_categories;
 use receipt_core::receipt_parse_helpers;
 use receipt_core::receipt_parser;
@@ -244,37 +245,36 @@ fn to_spatial_pages(pages: Vec<GenericPageInput>) -> Vec<receipt_spatial::PageIn
         .collect()
 }
 
-#[pyfunction]
-fn receipt_parse_receipt(
-    py: Python<'_>,
-    ocr_result: &Bound<'_, PyAny>,
-    rule_layers: PyRuleLayersInput,
-    image_filename: String,
-    known_merchants: Option<Vec<String>>,
-    current_year: i32,
-) -> PyResult<Py<PyDict>> {
-    let ocr_dict = ocr_result
-        .cast::<PyDict>()
-        .map_err(|_| PyTypeError::new_err("ocr_result must be a dict"))?;
-    let full_text = match ocr_dict.get_item("full_text")? {
-        Some(value) => value.extract::<String>()?,
-        None => String::new(),
-    };
-    let pages = match ocr_dict.get_item("pages")? {
-        Some(value) => value.extract::<Vec<GenericPageInput>>()?,
-        None => Vec::new(),
-    };
+/// Parse the raw PaddleOCR `detections` list (`[[points], [text, conf]]`) into
+/// `receipt-core`'s `RawDetection`. Points arrive as `[x, y]` lists in
+/// padded-image pixel coordinates.
+fn extract_raw_detections(detections: &Bound<'_, PyAny>) -> PyResult<Vec<RawDetection>> {
+    let list = detections.cast::<PyList>()?;
+    let mut out = Vec::with_capacity(list.len());
+    for detection in list.try_iter()? {
+        let detection = detection?;
+        let points = detection
+            .get_item(0)?
+            .extract::<Vec<Vec<f64>>>()?
+            .into_iter()
+            .filter(|p| p.len() >= 2)
+            .map(|p| (p[0], p[1]))
+            .collect::<Vec<_>>();
+        let text_conf = detection.get_item(1)?;
+        let text = text_conf.get_item(0)?.extract::<String>()?;
+        let confidence = text_conf.get_item(1)?.extract::<f64>().unwrap_or(0.0);
+        out.push(RawDetection {
+            points,
+            text,
+            confidence,
+        });
+    }
+    Ok(out)
+}
 
-    let parsed = receipt_parser::parse_receipt(
-        &full_text,
-        &to_helper_pages(pages.clone()),
-        &to_spatial_pages(pages),
-        &to_rule_layers(rule_layers),
-        &image_filename,
-        &known_merchants.unwrap_or_default(),
-        current_year,
-    );
-
+/// Serialize a parsed receipt into the dict schema the Python `parse_receipt`
+/// mapping consumes. Shared by the transformed-input and raw-input bindings.
+fn parsed_to_pydict(py: Python<'_>, parsed: receipt_parser::ParsedReceiptData) -> PyResult<Py<PyDict>> {
     let dict = PyDict::new(py);
     dict.set_item("merchant", parsed.merchant)?;
     dict.set_item("date", parsed.date)?;
@@ -311,7 +311,87 @@ fn receipt_parse_receipt(
     Ok(dict.unbind())
 }
 
+#[pyfunction]
+fn receipt_parse_receipt(
+    py: Python<'_>,
+    ocr_result: &Bound<'_, PyAny>,
+    rule_layers: PyRuleLayersInput,
+    image_filename: String,
+    known_merchants: Option<Vec<String>>,
+    current_year: i32,
+) -> PyResult<Py<PyDict>> {
+    let ocr_dict = ocr_result
+        .cast::<PyDict>()
+        .map_err(|_| PyTypeError::new_err("ocr_result must be a dict"))?;
+    let full_text = match ocr_dict.get_item("full_text")? {
+        Some(value) => value.extract::<String>()?,
+        None => String::new(),
+    };
+    let pages = match ocr_dict.get_item("pages")? {
+        Some(value) => value.extract::<Vec<GenericPageInput>>()?,
+        None => Vec::new(),
+    };
+
+    let parsed = receipt_parser::parse_receipt(
+        &full_text,
+        &to_helper_pages(pages.clone()),
+        &to_spatial_pages(pages),
+        &to_rule_layers(rule_layers),
+        &image_filename,
+        &known_merchants.unwrap_or_default(),
+        current_year,
+    );
+
+    parsed_to_pydict(py, parsed)
+}
+
+/// Like [`receipt_parse_receipt`] but takes the *raw* OCR result
+/// (`{image_width, image_height, detections}`) and runs the detection→parser
+/// transform in Rust (`receipt-core`), so no Python `transform_paddleocr_result`
+/// is needed. This is the desktop live path, unified with the iOS pipeline.
+#[pyfunction]
+#[pyo3(signature = (raw_result, rule_layers, image_filename, known_merchants, current_year, padding = 50))]
+fn receipt_parse_receipt_from_raw(
+    py: Python<'_>,
+    raw_result: &Bound<'_, PyAny>,
+    rule_layers: PyRuleLayersInput,
+    image_filename: String,
+    known_merchants: Option<Vec<String>>,
+    current_year: i32,
+    padding: i64,
+) -> PyResult<Py<PyDict>> {
+    let dict = raw_result
+        .cast::<PyDict>()
+        .map_err(|_| PyTypeError::new_err("raw_result must be a dict"))?;
+    let padded_width = dict
+        .get_item("image_width")?
+        .ok_or_else(|| PyTypeError::new_err("raw_result.image_width missing"))?
+        .extract::<i64>()?;
+    let padded_height = dict
+        .get_item("image_height")?
+        .ok_or_else(|| PyTypeError::new_err("raw_result.image_height missing"))?
+        .extract::<i64>()?;
+    let detections = match dict.get_item("detections")? {
+        Some(value) => extract_raw_detections(&value)?,
+        None => Vec::new(),
+    };
+
+    let transformed = ocr_transform::transform(detections, padded_width, padded_height, padding);
+    let parsed = receipt_parser::parse_receipt(
+        &transformed.full_text,
+        &transformed.helper_pages,
+        &transformed.spatial_pages,
+        &to_rule_layers(rule_layers),
+        &image_filename,
+        &known_merchants.unwrap_or_default(),
+        current_year,
+    );
+
+    parsed_to_pydict(py, parsed)
+}
+
 pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(receipt_parse_receipt, module)?)?;
+    module.add_function(wrap_pyfunction!(receipt_parse_receipt_from_raw, module)?)?;
     Ok(())
 }

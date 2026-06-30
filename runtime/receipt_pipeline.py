@@ -1,35 +1,102 @@
 """Runtime helpers for receipt OCR pipeline (non-HTTP)."""
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
 
 import httpx
 
+from beanbeaver.receipt._rust import require_rust_matcher
 from beanbeaver.receipt.ocr_extraction import (
     OCR_IMAGE_PADDING,
-    OcrDocument,
     resize_image_bytes,
-    transform_paddleocr_result,
 )
 from beanbeaver.runtime import get_logger
+from beanbeaver.runtime.ocr_models import MissingModelsError, require_models_dir, resolve_models_dir
 from beanbeaver.runtime.receipt_storage import receipt_ocr_overlay_path, receipt_ocr_raw_path
 
 logger = get_logger(__name__)
+
+# OCR backend selection: "container" (PaddleOCR over HTTP, the default) or
+# "native" (in-process ONNX via the `_rust_matcher` extension, no podman/docker).
+# Model resolution + download lives in `runtime.ocr_models` (`bb fetch-models`).
+OCR_BACKEND_ENV = "OCR_BACKEND"
 
 
 class OCRServiceUnavailable(RuntimeError):
     """Raised when the OCR service cannot be reached or returns an error."""
 
 
-def call_ocr_service(receipt_path: Path, ocr_url: str) -> tuple[dict[str, Any], OcrDocument]:
-    """
-    Call the OCR service and return both raw and transformed results.
+def _native_models_dir() -> Path:
+    """Resolve the native-OCR model dir, or raise with `bb fetch-models` guidance."""
+    try:
+        return require_models_dir()
+    except MissingModelsError as exc:
+        raise OCRServiceUnavailable(str(exc)) from exc
 
-    Returns:
-        Tuple of (raw_result, transformed_result).
+
+def select_ocr_backend() -> str:
+    """Resolve the active OCR backend: ``"native"`` or ``"container"``.
+
+    An explicit ``OCR_BACKEND`` env var wins. When it is unset, default to
+    ``native`` if model weights are already available (resolvable via the cache
+    chain), otherwise fall back to the ``container``. This makes native the
+    turnkey default once ``bb fetch-models`` has run, without breaking hosts that
+    only have the container.
     """
+    explicit = os.environ.get(OCR_BACKEND_ENV, "").strip()
+    if explicit:
+        return explicit.lower()
+    return "native" if resolve_models_dir() is not None else "container"
+
+
+def call_ocr_native(receipt_path: Path) -> dict[str, Any]:
+    """Run OCR in-process via the native ONNX pipeline (no container).
+
+    Returns the raw OCR result dict (``{image_width, image_height, detections}``),
+    same shape as the container, so callers are backend-agnostic. The
+    detection→parser transform happens later in Rust via ``parse_receipt_from_raw``.
+    """
+    models_dir = _native_models_dir()
+    logger.info("Running native (in-process) OCR with models in %s...", models_dir)
+
+    image_bytes = receipt_path.read_bytes()
+    resized_bytes = resize_image_bytes(image_bytes)
+
+    rust = require_rust_matcher()
+    if not hasattr(rust, "ocr_image_native"):
+        raise OCRServiceUnavailable(
+            "native OCR backend requested but the extension was built without the "
+            "'native-ocr' feature (no ocr_image_native); rebuild with it enabled "
+            "or set OCR_BACKEND=container"
+        )
+
+    start_time = time.time()
+    try:
+        raw_result: dict[str, Any] = rust.ocr_image_native(resized_bytes, str(models_dir))
+    except Exception as e:  # noqa: BLE001 - surface as the shared OCR error type
+        raise OCRServiceUnavailable(f"native OCR failed: {e}") from e
+    logger.info("Native OCR returned in %.2f seconds", time.time() - start_time)
+
+    return raw_result
+
+
+def call_ocr_service(receipt_path: Path, ocr_url: str) -> dict[str, Any]:
+    """
+    Run OCR and return the raw result dict (image_width, image_height, detections).
+
+    Backend is chosen by :func:`select_ocr_backend`: ``native`` (in-process ONNX)
+    when models are available or forced, else ``container`` (PaddleOCR over HTTP
+    at ``ocr_url``). The transform→parse step runs in Rust downstream.
+    """
+    backend = select_ocr_backend()
+    if backend == "native":
+        return call_ocr_native(receipt_path)
+    if backend != "container":
+        raise OCRServiceUnavailable(f"unknown OCR_BACKEND {backend!r} (expected 'container' or 'native')")
+
     ocr_url = ocr_url.rstrip("/")
     logger.info("Sending receipt to OCR service at %s...", ocr_url)
 
@@ -52,9 +119,8 @@ def call_ocr_service(receipt_path: Path, ocr_url: str) -> tuple[dict[str, Any], 
             logger.error("OCR service error: %s - %s", response.status_code, response.text)
             raise OCRServiceUnavailable(f"OCR service error: {response.status_code}")
 
-        raw_result = response.json()
-        transformed_result = transform_paddleocr_result(raw_result)
-        return raw_result, transformed_result
+        raw_result: dict[str, Any] = response.json()
+        return raw_result
 
     except httpx.RequestError as e:
         logger.error("Failed to connect to OCR service: %s", e)

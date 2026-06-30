@@ -212,3 +212,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# OCR model weights (distributed separately, not committed — see docs/mac_native_ocr packaging)
+/models/
+/models-server/
+/models-hybrid/
+/models-desktop/
+/models-desktop-mobile/
+*.onnx
+.DS_Store

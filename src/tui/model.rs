@@ -185,6 +185,11 @@ pub(crate) struct ConfigResponse {
     pub(crate) _scanned_dir: String,
     #[serde(default, rename = "approved_dir")]
     pub(crate) _approved_dir: String,
+    /// Resolved OCR backend ("native" | "container"). When "native" the TUI
+    /// skips auto-managing the PaddleOCR container. Defaults empty for older
+    /// backends that don't report it (treated as container).
+    #[serde(default)]
+    pub(crate) ocr_backend: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]

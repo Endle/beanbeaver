@@ -64,9 +64,20 @@ It scans your default Downloads folder and matches the bank.
 ### Parse receipt
 
 
-#### 1. Launch PaddleOCR
+#### 1. Set up OCR
 
-We need to run [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) in container: <https://github.com/Endle/beanbeaver-ocr>
+By default Beanbeaver runs receipt OCR **in-process** — no container needed.
+Download the model weights once:
+```
+bb fetch-models
+```
+This fetches the PP-OCRv5 ONNX models (~100 MB) into a per-user cache; from then
+on `bb serve` and the TUI run OCR natively. Force a backend any time with
+`OCR_BACKEND=native|container`.
+
+**Higher line-item accuracy (optional container):** the [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)
+container (<https://github.com/Endle/beanbeaver-ocr>) reaches somewhat higher
+itemization accuracy. Run it and set `OCR_BACKEND=container`:
 ```
 docker run --name beanbeaver-ocr -p 8001:8000 ghcr.io/endle/beanbeaver-ocr:latest
 # Or podman on Linux
