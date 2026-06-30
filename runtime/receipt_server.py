@@ -40,12 +40,14 @@ OCR_SERVICE_URL = os.environ.get("OCR_SERVICE_URL", "http://localhost:8001")
 
 
 def _format_decimal(value: Decimal | None) -> str | None:
+    """Format a Decimal as a 2-dp string, or None when absent."""
     if value is None:
         return None
     return f"{value:.2f}"
 
 
 def _format_summary(receipt: Receipt) -> str:
+    """One-line human summary (merchant · date · total · item count)."""
     date_part = "UNKNOWN" if receipt.date_is_placeholder else receipt.date.isoformat()
     item_word = "item" if len(receipt.items) == 1 else "items"
     return f"{receipt.merchant} · {date_part} · ${receipt.total:.2f} · {len(receipt.items)} {item_word}"
@@ -202,8 +204,8 @@ async def _acquire_ocr_result(
         return None, "ocr_unreachable", f"OCR service unreachable at {OCR_SERVICE_URL}"
 
     if response.status_code != 200:
-        # TODO(security): This may include OCR payload text with PII.
-        # Keep only for localhost-only operation; redact before non-localhost deployment.
+        # TODO(security): response text may include OCR payload text with PII.
+        # Keep for localhost-only use; redact before non-localhost deployment.
         logger.error(f"OCR service error: {response.status_code} {response.text}")
         return None, "ocr_error", f"OCR service returned HTTP {response.status_code}"
     return response.json(), "", ""
@@ -268,8 +270,8 @@ async def upload_receipt(request: Request) -> JSONResponse:
                 error_code = "parse_failed"
                 error_message = f"Could not parse receipt: {e}"
             else:
-                # TODO(security): These stdout lines include merchant/date/amount/path details.
-                # Keep only for localhost-only operation; redact before non-localhost deployment.
+                # TODO(security): stdout below includes merchant/date/amount/path.
+                # Keep for localhost-only use; redact before non-localhost deploy.
                 print(f"\n{'=' * 60}")
                 print(f"Received: {filename}")
                 print(f"Parsed: {receipt.merchant}, {receipt.date}, ${receipt.total:.2f}, {len(receipt.items)} items")

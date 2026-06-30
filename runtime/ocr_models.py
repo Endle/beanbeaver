@@ -47,6 +47,7 @@ class ModelFile:
 
     @property
     def url(self) -> str:
+        """Download URL for this asset on the GitHub Release."""
         return f"{MODELS_BASE_URL}/{self.filename}"
 
 
@@ -124,7 +125,7 @@ def has_complete_set(directory: Path) -> bool:
 
 
 def _candidate_dirs() -> list[Path]:
-    """Resolution precedence: env override → repo dev dir → cache (default set first)."""
+    """Candidate dirs by precedence: env override → repo dev dir → cache."""
     candidates: list[Path] = []
     override = os.environ.get(OCR_MODELS_DIR_ENV)
     if override:
@@ -158,6 +159,7 @@ def require_models_dir() -> Path:
 
 
 def _sha256_file(path: Path) -> str:
+    """Return the hex SHA-256 of a file, read in chunks."""
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):

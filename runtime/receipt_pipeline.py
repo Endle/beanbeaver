@@ -85,7 +85,7 @@ def call_ocr_native(receipt_path: Path) -> dict[str, Any]:
 
 def call_ocr_service(receipt_path: Path, ocr_url: str) -> dict[str, Any]:
     """
-    Run OCR and return the raw result dict (``{image_width, image_height, detections}``).
+    Run OCR and return the raw result dict (image_width, image_height, detections).
 
     Backend is chosen by :func:`select_ocr_backend`: ``native`` (in-process ONNX)
     when models are available or forced, else ``container`` (PaddleOCR over HTTP

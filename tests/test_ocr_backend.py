@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import beanbeaver.runtime.receipt_pipeline as rp
 import beanbeaver.runtime.receipt_server as srv
@@ -63,16 +64,19 @@ def test_acquire_native_failure_surfaces_instructions(monkeypatch: MonkeyPatch, 
 
 
 def test_acquire_container_success(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    response = MagicMock(status_code=200)
+    response.json.return_value = {"image_width": 3, "image_height": 4, "detections": []}
     monkeypatch.setattr(srv, "select_ocr_backend", lambda: "container")
-    monkeypatch.setattr(srv.httpx, "AsyncClient", _FakeClient)
+    monkeypatch.setattr(srv.httpx, "AsyncClient", _fake_async_client(response))
     result, code, message = asyncio.run(_acquire(tmp_path))
     assert result == {"image_width": 3, "image_height": 4, "detections": []}
     assert (code, message) == ("", "")
 
 
 def test_acquire_container_http_error(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    response = MagicMock(status_code=500, text="boom")
     monkeypatch.setattr(srv, "select_ocr_backend", lambda: "container")
-    monkeypatch.setattr(srv.httpx, "AsyncClient", _FakeClient500)
+    monkeypatch.setattr(srv.httpx, "AsyncClient", _fake_async_client(response))
     result, code, message = asyncio.run(_acquire(tmp_path))
     assert result is None
     assert code == "ocr_error"
@@ -80,38 +84,14 @@ def test_acquire_container_http_error(monkeypatch: MonkeyPatch, tmp_path: Path) 
 
 
 async def _acquire(tmp_path: Path) -> tuple[dict[str, object] | None, str, str]:
+    """Invoke the server's OCR-acquisition helper for one fake upload."""
     return await srv._acquire_ocr_result(tmp_path / "r.jpg", b"resized", "r.jpg")
 
 
-class _FakeResp:
-    status_code = 200
-    text = ""
-
-    def json(self) -> dict[str, object]:
-        return {"image_width": 3, "image_height": 4, "detections": []}
-
-
-class _FakeClient:
-    def __init__(self, *args: object, **kwargs: object) -> None: ...
-
-    async def __aenter__(self) -> _FakeClient:
-        return self
-
-    async def __aexit__(self, *args: object) -> bool:
-        return False
-
-    async def post(self, *args: object, **kwargs: object) -> _FakeResp:
-        return _FakeResp()
-
-
-class _FakeResp500:
-    status_code = 500
-    text = "boom"
-
-    def json(self) -> dict[str, object]:
-        raise AssertionError("should not parse a non-200 response")
-
-
-class _FakeClient500(_FakeClient):
-    async def post(self, *args: object, **kwargs: object) -> _FakeResp500:  # type: ignore[override]
-        return _FakeResp500()
+def _fake_async_client(response: object) -> object:
+    """Return a drop-in for httpx.AsyncClient whose async `post` yields `response`."""
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    client.post = AsyncMock(return_value=response)
+    return lambda *args, **kwargs: client

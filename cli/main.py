@@ -5,6 +5,7 @@ from collections.abc import Callable, Sequence
 
 
 def _coerce_exit_code(code: object) -> int:
+    """Normalize a SystemExit code (None/int/other) to a process exit int."""
     if code is None:
         return 0
     if isinstance(code, int):
@@ -26,6 +27,7 @@ def _run_legacy_command(command: Callable[[argparse.Namespace], None], args: arg
 
 
 def _print_error(error: str) -> None:
+    """Print a multi-line error message line by line."""
     for line in error.splitlines():
         print(line)
 
