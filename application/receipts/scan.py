@@ -7,10 +7,10 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Literal
 
 from beanbeaver.receipt.ocr_extraction import resize_image_bytes
-from beanbeaver.receipt.receipt_structuring import parse_receipt
+from beanbeaver.receipt.receipt_structuring import parse_receipt_from_raw
 from beanbeaver.runtime import load_known_merchant_keywords, load_receipt_structuring_rule_layers
 from beanbeaver.runtime.receipt_pipeline import (
     OCRServiceUnavailable,
@@ -63,15 +63,15 @@ def run_receipt_scan(request: ReceiptScanRequest) -> ReceiptScanResult:
         )
 
     try:
-        raw_ocr_result, ocr_result = call_ocr_service(request.image_path, request.ocr_url)
+        raw_ocr_result = call_ocr_service(request.image_path, request.ocr_url)
     except OCRServiceUnavailable as exc:
         return ReceiptScanResult(
             status="ocr_unavailable",
             error=str(exc),
         )
 
-    receipt = parse_receipt(
-        ocr_result,
+    receipt = parse_receipt_from_raw(
+        raw_ocr_result,
         image_filename=request.image_path.name,
         known_merchants=load_known_merchant_keywords(),
         item_category_rule_layers=load_receipt_structuring_rule_layers(),
@@ -81,7 +81,6 @@ def run_receipt_scan(request: ReceiptScanRequest) -> ReceiptScanResult:
     scanned_path = save_scanned_receipt(
         receipt,
         raw_ocr_payload=raw_ocr_result,
-        stage1_ocr_payload=cast(dict[str, Any], ocr_result),
         image_sha256=image_sha256,
         source_image_path=request.image_path,
         resized_image_bytes=resized_image_bytes,

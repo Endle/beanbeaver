@@ -23,6 +23,14 @@ allow = [
     "Unicode-3.0",
     "Unicode-DFS-2016",
     "Zlib",
+    # NCSA (permissive, OSI-approved): libfuzzer-sys, pulled transitively by the
+    # `image` crate's AVIF encoder (image -> ravif -> rav1e). Desktop-only; never
+    # enters the iOS-bound receipt-core tree.
+    "NCSA",
+    # CDLA-Permissive-2.0 (permissive data license): webpki-root-certs, a build
+    # dependency of ort-sys (ureq, used to download ONNX Runtime). Desktop-only
+    # build dep; never enters receipt-core.
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.9
 unused-allowed-license = "allow"

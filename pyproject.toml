@@ -73,6 +73,8 @@ markers = [
 [tool.ruff]
 target-version = "py312"
 line-length = 120
+# Throwaway OCR diagnostic scripts (one-off, untyped); not linted library code.
+extend-exclude = ["crates/ocr-paddle/scripts"]
 
 [tool.ruff.lint]
 select = [
@@ -103,6 +105,8 @@ warn_return_any = false
 warn_unused_ignores = true
 ignore_missing_imports = true
 check_untyped_defs = true
+# Throwaway OCR diagnostic scripts (one-off, untyped); not type-checked.
+exclude = ["crates/ocr-paddle/scripts/"]
 
 [[tool.mypy.overrides]]
 module = "beancount.*"
