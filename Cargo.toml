@@ -16,7 +16,7 @@ path = "src/main.rs"
 name = "beanbeaver._rust_matcher"
 
 [workspace]
-members = ["crates/receipt-core", "crates/receipt-image", "crates/ocr-paddle"]
+members = ["crates/receipt-core", "crates/receipt-image", "crates/ocr-paddle", "crates/ffi"]
 
 [features]
 default = ["native-ocr"]

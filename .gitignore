@@ -214,10 +214,22 @@ marimo/_lsp/
 __marimo__/
 
 # OCR model weights (distributed separately, not committed — see docs/mac_native_ocr packaging)
+# NOTE: ios/'s models/*.onnx are force-added despite this — see docs/ios_port.md "Model setup".
 /models/
 /models-server/
 /models-hybrid/
 /models-desktop/
 /models-desktop-mobile/
 *.onnx
+
+# Generated UniFFI Swift bindings (regenerated from the compiled lib)
+crates/ffi/generated/
+
+# iOS build artifacts (rebuilt by crates/ffi/build-xcframework.sh)
+ios/BBReceiptKit/Frameworks/
+ios/BBReceiptKit/Sources/BBReceiptKit/Generated/
+# Xcode user/build state
+ios/**/xcuserdata/
+ios/**/*.xcworkspace/xcuserdata/
+ios/**/build/
 .DS_Store

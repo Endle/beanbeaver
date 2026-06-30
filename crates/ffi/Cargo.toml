@@ -1,0 +1,31 @@
+[package]
+name = "bb-receipt-ffi"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+# The Swift seam. `staticlib` is what the .xcframework links; `cdylib` lets
+# uniffi-bindgen introspect the compiled library to emit Swift; `lib` keeps the
+# crate usable from Rust tests.
+[lib]
+name = "bb_receipt_ffi"
+crate-type = ["lib", "staticlib", "cdylib"]
+
+# `cargo run --bin uniffi-bindgen -- generate --library <dylib> --language swift`
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+ocr-paddle = { path = "../ocr-paddle" }
+receipt-core = { path = "../receipt-core" }
+# Decode JPEG/PNG bytes handed across the FFI into an RgbImage.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+# UniFFI proc-macro bindings ("cli" provides uniffi_bindgen_main for the bin).
+uniffi = { version = "0.28", features = ["cli"] }
+
+[features]
+# Forward CoreML (Apple Neural Engine / GPU) acceleration to ocr-paddle. Enabled
+# by the iOS xcframework build (build-xcframework.sh); off for host bindgen.
+coreml = ["ocr-paddle/coreml"]
