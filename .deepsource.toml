@@ -6,8 +6,6 @@ test_patterns = [
 
 exclude_patterns = [
   "demo/**",
-  # Throwaway OCR diagnostic scripts (one-off, untyped); not production code.
-  "crates/ocr-paddle/scripts/**",
 ]
 
 [[analyzers]]
