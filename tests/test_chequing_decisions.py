@@ -69,6 +69,28 @@ def test_strict_cc_resolver_returns_no_match_when_pattern_missing(monkeypatch: M
     assert resolution.kind == "no_match"
 
 
+def test_strict_cc_resolver_routes_canadian_tire_bank_etransfer_to_ctfs(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    _install_open_accounts(monkeypatch, cc_accounts=["Liabilities:CreditCard:CTFS:MasterCard"])
+    resolution = account_discovery.resolve_cc_payment_account_strict(
+        "Interac e-Transfer sent to Canadian Tire Bank",
+    )
+    assert resolution.kind == "resolved"
+    assert resolution.pattern == "CANADIAN TIRE BANK"
+    assert resolution.account == "Liabilities:CreditCard:CTFS:MasterCard"
+
+
+def test_strict_cc_resolver_routes_royal_bank_visa_payment_to_rbc(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    _install_open_accounts(monkeypatch, cc_accounts=["Liabilities:CreditCard:RBC:Visa"])
+    resolution = account_discovery.resolve_cc_payment_account_strict("Payment to ROYAL BANK VISA")
+    assert resolution.kind == "resolved"
+    assert resolution.pattern == "ROYAL BANK VISA"
+    assert resolution.account == "Liabilities:CreditCard:RBC:Visa"
+
+
 def test_legacy_cc_wrapper_raises_when_ambiguous_non_tty(monkeypatch: MonkeyPatch) -> None:
     _install_open_accounts(
         monkeypatch,

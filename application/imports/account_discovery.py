@@ -19,8 +19,12 @@ CC_PAYMENT_RULES: list[tuple[str, list[str]]] = [
     ("MBNA CANADA MASTERCARD", ["Liabilities:CreditCard:MBNA*"]),
     ("CIBC MASTERCARD", ["Liabilities:CreditCard:CIBC*"]),
     ("SCOTIA VISA", ["Liabilities:CreditCard:Scotia*"]),
+    ("ROYAL BANK VISA", ["Liabilities:CreditCard:RBC*", "Liabilities:CreditCard:Royal*"]),
     ("CTFS", ["Liabilities:CreditCard:CTFS*"]),
     ("CDN TIRE", ["Liabilities:CreditCard:CTFS*"]),
+    # Interac e-Transfer payoff of the CTFS card reads "Canadian Tire Bank"; require the
+    # "BANK" suffix so in-store "Canadian Tire" debit purchases are not routed to the card.
+    ("CANADIAN TIRE BANK", ["Liabilities:CreditCard:CTFS*"]),
     ("ROGERS", ["Liabilities:CreditCard:Rogers*"]),
     ("AMEX BILL PYMT", ["Liabilities:CreditCard:Amex*", "Liabilities:CreditCard:AmericanExpress*"]),
 ]
