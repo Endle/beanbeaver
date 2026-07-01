@@ -1,18 +1,16 @@
-# License guard for the Rust workspace.
+# License guard for this repo's Rust dependencies (bb-tui / _rust_matcher).
 #
-# Rationale: `receipt-core` is compiled into the iOS app, and GPLv3 (e.g. the
-# beancount toolchain) conflicts with App Store distribution. beancount itself is
-# a *Python* dependency cargo-deny never sees, but this allowlist is the mechanical
-# guard that prevents any *copyleft Rust crate* from ever entering the tree that
-# `receipt-core` (and thus the iOS binary) draws from. Only permissive licenses are
-# allowed; GPL/LGPL/AGPL/MPL are absent from the list and therefore rejected.
+# History: this repo used to also host `receipt-core` et al. as local workspace
+# members, and this allowlist existed to keep the tree that iOS's build drew
+# from free of copyleft. Per repo_split_plan.md, that firewall is now structural
+# instead: `receipt-core`/`receipt-image`/`ocr-paddle` live in the separate MIT
+# `beanbeaver-core` repo (consumed here via a pinned git dependency), and iOS
+# consumes `beanbeaver-core` directly — this repo (GPL-2.0) is no longer in
+# that path at all. This allowlist is now just general license hygiene for
+# desktop's own third-party Rust deps, not an App-Store-compatibility guard.
 
 [licenses]
-# Govern THIRD-PARTY dependencies only. First-party workspace crates are ignored
-# here: their licensing is a deliberate project decision, not something to police
-# via allowlist. The repo is GPL-2.0, but the iOS-bound `receipt-core` is licensed
-# MIT (see crates/receipt-core/LICENSE) so it is App-Store-distributable; MIT is
-# GPL-compatible, so the mixed licensing within the workspace is fine.
+# Govern THIRD-PARTY dependencies only.
 allow = [
     "MIT",
     "Apache-2.0",

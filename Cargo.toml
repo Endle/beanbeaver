@@ -15,19 +15,25 @@ path = "src/main.rs"
 [package.metadata.maturin]
 name = "beanbeaver._rust_matcher"
 
-[workspace]
-members = ["crates/receipt-core", "crates/receipt-image", "crates/ocr-paddle"]
-
 [features]
 default = ["native-ocr"]
 # In-process ONNX OCR (no PaddleOCR container). Pulls in `ocr-paddle` + ONNX
 # Runtime; disable with `--no-default-features` for a container-only build.
 native-ocr = ["dep:ocr-paddle", "dep:image"]
 
+# receipt-core/receipt-image/ocr-paddle live in beanbeaver-core (MIT), pinned by
+# git tag per repo_split_plan.md. NOTE on rules/*.toml: receipt-core embeds its
+# default category/merchant rules via `include_str!`, resolved against *its own*
+# checkout — i.e. beanbeaver-core's rules/, not this repo's rules/. This repo's
+# rules/*.toml still is what the Python loaders (runtime/item_category_rules.py,
+# runtime/merchant_rules.py) read, unchanged. To change the Rust-side (native-OCR
+# pipeline) rule defaults, edit rules/ in beanbeaver-core, cut a new tag, and bump
+# the `tag =` below — editing this repo's rules/*.toml alone will NOT affect the
+# Rust side.
 [dependencies]
-receipt-core = { path = "crates/receipt-core" }
-receipt-image = { path = "crates/receipt-image" }
-ocr-paddle = { path = "crates/ocr-paddle", optional = true }
+receipt-core = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.1.0" }
+receipt-image = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.1.0" }
+ocr-paddle = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.1.0", optional = true }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"], optional = true }
 crossterm = "0.28"
 pyo3 = { version = "0.28", features = ["extension-module"] }
