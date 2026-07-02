@@ -75,6 +75,24 @@ def test_public_grocery_rules_match_statement_merchant_strings(tmp_path: Path, m
     assert engine.categorize(_Txn("WAL-MART #3053 MARKHAM ON")) == "Expenses:Food:Grocery"
 
 
+def test_public_utility_and_takeout_rules_match_statement_merchant_strings(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """Enercare home services categorize as utility; Auric King BBQ as takeout."""
+    public_rules = Path(__file__).resolve().parents[1] / "rules" / "default_merchant_rules.toml"
+    monkeypatch.setattr(
+        rule_engine_module,
+        "get_paths",
+        lambda: _Paths(
+            merchant_rules=tmp_path / "merchant_rules.toml",
+            default_merchant_rules=public_rules,
+            legacy_default_merchant_rules=public_rules,
+        ),
+    )
+    engine = RuleEngine(config_path=tmp_path / "missing.toml")
+
+    assert engine.categorize(_Txn("ENERCARE HOME SERVICES MARKHAM ON")) == "Expenses:Home:Utility"
+    assert engine.categorize(_Txn("AURIC KING BBQ TAKE OU MARKHAM ON")) == "Expenses:Food:Restaurant:TakeOut"
+
+
 def test_project_rule_overrides_public_fallback_rule(tmp_path: Path) -> None:
     config_path = tmp_path / "merchant_rules.toml"
     config_path.write_text(

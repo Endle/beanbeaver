@@ -60,3 +60,14 @@ category = "Expenses:Home"
 [[rules]]
 keywords = ["IKEA", "STRUC-TUBE", "STRUC TUBE"]
 category = "Expenses:Home:Furniture"
+
+[[rules]]
+# Enercare rents water heaters / HVAC equipment and bills recurring home
+# service charges; statements print as "ENERCARE HOME SERVICES <CITY>".
+keywords = ["ENERCARE"]
+category = "Expenses:Home:Utility"
+
+[[rules]]
+# "AURIC KING BBQ TAKE OU <CITY>" (truncated "TAKE OUT") is a BBQ takeout shop.
+keywords = ["AURIC KING BBQ"]
+category = "Expenses:Food:Restaurant:TakeOut"
