@@ -112,7 +112,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0013"
-keywords = ["ROTISSERIE CHICKEN", "PREPARED MEAL", "DELI MEAL", "READY TO EAT", "HEAT AND SERVE", "MEAL KIT"]
+keywords = ["ROTISSERIE CHICKEN", "SOY SAUCE CHICKEN", "PREPARED MEAL", "DELI MEAL", "READY TO EAT", "HEAT AND SERVE", "MEAL KIT"]
 category = "grocery_prepared_meal"
 tags = ["grocery", "prepared", "meal"]
 priority = 0
@@ -160,7 +160,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0021"
-keywords = ["POTATO CHIPS", "CHIP", "CHIPS", "POPCORN", "PRETZEL", "NUTS", "ALMONDS", "CASHEWS", "PEANUTS", "WALNUTS", "PISTACHIOS", "TRAIL MIX", "GRANOLA BAR", "PROTEIN BAR", "ENERGY BAR", "CANDY", "CHOCOLATE", "GUMMY", "GUMMIES", "SKITTLES", "M&M", "SNICKERS", "TWIX", "KITKAT", "REESE", "OREO", "GOLDFISH", "CHEETOS", "DORITOS", "PRINGLES", "LAYS", "RUFFLES", "TOSTITOS", "CHEEZ-IT", "RITZ"]
+keywords = ["POTATO CHIPS", "POTATO PUFFED", "PUFFED FOOD", "CHIP", "CHIPS", "POPCORN", "PRETZEL", "NUTS", "ALMONDS", "CASHEWS", "PEANUTS", "WALNUTS", "PISTACHIOS", "TRAIL MIX", "GRANOLA BAR", "PROTEIN BAR", "ENERGY BAR", "CANDY", "CHOCOLATE", "GUMMY", "GUMMIES", "SKITTLES", "M&M", "SNICKERS", "TWIX", "KITKAT", "REESE", "OREO", "GOLDFISH", "CHEETOS", "DORITOS", "PRINGLES", "LAYS", "RUFFLES", "TOSTITOS", "CHEEZ-IT", "RITZ"]
 category = "grocery_snacks"
 tags = ["grocery", "snacks"]
 priority = 0
