@@ -36,6 +36,7 @@ from beanbeaver.importers import (
     CanadianTireFinancialImporter,
     CibcImporter,
     MbnaImporter,
+    NationalBankImporter,
     PcfImporter,
     RogersImporter,
     ScotiaImporter,
@@ -58,6 +59,11 @@ MBNA_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:MBNA*"]
 PCF_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:PCFinancial*", "Liabilities:CreditCard:PC*"]
 CTFS_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:CTFS*"]
 AMEX_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:Amex*", "Liabilities:CreditCard:AmericanExpress*"]
+NATIONALBANK_ACCOUNT_PATTERNS = [
+    "Liabilities:CreditCard:NationalBank*",
+    "Liabilities:CreditCard:*:NationalBank:*",
+    "Liabilities:CreditCard:*NationalBank*",
+]
 
 CreditCardImportStatus = Literal["ok", "aborted", "error"]
 
@@ -195,6 +201,7 @@ def _build_detection_importers() -> list[BaseCardImporter]:
         CanadianTireFinancialImporter(account="Liabilities:CreditCard:Tmp:CTFS"),
         RogersImporter(account="Liabilities:CreditCard:Tmp:Rogers"),
         AmexImporter(account="Liabilities:CreditCard:Tmp:Amex"),
+        NationalBankImporter(account="Liabilities:CreditCard:Tmp:NationalBank"),
     ]
 
 
@@ -215,6 +222,8 @@ def _build_detection_importer(importer_id: CardImporterId) -> BaseCardImporter:
         if importer_id == "ctfs" and isinstance(candidate, CanadianTireFinancialImporter):
             return candidate
         if importer_id == "amex" and isinstance(candidate, AmexImporter):
+            return candidate
+        if importer_id == "nationalbank" and isinstance(candidate, NationalBankImporter):
             return candidate
     raise RuntimeError(f"Unsupported importer id: {importer_id}")
 
@@ -435,6 +444,15 @@ def _resolve_importer(
     if isinstance(detected_importer, AmexImporter):
         importer, account = _discover_amex_importer(as_of, csv_file, selected_account=selected_account)
         return importer, account, as_of
+    if isinstance(detected_importer, NationalBankImporter):
+        importer, account = _discover_single_account_importer(
+            NationalBankImporter,
+            NATIONALBANK_ACCOUNT_PATTERNS,
+            label="National Bank credit card",
+            as_of=as_of,
+            selected_account=selected_account,
+        )
+        return importer, account, as_of
     raise RuntimeError(f"Unsupported importer type: {detected_importer.__class__.__name__}")
 
 
@@ -508,6 +526,13 @@ def resolve_credit_card_account_options(
             importer_id=resolved_importer_id,
             account_label="AMEX credit card",
             account_options=_amex_account_matches(as_of, csv_file),
+            as_of=as_of,
+        )
+    if isinstance(detected_importer, NationalBankImporter):
+        return CreditCardAccountOptions(
+            importer_id=resolved_importer_id,
+            account_label="National Bank credit card",
+            account_options=find_open_accounts(NATIONALBANK_ACCOUNT_PATTERNS, as_of=as_of),
             as_of=as_of,
         )
     raise RuntimeError(f"Unsupported importer type: {detected_importer.__class__.__name__}")
@@ -613,7 +638,7 @@ def _prepare_card_entries(
                         f"No credit card CSV file found in {downloads_display_path(DOWNLOADED_CSV_BASE_PATH)}\n"
                         "Supported files: CIBC.csv, statement.csv, report.csv, Transactions.csv, "
                         "activity.csv, plat.csv, *AMEX*.csv, SIMPLII*.csv, *Scotiabank*.csv, "
-                        "Transaction History_*.csv, *MBNA*.csv"
+                        "Transaction History_*.csv, *MBNA*.csv, YYYY-MM-DD-HHMMSS.csv (National Bank)"
                     ),
                 ),
                 None,

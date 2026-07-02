@@ -13,6 +13,7 @@ Supported institutions:
 - PC Financial
 - Canadian Tire Financial Services
 - American Express Canada
+- National Bank of Canada
 
 Configuration:
     Card importers require explicit account names from caller:
@@ -37,6 +38,7 @@ from .bmo import BmoImporter
 from .canadian_tire_financial import CanadianTireFinancialImporter
 from .cibc import CibcImporter
 from .mbna import MbnaImporter
+from .nationalbank import NationalBankImporter
 from .pcf import PcfImporter
 from .rogers import RogersImporter
 from .scotia import ScotiaImporter
@@ -48,6 +50,7 @@ __all__ = [
     "CibcImporter",
     "CanadianTireFinancialImporter",
     "MbnaImporter",
+    "NationalBankImporter",
     "PcfImporter",
     "RogersImporter",
     "ScotiaImporter",

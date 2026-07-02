@@ -25,6 +25,9 @@ _paths = get_paths()
 
 _MBNA_MONTHLY_EXPORT_RE = re.compile(r"^[A-Za-z]+20\d{2}_\d{4}\.csv$")
 _TRANSACTIONS_DOWNLOAD_RE = re.compile(r"^transactions(?: \(\d+\))?\.csv$")
+# National Bank exports carry a generic timestamp name (YYYY-MM-DD-HHMMSS.csv);
+# the header validator is what actually confirms the institution.
+_NATIONALBANK_EXPORT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{6}\.csv$")
 
 ImportType = Literal["cc", "chequing"]
 
@@ -37,6 +40,7 @@ CardImporterId = Literal[
     "pcf",
     "ctfs",
     "amex",
+    "nationalbank",
 ]
 
 ChequingImporterId = Literal["eqbank", "scotia_chequing"]
@@ -81,6 +85,8 @@ class Stage1Rule:
             return "amex" in lower and lower.endswith(".csv")
         if self.rule_id == "cc-amex-plat":
             return lower == "plat.csv"
+        if self.rule_id == "cc-nationalbank":
+            return bool(_NATIONALBANK_EXPORT_RE.match(lower))
         if self.rule_id == "chequing-eqbank":
             return lower.endswith("details.csv")
         if self.rule_id == "chequing-scotia":
@@ -118,15 +124,16 @@ STAGE1_RULES: tuple[Stage1Rule, ...] = (
     Stage1Rule("cc-amex-activity", "cc", "amex", "activity.csv", False),
     Stage1Rule("cc-amex-named", "cc", "amex", "*AMEX*.csv", True),
     Stage1Rule("cc-amex-plat", "cc", "amex", "plat.csv", False),
+    Stage1Rule("cc-nationalbank", "cc", "nationalbank", "YYYY-MM-DD-HHMMSS.csv (National Bank)", True),
     Stage1Rule("chequing-eqbank", "chequing", "eqbank", "*Details.csv", True),
     Stage1Rule("chequing-scotia", "chequing", "scotia_chequing", "Preferred_Package_*.csv", True),
 )
 
 
-def _read_header(path: Path, *, skip_rows: int = 0, encoding: str = "utf-8-sig") -> list[str]:
+def _read_header(path: Path, *, skip_rows: int = 0, encoding: str = "utf-8-sig", delimiter: str = ",") -> list[str]:
     try:
         with open(path, encoding=encoding) as handle:
-            reader = csv.reader(handle)
+            reader = csv.reader(handle, delimiter=delimiter)
             for _ in range(skip_rows):
                 next(reader, None)
             row = next(reader, [])
@@ -174,6 +181,10 @@ def _validate_rule(rule_id: str, path: Path) -> bool:
     if rule_id == "cc-amex-named":
         header = _read_header(path)
         required = {"date", "description", "amount"}
+        return required.issubset(set(header))
+    if rule_id == "cc-nationalbank":
+        header = _read_header(path, delimiter=";")
+        required = {"date", "card number", "description", "category", "debit", "credit"}
         return required.issubset(set(header))
     if rule_id == "chequing-eqbank":
         header = _read_header(path)
