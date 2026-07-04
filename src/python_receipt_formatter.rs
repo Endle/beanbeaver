@@ -182,10 +182,16 @@ fn receipt_format_enriched_transaction(
 ) -> PyResult<String> {
     let input = extract_formatter_receipt_input(receipt, item_accounts)?;
     let match_input = extract_enriched_match_input(match_obj)?;
+    // Identity carry-forward onto matched entries is handled by the Phase 5
+    // pairing matcher, which reads `beanbeaver-id`/`document:` off the receipt's
+    // existing ledger entry. This legacy staged-JSON apply path has no ledger
+    // entry (nor a sha on the domain Receipt), so it emits none here.
     Ok(receipt_formatter::format_enriched_transaction(
         &input,
         &match_input,
         &default_expense,
+        None,
+        None,
     ))
 }
 

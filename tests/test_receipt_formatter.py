@@ -39,7 +39,11 @@ def test_format_parsed_receipt_renders_expected_metadata_and_warning_anchor() ->
     output = format_parsed_receipt(receipt, image_sha256="abc123")
 
     assert '; @merchant: Fresh "Mart"' in output
-    assert "; @image_sha256: abc123" in output
+    # Portable receipt identity: real beancount metadata (greppable), not a
+    # `; @image*` comment. Content-hash token shared by id + document filename.
+    assert '  beanbeaver-id: "bb-20260305-abc123"' in output
+    assert '  beanbeaver-image-sha256: "abc123"' in output
+    assert '  document: "beanbeaver/2026-03-05-fresh-mart-abc123.jpg"' in output
     assert '2026-03-05 * "Fresh \'Mart\'" "Receipt scan"' in output
     assert "Liabilities:CreditCard:PENDING" in output
     assert "card ****1234" in output

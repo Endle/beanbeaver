@@ -31,9 +31,9 @@ native-ocr = ["dep:ocr-paddle", "dep:image"]
 # the `tag =` below — editing this repo's rules/*.toml alone will NOT affect the
 # Rust side.
 [dependencies]
-receipt-core = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.1.0" }
-receipt-image = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.1.0" }
-ocr-paddle = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.1.0", optional = true }
+receipt-core = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.2.0" }
+receipt-image = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.2.0" }
+ocr-paddle = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.2.0", optional = true }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"], optional = true }
 crossterm = "0.28"
 pyo3 = { version = "0.28", features = ["extension-module"] }
