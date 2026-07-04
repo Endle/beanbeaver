@@ -761,10 +761,15 @@ pub(crate) fn apply_receipt_match_service(
     }
 
     let receipt_name = receipt_chain_name(approved_receipt_path)?;
+    // beanbeaver_id/document carry-forward is the Phase 5 pairing matcher's job
+    // (it reads them off the receipt's ledger entry); this staged-JSON apply path
+    // predates that, so it emits no identity metadata on the merged transaction.
     let enriched = format_enriched_transaction(
         &formatter_receipt_input(&receipt),
         &formatter_match_input(&candidate, selected_transaction),
         "Expenses:FIXME",
+        None,
+        None,
     );
     let enriched_dir = matched_file
         .parent()

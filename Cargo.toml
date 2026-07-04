@@ -31,9 +31,14 @@ native-ocr = ["dep:ocr-paddle", "dep:image"]
 # the `tag =` below — editing this repo's rules/*.toml alone will NOT affect the
 # Rust side.
 [dependencies]
-receipt-core = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.1.0" }
-receipt-image = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.1.0" }
-ocr-paddle = { git = "https://github.com/Endle/beanbeaver-core", tag = "v0.1.0", optional = true }
+# DEV: tracking the beanbeaver-core dev branch for the portable-receipt-identity
+# work (format_enriched_transaction gained beanbeaver_id/document args; scanned
+# receipts now emit real `beanbeaver-id`/`document:` metadata). Re-pin to a cut
+# tag (e.g. v0.2.0) before merging to master, and run `cargo update -p
+# receipt-core` once the branch is pushed to refresh Cargo.lock.
+receipt-core = { git = "https://github.com/Endle/beanbeaver-core", branch = "dev/portable-receipt-identity" }
+receipt-image = { git = "https://github.com/Endle/beanbeaver-core", branch = "dev/portable-receipt-identity" }
+ocr-paddle = { git = "https://github.com/Endle/beanbeaver-core", branch = "dev/portable-receipt-identity", optional = true }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"], optional = true }
 crossterm = "0.28"
 pyo3 = { version = "0.28", features = ["extension-module"] }
