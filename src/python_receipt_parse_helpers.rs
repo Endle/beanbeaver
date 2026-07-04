@@ -71,12 +71,18 @@ fn receipt_extract_merchant(
     pages: Vec<PyMerchantPageInput>,
     known_merchants: Option<Vec<String>>,
 ) -> String {
-    receipt_parse_helpers::extract_merchant(
+    // Core replaced extract_merchant (raw string) with fuzzy extract_merchant_match;
+    // `.display()` keeps the old contract — canonical name only on a trusted
+    // (exact/corrected) match, else the raw OCR header.
+    receipt_parse_helpers::extract_merchant_match(
         &lines,
         full_text,
         &pages.into_iter().map(to_page_input).collect::<Vec<_>>(),
         &known_merchants.unwrap_or_default(),
+        &receipt_core::rules::default_merchant_families(),
     )
+    .display()
+    .to_string()
 }
 
 #[pyfunction]

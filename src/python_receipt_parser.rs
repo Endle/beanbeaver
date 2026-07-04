@@ -332,6 +332,10 @@ fn receipt_parse_receipt(
         None => Vec::new(),
     };
 
+    // Rust-side merchant families come from beanbeaver-core's bundled rules
+    // (the native-OCR path deliberately uses core's rules, per Cargo.toml), same
+    // as core's own process_receipt.
+    let merchant_families = receipt_core::rules::default_merchant_families();
     let parsed = receipt_parser::parse_receipt(
         &full_text,
         &to_helper_pages(pages.clone()),
@@ -339,6 +343,7 @@ fn receipt_parse_receipt(
         &to_rule_layers(rule_layers),
         &image_filename,
         &known_merchants.unwrap_or_default(),
+        &merchant_families,
         current_year,
     );
 
@@ -377,6 +382,7 @@ fn receipt_parse_receipt_from_raw(
     };
 
     let transformed = ocr_transform::transform(detections, padded_width, padded_height, padding);
+    let merchant_families = receipt_core::rules::default_merchant_families();
     let parsed = receipt_parser::parse_receipt(
         &transformed.full_text,
         &transformed.helper_pages,
@@ -384,6 +390,7 @@ fn receipt_parse_receipt_from_raw(
         &to_rule_layers(rule_layers),
         &image_filename,
         &known_merchants.unwrap_or_default(),
+        &merchant_families,
         current_year,
     );
 
