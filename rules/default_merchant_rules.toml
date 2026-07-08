@@ -42,6 +42,12 @@ keywords = ["SHELL", "ESSO CIRCLE K", "PETRO CANADA"]
 category = "Expenses:Driving:Gas"
 
 [[rules]]
+# Ontario's DriveTest runs road tests / licensing; charges print as
+# "DRIVE TEST PAYMENT".
+keywords = ["DRIVE TEST"]
+category = "Expenses:Driving:Test"
+
+[[rules]]
 keywords = ["UBER"]
 category = "Expenses:Travel:Taxi"
 
