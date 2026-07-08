@@ -12,7 +12,10 @@ from typing import Literal
 from beancount.core import data
 from beancount.core.number import D
 
-from beanbeaver.application.imports.account_discovery import find_open_accounts
+from beanbeaver.application.imports.account_discovery import (
+    find_open_accounts,
+    find_open_cc_accounts_for_issuer,
+)
 from beanbeaver.application.imports.csv_routing import (
     CardImporterId,
     detect_credit_card_importer_id,
@@ -50,14 +53,17 @@ DOWNLOADED_CSV_BASE_PATH = _paths.downloads
 BC_RECORD_IMPORT_PATH = _paths.records_current_year
 BC_YEARLY_SUMMARY_PATH = _paths.yearly_summary
 
-CIBC_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:CIBC*"]
-BMO_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:BMO*", "Liabilities:CreditCard:*:BMO:*", "Liabilities:CreditCard:*BMO*"]
-SCOTIA_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:Scotia*"]
-ROGERS_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:Rogers*"]
-MBNA_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:MBNA*"]
-PCF_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:PCFinancial*", "Liabilities:CreditCard:PC*"]
-CTFS_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:CTFS*"]
-AMEX_ACCOUNT_PATTERNS = ["Liabilities:CreditCard:Amex*", "Liabilities:CreditCard:AmericanExpress*"]
+# Issuer aliases, matched order-independently under Liabilities:CreditCard:* so an owner segment
+# (e.g. Liabilities:CreditCard:Tama:Rogers:WorldElite) still resolves. See
+# account_discovery.find_open_cc_accounts_for_issuer.
+CIBC_ISSUER_ALIASES = ["CIBC"]
+BMO_ISSUER_ALIASES = ["BMO"]
+SCOTIA_ISSUER_ALIASES = ["Scotia"]
+ROGERS_ISSUER_ALIASES = ["Rogers"]
+MBNA_ISSUER_ALIASES = ["MBNA"]
+PCF_ISSUER_ALIASES = ["PCFinancial", "PC"]
+CTFS_ISSUER_ALIASES = ["CTFS"]
+AMEX_ISSUER_ALIASES = ["Amex", "AmericanExpress"]
 
 CreditCardImportStatus = Literal["ok", "aborted", "error"]
 
@@ -247,7 +253,7 @@ def _detect_statement_as_of(importer: BaseCardImporter, target_file_name: os.Pat
 
 
 def _cibc_account_matches(as_of: datetime.date | None, csv_file: str) -> list[str]:
-    matches = find_open_accounts(CIBC_ACCOUNT_PATTERNS, as_of=as_of)
+    matches = find_open_cc_accounts_for_issuer(CIBC_ISSUER_ALIASES, as_of=as_of)
     is_simplii_file = "simplii" in csv_file.lower()
     simplii_matches = [account for account in matches if _contains_token(account, "simplii")]
     cibc_matches = [account for account in matches if account not in simplii_matches]
@@ -261,7 +267,7 @@ def _discover_cibc_accounts(
     *,
     selected_account: str | None = None,
 ) -> tuple[CibcImporter, str]:
-    matches = find_open_accounts(CIBC_ACCOUNT_PATTERNS, as_of=as_of)
+    matches = find_open_cc_accounts_for_issuer(CIBC_ISSUER_ALIASES, as_of=as_of)
     is_simplii_file = "simplii" in csv_file.lower()
     simplii_matches = [account for account in matches if _contains_token(account, "simplii")]
     cibc_matches = [account for account in matches if account not in simplii_matches]
@@ -284,7 +290,7 @@ def _discover_cibc_accounts(
 
 
 def _bmo_account_matches(as_of: datetime.date | None, csv_file: str) -> list[str]:
-    matches = find_open_accounts(BMO_ACCOUNT_PATTERNS, as_of=as_of)
+    matches = find_open_cc_accounts_for_issuer(BMO_ISSUER_ALIASES, as_of=as_of)
     is_porter_file = os.path.basename(csv_file).lower() == "porter.csv"
     porter_matches = [account for account in matches if _contains_token(account, "porter")]
     bmo_matches = [account for account in matches if account not in porter_matches]
@@ -298,7 +304,7 @@ def _discover_bmo_accounts(
     *,
     selected_account: str | None = None,
 ) -> tuple[BmoImporter, str]:
-    matches = find_open_accounts(BMO_ACCOUNT_PATTERNS, as_of=as_of)
+    matches = find_open_cc_accounts_for_issuer(BMO_ISSUER_ALIASES, as_of=as_of)
     is_porter_file = os.path.basename(csv_file).lower() == "porter.csv"
     porter_matches = [account for account in matches if _contains_token(account, "porter")]
     bmo_matches = [account for account in matches if account not in porter_matches]
@@ -323,19 +329,19 @@ def _discover_bmo_accounts(
 
 def _discover_single_account_importer(
     importer_cls: type[BaseCardImporter],
-    patterns: list[str],
+    issuer_aliases: list[str],
     *,
     label: str,
     as_of: datetime.date | None,
     selected_account: str | None = None,
 ) -> tuple[BaseCardImporter, str]:
-    matches = find_open_accounts(patterns, as_of=as_of)
+    matches = find_open_cc_accounts_for_issuer(issuer_aliases, as_of=as_of)
     selected = _select_account(matches, account_label=label, as_of=as_of, selected_account=selected_account)
     return importer_cls(account=selected), selected
 
 
 def _amex_account_matches(as_of: datetime.date | None, csv_file: str) -> list[str]:
-    matches = find_open_accounts(AMEX_ACCOUNT_PATTERNS, as_of=as_of)
+    matches = find_open_cc_accounts_for_issuer(AMEX_ISSUER_ALIASES, as_of=as_of)
     lower_name = os.path.basename(csv_file).lower()
     keyword_map = {
         "marr": "marriott",
@@ -390,7 +396,7 @@ def _resolve_importer(
     if isinstance(detected_importer, ScotiaImporter):
         importer, account = _discover_single_account_importer(
             ScotiaImporter,
-            SCOTIA_ACCOUNT_PATTERNS,
+            SCOTIA_ISSUER_ALIASES,
             label="Scotia credit card",
             as_of=as_of,
             selected_account=selected_account,
@@ -399,7 +405,7 @@ def _resolve_importer(
     if isinstance(detected_importer, RogersImporter):
         importer, account = _discover_single_account_importer(
             RogersImporter,
-            ROGERS_ACCOUNT_PATTERNS,
+            ROGERS_ISSUER_ALIASES,
             label="Rogers credit card",
             as_of=as_of,
             selected_account=selected_account,
@@ -408,7 +414,7 @@ def _resolve_importer(
     if isinstance(detected_importer, MbnaImporter):
         importer, account = _discover_single_account_importer(
             MbnaImporter,
-            MBNA_ACCOUNT_PATTERNS,
+            MBNA_ISSUER_ALIASES,
             label="MBNA credit card",
             as_of=as_of,
             selected_account=selected_account,
@@ -417,7 +423,7 @@ def _resolve_importer(
     if isinstance(detected_importer, PcfImporter):
         importer, account = _discover_single_account_importer(
             PcfImporter,
-            PCF_ACCOUNT_PATTERNS,
+            PCF_ISSUER_ALIASES,
             label="PC Financial credit card",
             as_of=as_of,
             selected_account=selected_account,
@@ -426,7 +432,7 @@ def _resolve_importer(
     if isinstance(detected_importer, CanadianTireFinancialImporter):
         importer, account = _discover_single_account_importer(
             CanadianTireFinancialImporter,
-            CTFS_ACCOUNT_PATTERNS,
+            CTFS_ISSUER_ALIASES,
             label="CTFS credit card",
             as_of=as_of,
             selected_account=selected_account,
@@ -472,35 +478,35 @@ def resolve_credit_card_account_options(
         return CreditCardAccountOptions(
             importer_id=resolved_importer_id,
             account_label="Scotia credit card",
-            account_options=find_open_accounts(SCOTIA_ACCOUNT_PATTERNS, as_of=as_of),
+            account_options=find_open_cc_accounts_for_issuer(SCOTIA_ISSUER_ALIASES, as_of=as_of),
             as_of=as_of,
         )
     if isinstance(detected_importer, RogersImporter):
         return CreditCardAccountOptions(
             importer_id=resolved_importer_id,
             account_label="Rogers credit card",
-            account_options=find_open_accounts(ROGERS_ACCOUNT_PATTERNS, as_of=as_of),
+            account_options=find_open_cc_accounts_for_issuer(ROGERS_ISSUER_ALIASES, as_of=as_of),
             as_of=as_of,
         )
     if isinstance(detected_importer, MbnaImporter):
         return CreditCardAccountOptions(
             importer_id=resolved_importer_id,
             account_label="MBNA credit card",
-            account_options=find_open_accounts(MBNA_ACCOUNT_PATTERNS, as_of=as_of),
+            account_options=find_open_cc_accounts_for_issuer(MBNA_ISSUER_ALIASES, as_of=as_of),
             as_of=as_of,
         )
     if isinstance(detected_importer, PcfImporter):
         return CreditCardAccountOptions(
             importer_id=resolved_importer_id,
             account_label="PC Financial credit card",
-            account_options=find_open_accounts(PCF_ACCOUNT_PATTERNS, as_of=as_of),
+            account_options=find_open_cc_accounts_for_issuer(PCF_ISSUER_ALIASES, as_of=as_of),
             as_of=as_of,
         )
     if isinstance(detected_importer, CanadianTireFinancialImporter):
         return CreditCardAccountOptions(
             importer_id=resolved_importer_id,
             account_label="CTFS credit card",
-            account_options=find_open_accounts(CTFS_ACCOUNT_PATTERNS, as_of=as_of),
+            account_options=find_open_cc_accounts_for_issuer(CTFS_ISSUER_ALIASES, as_of=as_of),
             as_of=as_of,
         )
     if isinstance(detected_importer, AmexImporter):
