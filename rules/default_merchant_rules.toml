@@ -50,12 +50,32 @@ keywords = ["LYFT"]
 category = "Expenses:Travel:Taxi"
 
 [[rules]]
+# Air Canada prints with and without the space depending on the issuer. Alaska
+# truncates to "ALASKA A <TICKET#>" on some statements; the trailing space keeps
+# that keyword from also matching unrelated "ALASKA A..." merchant names.
+keywords = ["ALASKA AIRLINES", "ALASKA A ", "AIR CANADA", "AIRCANADA"]
+category = "Expenses:Travel:Air"
+
+[[rules]]
+# Park'N Fly prints with the apostrophe on most statements and without it on
+# Scotiabank exports.
+keywords = ["PARK'N FLY", "PARKN FLY"]
+category = "Expenses:Travel:Parking"
+
+[[rules]]
+keywords = ["SKIP THE DISHES", "SKIPTHEDISHES"]
+category = "Expenses:Food:Restaurant:TakeOut"
+
+[[rules]]
 keywords = ["ONE S BETTER LIVING"]
 category = "Expenses:Home"
 
 [[rules]]
-keywords = ["MINISO CANADA"]
-category = "Expenses:Home"
+# Statements print the store as "MINISO CANADA <CITY>", "MINISO-ON-<STORE>", or
+# bare "MINISO" (Scotiabank drops the city into a separate column), so key the
+# rule on the shortest distinctive form.
+keywords = ["MINISO"]
+category = "Expenses:Shopping:Miniso"
 
 [[rules]]
 keywords = ["IKEA", "STRUC-TUBE", "STRUC TUBE"]
