@@ -53,7 +53,7 @@ def test_public_grocery_and_home_rules_apply_without_project_config(tmp_path: Pa
     assert engine.categorize(_Txn("FOODY MART")) == "Expenses:Food:Grocery"
     assert engine.categorize(_Txn("TREDISH GROCERIES TORO")) == "Expenses:Food:Grocery"
     assert engine.categorize(_Txn("ONE S BETTER LIVING")) == "Expenses:Home"
-    assert engine.categorize(_Txn("MINISO CANADA")) == "Expenses:Home"
+    assert engine.categorize(_Txn("MINISO CANADA")) == "Expenses:Shopping:Miniso"
 
 
 def test_public_grocery_rules_match_statement_merchant_strings(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
@@ -75,7 +75,9 @@ def test_public_grocery_rules_match_statement_merchant_strings(tmp_path: Path, m
     assert engine.categorize(_Txn("WAL-MART #3053 MARKHAM ON")) == "Expenses:Food:Grocery"
 
 
-def test_public_utility_and_takeout_rules_match_statement_merchant_strings(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+def test_public_utility_and_takeout_rules_match_statement_merchant_strings(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
     """Enercare home services categorize as utility; Auric King BBQ as takeout."""
     public_rules = Path(__file__).resolve().parents[1] / "rules" / "default_merchant_rules.toml"
     monkeypatch.setattr(
@@ -91,6 +93,30 @@ def test_public_utility_and_takeout_rules_match_statement_merchant_strings(tmp_p
 
     assert engine.categorize(_Txn("ENERCARE HOME SERVICES MARKHAM ON")) == "Expenses:Home:Utility"
     assert engine.categorize(_Txn("AURIC KING BBQ TAKE OU MARKHAM ON")) == "Expenses:Food:Restaurant:TakeOut"
+
+
+def test_public_rules_match_scotiabank_short_merchant_strings(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """Scotiabank exports the bare merchant name, with the city in a separate column."""
+    public_rules = Path(__file__).resolve().parents[1] / "rules" / "default_merchant_rules.toml"
+    monkeypatch.setattr(
+        rule_engine_module,
+        "get_paths",
+        lambda: _Paths(
+            merchant_rules=tmp_path / "merchant_rules.toml",
+            default_merchant_rules=public_rules,
+            legacy_default_merchant_rules=public_rules,
+        ),
+    )
+    engine = RuleEngine(config_path=tmp_path / "missing.toml")
+
+    assert engine.categorize(_Txn("miniso")) == "Expenses:Shopping:Miniso"
+    assert engine.categorize(_Txn("MINISO-ON-0123")) == "Expenses:Shopping:Miniso"
+    assert engine.categorize(_Txn("alaska airlines")) == "Expenses:Travel:Air"
+    assert engine.categorize(_Txn("air canada")) == "Expenses:Travel:Air"
+    assert engine.categorize(_Txn("AIRCANADA")) == "Expenses:Travel:Air"
+    assert engine.categorize(_Txn("parkn fly")) == "Expenses:Travel:Parking"
+    assert engine.categorize(_Txn("PARK'N FLY TORONTO ON")) == "Expenses:Travel:Parking"
+    assert engine.categorize(_Txn("skip the dishes")) == "Expenses:Food:Restaurant:TakeOut"
 
 
 def test_project_rule_overrides_public_fallback_rule(tmp_path: Path) -> None:
