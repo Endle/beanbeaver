@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -11,18 +12,18 @@ from beanbeaver.application.imports.shared import select_interactive_option
 from beanbeaver.ledger_access import open_accounts
 from beanbeaver.runtime import get_paths
 
+# Each rule maps a statement-description substring to the issuer aliases that identify the
+# paying credit card. Aliases are matched order-independently under the CreditCard subtree
+# (see find_open_cc_accounts_for_issuer), so owner segments like ``:Tama:Rogers:`` still match.
 CC_PAYMENT_RULES: list[tuple[str, list[str]]] = [
-    (
-        "BMO MASTERCARD",
-        ["Liabilities:CreditCard:BMO*", "Liabilities:CreditCard:*:BMO:*", "Liabilities:CreditCard:*BMO*"],
-    ),
-    ("MBNA CANADA MASTERCARD", ["Liabilities:CreditCard:MBNA*"]),
-    ("CIBC MASTERCARD", ["Liabilities:CreditCard:CIBC*"]),
-    ("SCOTIA VISA", ["Liabilities:CreditCard:Scotia*"]),
-    ("CTFS", ["Liabilities:CreditCard:CTFS*"]),
-    ("CDN TIRE", ["Liabilities:CreditCard:CTFS*"]),
-    ("ROGERS", ["Liabilities:CreditCard:Rogers*"]),
-    ("AMEX BILL PYMT", ["Liabilities:CreditCard:Amex*", "Liabilities:CreditCard:AmericanExpress*"]),
+    ("BMO MASTERCARD", ["BMO"]),
+    ("MBNA CANADA MASTERCARD", ["MBNA"]),
+    ("CIBC MASTERCARD", ["CIBC"]),
+    ("SCOTIA VISA", ["Scotia"]),
+    ("CTFS", ["CTFS"]),
+    ("CDN TIRE", ["CTFS"]),
+    ("ROGERS", ["Rogers"]),
+    ("AMEX BILL PYMT", ["Amex", "AmericanExpress"]),
 ]
 
 BANK_TRANSFER_RULES: list[tuple[str, list[str]]] = [
@@ -81,6 +82,33 @@ def find_open_accounts(
     )
 
 
+def _normalize_segmentish(text: str) -> str:
+    """Uppercase and drop separators so ``:Tama:Rogers:`` compares token-wise to ``ROGERS``."""
+    return re.sub(r"[^0-9A-Z]", "", text.upper())
+
+
+def find_open_cc_accounts_for_issuer(
+    issuer_aliases: list[str],
+    *,
+    as_of: dt.date | None = None,
+    ledger_path: Path | None = None,
+    prefix: str = "Liabilities:CreditCard",
+) -> list[str]:
+    """Open credit-card accounts for an issuer, independent of where the issuer segment sits.
+
+    The ``prefix`` fixes the "credit card" half of the match; an account qualifies when any
+    alias appears anywhere after it (case- and separator-insensitive). Unlike an anchored glob
+    such as ``Liabilities:CreditCard:Rogers*``, this also matches owner-segmented accounts like
+    ``Liabilities:CreditCard:Tama:Rogers:WorldElite``.
+    """
+    normalized_prefix = prefix[:-1] if prefix.endswith(":") else prefix
+    candidates = find_open_accounts([f"{normalized_prefix}:*"], as_of=as_of, ledger_path=ledger_path)
+    needles = [_normalize_segmentish(alias) for alias in issuer_aliases if alias]
+    if not needles:
+        return candidates
+    return [account for account in candidates if any(needle in _normalize_segmentish(account) for needle in needles)]
+
+
 def resolve_cc_payment_account_strict(
     description: str,
     *,
@@ -90,14 +118,14 @@ def resolve_cc_payment_account_strict(
 ) -> AccountResolution:
     """Resolve a CC-payment description without prompting; ambiguity is returned as data."""
     desc_upper = description.upper()
-    for pattern, account_patterns in CC_PAYMENT_RULES:
+    for pattern, issuer_aliases in CC_PAYMENT_RULES:
         if pattern not in desc_upper:
             continue
 
         if cache is not None and pattern in cache:
             return cache[pattern]
 
-        matches = find_open_accounts(account_patterns, as_of=as_of, ledger_path=ledger_path)
+        matches = find_open_cc_accounts_for_issuer(issuer_aliases, as_of=as_of, ledger_path=ledger_path)
         if not matches:
             resolution = AccountResolution(kind="no_match", pattern=pattern)
         elif len(matches) == 1:
