@@ -3,7 +3,43 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
 
+use receipt_core::receipt_categories;
 use receipt_core::receipt_common;
+
+/// Python-side item-category rule entry, mirrored across the receipt wrappers
+/// (parser / categories / staged-json). Extracted from a Python object exposing
+/// `keywords` / `category` / `tags` / `priority`.
+#[derive(Clone, Debug)]
+pub(crate) struct PyRuleEntry {
+    keywords: Vec<String>,
+    category: Option<String>,
+    tags: Vec<String>,
+    priority: i32,
+}
+
+impl<'a, 'py> FromPyObject<'a, 'py> for PyRuleEntry {
+    type Error = PyErr;
+
+    fn extract(ob: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+        Ok(Self {
+            keywords: ob.getattr("keywords")?.extract::<Vec<String>>()?,
+            category: ob.getattr("category")?.extract::<Option<String>>()?,
+            tags: ob.getattr("tags")?.extract::<Vec<String>>()?,
+            priority: ob.getattr("priority")?.extract::<i32>()?,
+        })
+    }
+}
+
+impl From<PyRuleEntry> for receipt_categories::CategoryRule {
+    fn from(rule: PyRuleEntry) -> Self {
+        receipt_categories::CategoryRule {
+            keywords: rule.keywords,
+            category: rule.category,
+            tags: rule.tags,
+            priority: rule.priority,
+        }
+    }
+}
 
 fn decimalish_to_string(value: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
     if value.is_none() {

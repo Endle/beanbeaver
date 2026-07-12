@@ -6,26 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 use receipt_core::receipt_categories;
 
-#[derive(Clone, Debug)]
-struct PyRuleEntry {
-    keywords: Vec<String>,
-    category: Option<String>,
-    tags: Vec<String>,
-    priority: i32,
-}
-
-impl<'a, 'py> FromPyObject<'a, 'py> for PyRuleEntry {
-    type Error = PyErr;
-
-    fn extract(ob: Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
-        Ok(Self {
-            keywords: ob.getattr("keywords")?.extract::<Vec<String>>()?,
-            category: ob.getattr("category")?.extract::<Option<String>>()?,
-            tags: ob.getattr("tags")?.extract::<Vec<String>>()?,
-            priority: ob.getattr("priority")?.extract::<i32>()?,
-        })
-    }
-}
+use crate::python_receipt_common::PyRuleEntry;
 
 #[derive(Clone, Debug)]
 struct PyBuildRuleEntry {
@@ -186,12 +167,7 @@ fn to_rule_layers(input: PyRuleLayersInput) -> receipt_categories::CategoryRuleL
         rules: input
             .rules
             .into_iter()
-            .map(|rule| receipt_categories::CategoryRule {
-                keywords: rule.keywords,
-                category: rule.category,
-                tags: rule.tags,
-                priority: rule.priority,
-            })
+            .map(receipt_categories::CategoryRule::from)
             .collect(),
         exact_only_keywords: input.exact_only_keywords,
         account_mapping: input.account_mapping,
