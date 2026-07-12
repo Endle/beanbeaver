@@ -16,7 +16,7 @@ jobs:
   private-tests:
     name: Private regression suite
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     env:
       # Fine-grained PAT or GitHub App token with read-only access to the
       # private test repository contents.

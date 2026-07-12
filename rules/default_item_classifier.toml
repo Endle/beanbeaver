@@ -48,7 +48,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0005"
-keywords = ["SEAFOOD"]
+keywords = ["SEAFOOD", "FROZEN IMITAT", "IMITATION CRAB"]
 category = "grocery_seafood"
 tags = ["grocery", "seafood"]
 priority = 0
@@ -136,7 +136,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0017"
-keywords = ["RICE", "PASTA", "NOODLE", "NOODLES", "DRIED NOOD", "SPAGHETTI", "MACARONI", "PENNE", "FLOUR", "SUGAR", "SALT", "OIL", "OLIVE OIL", "CANOLA OIL", "VINEGAR", "OATMEAL", "OATS", "CEREAL", "QUINOA", "COUSCOUS", "BARLEY", "LENTIL", "LENTILS", "CHICKPEA", "BEAN", "BEANS", "BLACK BEAN", "KIDNEY BEAN", "PINTO BEAN", "INSTANT NOODLE", "INSTANT NOODLES", "LONGKOU", "VERMICELLI", "RAMEN"]
+keywords = ["RICE", "PASTA", "NOODLE", "NOODLES", "DRIED NOOD", "SPAGHETTI", "MACARONI", "PENNE", "FLOUR", "SUGAR", "SALT", "OIL", "OLIVE OIL", "CANOLA OIL", "VINEGAR", "OATMEAL", "OATS", "CEREAL", "QUINOA", "COUSCOUS", "BARLEY", "MILLET", "LENTIL", "LENTILS", "CHICKPEA", "BEAN", "BEANS", "BLACK BEAN", "KIDNEY BEAN", "PINTO BEAN", "INSTANT NOODLE", "INSTANT NOODLES", "LONGKOU", "VERMICELLI", "RAMEN", "DANDAN"]
 category = "grocery_staple"
 tags = ["grocery", "staple"]
 priority = 0
@@ -152,7 +152,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0019"
-keywords = ["VEGETABLE OIL", "CORN OIL", "SESAME OIL", "SESAMEOIL", "GARLIC", "GINGER", "GREEN ONION", "GREEN ONIONS", "CHILI PEPPER", "RED CHILI PEPPER", "CHILLI", "DRIED CHILLI", "CRUSHED CHILLI", "SPICE", "SEASONING", "PAPRIKA", "CUMIN", "CORIANDER", "TURMERIC", "CINNAMON", "NUTMEG", "OREGANO", "THYME", "ROSEMARY", "BAY LEAF", "CURRY", "CHILI POWDER", "CAYENNE", "SOY SAUCE", "FISH SAUCE", "OYSTER SAUCE", "HOISIN", "WASABI", "SRIRACHA", "HOT SAUCE", "KETCHUP", "MUSTARD", "MAYONNAISE", "MAYO", "RELISH", "BBQ SAUCE", "TERIYAKI", "WORCESTERSHIRE", "PERICARPIUM ZANTHOXYLI", "PERICARPIURN ZANTHOXYLI", "SALSA", "HUMMUS", "GUACAMOLE", "PESTO", "CHINA TIME HONORED BRAND", "YUQUAN FRESH PRESERVED", "SOYBEAN PASTE", "MONOSODIUM", "MSG", "VEGOIL"]
+keywords = ["VEGETABLE OIL", "CORN OIL", "SESAME OIL", "SESAMEOIL", "GARLIC", "GINGER", "GREEN ONION", "GREEN ONIONS", "CHILI PEPPER", "RED CHILI PEPPER", "CHILLI", "DRIED CHILLI", "CRUSHED CHILLI", "SPICE", "SEASONING", "PAPRIKA", "CUMIN", "CORIANDER", "TURMERIC", "CINNAMON", "NUTMEG", "OREGANO", "THYME", "ROSEMARY", "BAY LEAF", "CURRY", "CHILI POWDER", "CAYENNE", "SOY SAUCE", "BEAN SAUCE", "FISH SAUCE", "OYSTER SAUCE", "HOISIN", "WASABI", "SRIRACHA", "HOT SAUCE", "KETCHUP", "MUSTARD", "MAYONNAISE", "MAYO", "RELISH", "BBQ SAUCE", "TERIYAKI", "WORCESTERSHIRE", "PERICARPIUM ZANTHOXYLI", "PERICARPIURN ZANTHOXYLI", "SALSA", "HUMMUS", "GUACAMOLE", "PESTO", "CHINA TIME HONORED BRAND", "YUQUAN FRESH PRESERVED", "SOYBEAN PASTE", "MONOSODIUM", "MSG", "VEGOIL"]
 category = "grocery_seasoning"
 tags = ["grocery", "seasoning"]
 priority = 0
@@ -160,7 +160,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0021"
-keywords = ["POTATO CHIPS", "POTATO PUFFED", "PUFFED FOOD", "CHIP", "CHIPS", "POPCORN", "PRETZEL", "NUTS", "ALMONDS", "CASHEWS", "PEANUTS", "WALNUTS", "PISTACHIOS", "TRAIL MIX", "GRANOLA BAR", "PROTEIN BAR", "ENERGY BAR", "CANDY", "CHOCOLATE", "GUMMY", "GUMMIES", "SKITTLES", "M&M", "SNICKERS", "TWIX", "KITKAT", "REESE", "OREO", "GOLDFISH", "CHEETOS", "DORITOS", "PRINGLES", "LAYS", "RUFFLES", "TOSTITOS", "CHEEZ-IT", "RITZ"]
+keywords = ["POTATO CHIPS", "POTATO PUFFED", "PUFFED FOOD", "CHIP", "CHIPS", "POPCORN", "PRETZEL", "NUTS", "ALMONDS", "CASHEWS", "PEANUTS", "WALNUTS", "PISTACHIOS", "TRAIL MIX", "GRANOLA BAR", "PROTEIN BAR", "ENERGY BAR", "CANDY", "CHOCOLATE", "GUMMY", "GUMMIES", "SKITTLES", "M&M", "SNICKERS", "TWIX", "KITKAT", "REESE", "OREO", "GOLDFISH", "CHEETOS", "DORITOS", "PRINGLES", "LAYS", "RUFFLES", "TOSTITOS", "CHEEZ-IT", "RITZ", "SENBEI", "RICE CRACKER"]
 category = "grocery_snacks"
 tags = ["grocery", "snacks"]
 priority = 0
@@ -184,7 +184,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0025"
-keywords = ["ORANGE JUICE", "APPLE JUICE", "GRAPE JUICE", "FRUIT PUNCH", "CRANBERRY", "LEMONADE", "SMOOTHIE", "JUICE", "V8"]
+keywords = ["ORANGE JUICE", "APPLE JUICE", "GRAPE JUICE", "FRUIT PUNCH", "CRANBERRY", "LEMONADE", "SMOOTHIE", "JUICE", "V8", "PC OJ"]
 category = "grocery_drink_juice"
 tags = ["grocery", "drink", "juice"]
 priority = 0
@@ -204,6 +204,41 @@ priority = 1
 exact_only = false
 
 [[rules]]
+# Same collision family as juice_brands: "Sprite Sugar Free Berry" embeds
+# BEER across the "...freE BERry..." word boundary — the compacted window
+# "EEBER" contains every bigram of BEER (similarity 1.0) — so the priority-1
+# alcohol rule would otherwise win. Priority 1 + the exact SPRITE match wins.
+id = "soda_brands"
+keywords = ["SPRITE"]
+category = "grocery_drink_cocacola"
+tags = ["grocery", "drink", "cocacola"]
+priority = 1
+exact_only = false
+
+[[rules]]
+# Beverage brands whose product names otherwise classify elsewhere:
+# "Nongfuspring - Orange Pee(l)" is a bottled tea, not fruit — ORANGE would
+# otherwise win at priority 0; "Heytea Kale Plant Beverag(e)" is a juice, not
+# a KALE vegetable.
+id = "beverage_brands"
+keywords = ["NONGFU", "HEYTEA"]
+category = "grocery_drink"
+tags = ["grocery", "drink"]
+priority = 1
+exact_only = false
+
+[[rules]]
+# Instant-noodle brands whose flavour names otherwise classify elsewhere:
+# "Nissin - Chicken Flavour" is ramen, not meat — CHICKEN would otherwise
+# win at priority 0.
+id = "noodle_brands"
+keywords = ["NISSIN"]
+category = "grocery_staple"
+tags = ["grocery", "staple"]
+priority = 1
+exact_only = false
+
+[[rules]]
 id = "legacy_0026"
 keywords = ["COFFEE BEAN", "GROUND COFFEE", "INSTANT COFFEE", "COFFEE PODS", "K-CUP", "NESPRESSO", "TEA", "TEA BAG", "GREEN TEA", "BLACK TEA", "HERBAL TEA", "CHAMOMILE", "EARL GREY", "OOLONG TEA", "OOLONG"]
 category = "grocery_drink_coffee"
@@ -213,7 +248,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0027"
-keywords = ["WATER", "SPARKLING WATER", "MINERAL WATER", "SPRING WATER", "COCONUT WATER", "SPORTS DRINK", "SOFT DRINK", "GATORADE", "POWERADE", "ENERGY DRINK", "RED BULL", "MONSTER", "CRUSH", "FANTA STRAUBERRY", "FANTA STRAWBERRY", "FANTA", "PEACE TEA", "DRINK", "BEVERAGE"]
+keywords = ["WATER", "SPARKLING WATER", "MINERAL WATER", "SPRING WATER", "COCONUT WATER", "SPORTS DRINK", "SOFT DRINK", "GATORADE", "POWERADE", "ENERGY DRINK", "RED BULL", "MONSTER", "CRUSH", "FANTA STRAUBERRY", "FANTA STRAWBERRY", "FANTA", "PEACE TEA", "DRINK", "BEVERAGE", "ZOA", "BIOSTEEL", "MILK TEA", "BUBBLE TEA"]
 category = "grocery_drink"
 tags = ["grocery", "drink"]
 priority = 0
@@ -221,7 +256,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0028"
-keywords = ["COORS", "BEER", "WINE", "VODKA", "WHISKEY", "WHISKY", "RUM", "GIN", "TEQUILA", "COGNAC", "CHAMPAGNE", "PROSECCO", "CIDER", "SAKE", "SOJU", "LIQUOR", "LIQUEUR", "LAGER", "STOUT", "PORTER"]
+keywords = ["COORS", "SMIRNOFF", "BEER", "WINE", "VODKA", "WHISKEY", "WHISKY", "RUM", "GIN", "TEQUILA", "COGNAC", "CHAMPAGNE", "PROSECCO", "CIDER", "SAKE", "SOJU", "LIQUOR", "LIQUEUR", "LAGER", "STOUT", "PORTER"]
 category = "alcoholic_beverage"
 tags = ["alcoholic", "beverage"]
 priority = 1
@@ -317,7 +352,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0041"
-keywords = ["KS IBU", "KIRKLAND IBU", "IBUPROFEN", "IBU 400M", "LUTEIN", "IRONKIDS", "MULTIVITAMIN", "VITAMIN", "VIT B100", "VIT B12"]
+keywords = ["KS IBU", "KIRKLAND IBU", "IBUPROFEN", "IBU 400M", "LUTEIN", "IRONKIDS", "MULTIVITAMIN", "VITAMIN", "VIT B100", "VIT B12", "VICKS", "SINUS", "TYLENOL", "ADVIL"]
 category = "health_pharmacy"
 tags = ["health", "pharmacy"]
 priority = 0
@@ -397,7 +432,7 @@ exact_only = false
 
 [[rules]]
 id = "legacy_0051"
-keywords = ["1944033 CHAMP SHORT", "CHAMP SHORT"]
+keywords = ["1944033 CHAMP SHORT", "CHAMP SHORT", "BACKPACK"]
 category = "shopping_clothing"
 tags = ["shopping", "clothing"]
 priority = -80
