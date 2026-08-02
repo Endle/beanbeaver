@@ -6,11 +6,11 @@ extracted from the original process_chequing.py script.
 
 import argparse
 import datetime
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 from beanbeaver.application.imports.account_discovery import (
     AccountResolution,
@@ -31,12 +31,14 @@ from beanbeaver.application.imports.shared import (
 )
 from beanbeaver.domain.chequing_categorization import categorize_chequing_transaction
 from beanbeaver.domain.chequing_import import (
+    ParsedChequingRow,
     build_result_file,
     format_balance,
     format_transaction,
     latest_date,
     parse_eqbank_rows,
     parse_scotia_rows,
+    parse_wealthsimple_rows,
 )
 from beanbeaver.ledger_access import transaction_dates_for_account, validate_ledger
 from beanbeaver.runtime import TMPDIR, get_logger, get_paths, load_chequing_categorization_patterns
@@ -60,7 +62,93 @@ SCOTIA_ACCOUNT_PATTERNS = [
     "Assets:Bank:Chequing:*Scotia*",
 ]
 
+WEALTHSIMPLE_ACCOUNT_PATTERNS = [
+    "Assets:Bank:Chequing:Wealthsimple*",
+    "Assets:Bank:Chequing:*Wealthsimple*",
+]
+
 ChequingImportStatus = Literal["ok", "aborted", "error"]
+
+
+class DatedEntry(Protocol):
+    """A Beancount entry, narrowed to the one field this workflow reads."""
+
+    date: datetime.date
+
+
+class ChequingImporter(Protocol):
+    """The slice of a chequing importer this workflow depends on.
+
+    Structural so the application layer stays free of beancount imports.
+    """
+
+    account: str
+
+    def extract_with_balances(
+        self, f: object
+    ) -> tuple[Sequence[DatedEntry], Sequence[tuple[datetime.date, Decimal]]]:  # pragma: no cover - structural
+        ...
+
+
+@dataclass(frozen=True)
+class ChequingTypeSpec:
+    """Per-institution wiring for the chequing import workflow."""
+
+    label: str
+    source_label: str
+    account_patterns: list[str]
+    parse_rows: Callable[[list[dict[str, str]]], list[ParsedChequingRow]]
+    build_importer: Callable[[str], ChequingImporter]
+
+
+def _build_eqbank_importer(account: str) -> "ChequingImporter":
+    from beanbeaver.importers.eqbank import EQBankChequingImporter
+
+    return EQBankChequingImporter(account=account)
+
+
+def _build_scotia_importer(account: str) -> "ChequingImporter":
+    from beanbeaver.importers.scotia_chequing import ScotiaChequingImporter
+
+    return ScotiaChequingImporter(account=account)
+
+
+def _build_wealthsimple_importer(account: str) -> "ChequingImporter":
+    from beanbeaver.importers.wealthsimple_chequing import WealthsimpleChequingImporter
+
+    return WealthsimpleChequingImporter(account=account)
+
+
+CHEQUING_TYPES: dict[str, ChequingTypeSpec] = {
+    "eqbank": ChequingTypeSpec(
+        label="EQ Bank chequing",
+        source_label="EQ Bank Chequing",
+        account_patterns=EQBANK_ACCOUNT_PATTERNS,
+        parse_rows=parse_eqbank_rows,
+        build_importer=_build_eqbank_importer,
+    ),
+    "scotia": ChequingTypeSpec(
+        label="Scotia chequing",
+        source_label="Scotia Chequing",
+        account_patterns=SCOTIA_ACCOUNT_PATTERNS,
+        parse_rows=parse_scotia_rows,
+        build_importer=_build_scotia_importer,
+    ),
+    "wealthsimple": ChequingTypeSpec(
+        label="Wealthsimple chequing",
+        source_label="Wealthsimple Chequing",
+        account_patterns=WEALTHSIMPLE_ACCOUNT_PATTERNS,
+        parse_rows=parse_wealthsimple_rows,
+        build_importer=_build_wealthsimple_importer,
+    ),
+}
+
+
+def _spec_for(chequing_type: str) -> ChequingTypeSpec:
+    spec = CHEQUING_TYPES.get(chequing_type)
+    if spec is None:
+        raise ValueError(f"Unsupported chequing type: {chequing_type}")
+    return spec
 
 
 @dataclass(frozen=True)
@@ -150,6 +238,8 @@ def detect_chequing_type(csv_path: Path) -> str:
         return "eqbank"
     if "Type of Transaction" in headers and "Sub-description" in headers:
         return "scotia"
+    if "transaction_date" in headers and "account_type" in headers and "net_cash_amount" in headers:
+        return "wealthsimple"
     raise ValueError("Unrecognized chequing CSV format")
 
 
@@ -274,7 +364,7 @@ def _resolve_transfer_for_row(
     return None
 
 
-def _read_chequing_csv_rows(csv_file: str) -> tuple[Path, str, list[tuple[datetime.date, str, Decimal, Decimal]]]:
+def _read_chequing_csv_rows(csv_file: str) -> tuple[Path, str, list[ParsedChequingRow]]:
     """Copy CSV to TMP, detect type, parse rows. Returns (target_path, chequing_type, parsed_rows)."""
     target_file_name = TMPDIR / "chequing.csv"
     copy_statement_csv(
@@ -291,10 +381,7 @@ def _read_chequing_csv_rows(csv_file: str) -> tuple[Path, str, list[tuple[dateti
         reader = csv.DictReader(csvfile)
         rows = list(reader)
 
-    if chequing_type == "eqbank":
-        parsed_rows = parse_eqbank_rows(rows)
-    else:
-        parsed_rows = parse_scotia_rows(rows)
+    parsed_rows = _spec_for(chequing_type).parse_rows(rows)
     return target_file_name, chequing_type, parsed_rows
 
 
@@ -312,12 +399,11 @@ def preflight_chequing_import(
         return PreflightChequingResult(status="error", error=str(exc))
 
     as_of = latest_date(parsed_rows)
-    patterns = EQBANK_ACCOUNT_PATTERNS if chequing_type == "eqbank" else SCOTIA_ACCOUNT_PATTERNS
-    label = "EQ Bank chequing" if chequing_type == "eqbank" else "Scotia chequing"
+    spec = _spec_for(chequing_type)
     try:
         account = _select_chequing_account(
-            patterns,
-            label=label,
+            spec.account_patterns,
+            label=spec.label,
             as_of=as_of,
             selected_account=selected_account,
         )
@@ -393,7 +479,7 @@ def run_chequing_import(request: ChequingImportRequest, *, emit_console_output: 
                 status="error",
                 error=(
                     f"No chequing CSV file found in {downloads_display_path(DOWNLOADED_CSV_BASE_PATH)}\n"
-                    "Supported files: *Details.csv, Preferred_Package_*.csv"
+                    "Supported files: *Details.csv, Preferred_Package_*.csv, activities-export-YYYY-MM-DD.csv"
                 ),
             )
 
@@ -414,7 +500,8 @@ def run_chequing_import(request: ChequingImportRequest, *, emit_console_output: 
     except ValueError as exc:
         return ChequingImportResult(status="error", error=str(exc))
 
-    source_label = "EQ Bank Chequing" if chequing_type == "eqbank" else "Scotia Chequing"
+    spec = _spec_for(chequing_type)
+    source_label = spec.source_label
     logger.info("Detected chequing type: %s", chequing_type)
 
     # Read CSV once for parsing + account selection
@@ -424,30 +511,15 @@ def run_chequing_import(request: ChequingImportRequest, *, emit_console_output: 
         reader = csv.DictReader(csvfile)
         rows = list(reader)
 
-    if chequing_type == "eqbank":
-        parsed_rows = parse_eqbank_rows(rows)
-        as_of = latest_date(parsed_rows)
-        account = _select_chequing_account(
-            EQBANK_ACCOUNT_PATTERNS,
-            label="EQ Bank chequing",
-            as_of=as_of,
-            selected_account=request.selected_account,
-        )
-        from beanbeaver.importers.eqbank import EQBankChequingImporter
-
-        importer = EQBankChequingImporter(account=account)
-    else:
-        parsed_rows = parse_scotia_rows(rows)
-        as_of = latest_date(parsed_rows)
-        account = _select_chequing_account(
-            SCOTIA_ACCOUNT_PATTERNS,
-            label="Scotia chequing",
-            as_of=as_of,
-            selected_account=request.selected_account,
-        )
-        from beanbeaver.importers.scotia_chequing import ScotiaChequingImporter
-
-        importer = ScotiaChequingImporter(account=account)
+    parsed_rows = spec.parse_rows(rows)
+    as_of = latest_date(parsed_rows)
+    account = _select_chequing_account(
+        spec.account_patterns,
+        label=spec.label,
+        as_of=as_of,
+        selected_account=request.selected_account,
+    )
+    importer = spec.build_importer(account)
 
     class FileMemo:
         def __init__(self, name: str):
@@ -637,22 +709,13 @@ def resolve_chequing_account_options(csv_file: str) -> ChequingAccountOptions:
         reader = csv.DictReader(csvfile)
         rows = list(reader)
 
-    if chequing_type == "eqbank":
-        parsed_rows = parse_eqbank_rows(rows)
-        as_of = latest_date(parsed_rows)
-        return ChequingAccountOptions(
-            chequing_type=chequing_type,
-            account_label="EQ Bank chequing",
-            account_options=find_open_accounts(EQBANK_ACCOUNT_PATTERNS, as_of=as_of),
-            as_of=as_of,
-        )
-
-    parsed_rows = parse_scotia_rows(rows)
+    spec = _spec_for(chequing_type)
+    parsed_rows = spec.parse_rows(rows)
     as_of = latest_date(parsed_rows)
     return ChequingAccountOptions(
         chequing_type=chequing_type,
-        account_label="Scotia chequing",
-        account_options=find_open_accounts(SCOTIA_ACCOUNT_PATTERNS, as_of=as_of),
+        account_label=spec.label,
+        account_options=find_open_accounts(spec.account_patterns, as_of=as_of),
         as_of=as_of,
     )
 

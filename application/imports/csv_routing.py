@@ -18,6 +18,7 @@ from beanbeaver.application.imports.shared import (
     select_interactive_item,
     select_interactive_option,
 )
+from beanbeaver.domain.chequing_import import WEALTHSIMPLE_CHEQUING_ACCOUNT_TYPE
 from beanbeaver.runtime import get_logger, get_paths
 
 logger = get_logger(__name__)
@@ -25,6 +26,7 @@ _paths = get_paths()
 
 _MBNA_MONTHLY_EXPORT_RE = re.compile(r"^[A-Za-z]+20\d{2}_\d{4}\.csv$")
 _TRANSACTIONS_DOWNLOAD_RE = re.compile(r"^transactions(?: \(\d+\))?\.csv$")
+_WEALTHSIMPLE_ACTIVITIES_EXPORT_RE = re.compile(r"^activities-export-\d{4}-\d{2}-\d{2}(?: \(\d+\))?\.csv$")
 
 ImportType = Literal["cc", "chequing"]
 
@@ -39,7 +41,7 @@ CardImporterId = Literal[
     "amex",
 ]
 
-ChequingImporterId = Literal["eqbank", "scotia_chequing"]
+ChequingImporterId = Literal["eqbank", "scotia_chequing", "wealthsimple_chequing"]
 ImporterId = CardImporterId | ChequingImporterId
 
 
@@ -85,6 +87,8 @@ class Stage1Rule:
             return lower.endswith("details.csv")
         if self.rule_id == "chequing-scotia":
             return file_name.startswith("Preferred_Package_") and lower.endswith(".csv")
+        if self.rule_id == "chequing-wealthsimple":
+            return bool(_WEALTHSIMPLE_ACTIVITIES_EXPORT_RE.match(lower))
         return False
 
 
@@ -120,6 +124,13 @@ STAGE1_RULES: tuple[Stage1Rule, ...] = (
     Stage1Rule("cc-amex-plat", "cc", "amex", "plat.csv", False),
     Stage1Rule("chequing-eqbank", "chequing", "eqbank", "*Details.csv", True),
     Stage1Rule("chequing-scotia", "chequing", "scotia_chequing", "Preferred_Package_*.csv", True),
+    Stage1Rule(
+        "chequing-wealthsimple",
+        "chequing",
+        "wealthsimple_chequing",
+        "activities-export-YYYY-MM-DD.csv",
+        True,
+    ),
 )
 
 
@@ -183,6 +194,21 @@ def _validate_rule(rule_id: str, path: Path) -> bool:
         header = _read_header(path)
         required = {"type of transaction", "sub-description"}
         return required.issubset(set(header))
+    if rule_id == "chequing-wealthsimple":
+        header = _read_header(path)
+        required = {"transaction_date", "account_type", "activity_type", "net_cash_amount"}
+        if not required.issubset(set(header)):
+            return False
+        # Wealthsimple reuses this filename for Cash/TFSA/RRSP exports; only route
+        # the file here when it actually carries chequing activity.
+        try:
+            with open(path, encoding="utf-8-sig") as handle:
+                return any(
+                    (row.get("account_type") or "").strip() == WEALTHSIMPLE_CHEQUING_ACCOUNT_TYPE
+                    for row in csv.DictReader(handle)
+                )
+        except Exception:
+            return False
     return True
 
 

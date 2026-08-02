@@ -36,6 +36,7 @@ BANK_TRANSFER_RULES: list[tuple[str, list[str]]] = [
     ("BMO", ["Assets:Bank:*BMO*"]),
     ("HSBC", ["Assets:Bank:*HSBC*"]),
     ("MANULIFE", ["Assets:Bank:*Manulife*"]),
+    ("WEALTHSIMPLE", ["Assets:Bank:*Wealthsimple*"]),
 ]
 
 _CC_TRANSFER_HINTS = ("MASTERCARD", "VISA", "AMEX", "CREDIT CARD")
