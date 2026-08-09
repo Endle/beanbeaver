@@ -30,11 +30,13 @@ logger = get_logger(__name__)
 # Env override pointing at a directory that already holds a complete model set.
 OCR_MODELS_DIR_ENV = "BEANBEAVER_OCR_MODELS_DIR"
 
-# GitHub Release that hosts the model assets. To publish: create a release with
-# this exact tag on the repo and upload the four ``.onnx`` files below as assets.
+# GitHub Release that hosts the model assets. It lives on beanbeaver-core, which
+# owns the ``ocr-paddle`` crate these weights feed; this repo only consumes them.
+# To publish: create a release with this exact tag *there* and upload the four
+# ``.onnx`` files below as assets.
 # The pinned SHA-256s mean the bytes are verified regardless of the release.
 MODELS_RELEASE_TAG = "ocr-models-v1"
-MODELS_BASE_URL = f"https://github.com/Endle/beanbeaver/releases/download/{MODELS_RELEASE_TAG}"
+MODELS_BASE_URL = f"https://github.com/Endle/beanbeaver-core/releases/download/{MODELS_RELEASE_TAG}"
 
 
 @dataclass(frozen=True)
